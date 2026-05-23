@@ -351,7 +351,89 @@ separate compose file so any operator can run it.
 
 ---
 
-## 11. Sources
+## 11. Validator-run federation (dynamic TOP-11)
+
+A natural way to run this gateway is to let VIZ's existing **TOP-11 witnesses**
+(the eleven top-voted delegates, the stable core of the 21-slot round) be the
+federation operators. They already run hardened infrastructure, are continuously
+elected by stake, and are penalized for downtime — exactly the properties a
+signer set wants. This section refines the design for that model.
+
+### 11.1 The structural shift it introduces
+
+With a hand-picked federation, custody security is "these N specific entities
+won't collude." Binding the set to TOP-11 makes custody security **≤ the cost to
+acquire enough VIZ stake-votes to seat a colluding majority of top witnesses.**
+You have coupled bridge custody to VIZ's stake-voting security. That is a
+reasonable assumption — it is the same trust users already place in VIZ
+consensus — but it must be *priced and bounded*, because vote distributions shift
+and stake can sometimes be acquired faster than a curated set can be compromised.
+Everything below exists to bound that.
+
+### 11.2 VIZ side — registration + heartbeat are free, and a good idea
+
+VIZ `custom`-type operations are bandwidth-funded; TOP-11 witnesses have large
+effective stake, so these messages cost effectively nothing in token terms. Use
+two:
+
+- **Registration** — `{type: gateway_register, ton_signer_pubkey, endpoint, version}`. This makes the VIZ chain the authoritative, auditable registry of *who runs the gateway* and *which TON ed25519 key* each validator signs with. The TON signer set is derived from this registry.
+- **Heartbeat / attestation** (every 5–10 min) — not just "online", but `{ts, last_viz_block, last_ton_seqno, locked_viz, wviz_supply, version}`. This turns liveness into a *decentralized proof-of-reserves cross-check*: if validators' attested `locked_viz` / `wviz_supply` diverge, that is an early theft/bug signal independent of the `recon` job.
+
+For the VIZ custody itself, use the chain's native authority model rather than
+separate keys: set the gateway account's `active` authority to `account_auths`
+of the 11 witness accounts (each weight 1, threshold 7). Validators then sign
+releases with their *own* account keys. Keep the two tiers: `active` = the
+rotating TOP-11; `master` = a small, stable **guardian** multisig used only to
+rotate the active set and to pause.
+
+Caveat to verify: VIZ's permission table places "replacement of all keys" under
+**Master**, implying authority changes are a master-key action — so each VIZ-side
+rotation is performed by the guardian (still free, but it needs the guardian, not
+the active set itself). Confirm the exact `account_update` requirement in
+`viz-cpp-node`; it decides whether the active set can rotate itself or the
+guardian gates every rotation.
+
+### 11.3 TON side — the crux
+
+TON is where the VIZ/TON asymmetry bites:
+
+- **Static multisig vs dynamic set.** `multisig-contract-v2` has a *fixed* signer set, changeable only by an `update` order approved by the *current* T-of-N. You cannot "just track TOP-11" — you reflect each change with an update order, which costs gas and has latency.
+- **No heartbeats on TON — and you don't want them.** Liveness stays a VIZ-only, free concern. TON is touched only on *events*: mint executions (per peg-in) and the occasional membership `update`. With rare rotations (below), TON cost is dominated by mints, not liveness.
+- **The incumbent-approval gate is a feature.** Adding a signer needs the *current* signers to approve, so a VIZ vote-capture does **not** automatically capture the TON multisig — incumbents gate entry. The risk only materializes if the operating policy is "blindly rotate to whatever TOP-11 says." So rotation must be deliberate, not automatic; the update order is the natural checkpoint to apply anti-capture policy.
+- **Gas funding.** Unlike VIZ, TON ops cost toncoin. Fund the multisig + a small gas wallet from a **bridge fee** (a few bps on peg-in/out, accrued/swapped to TON). Validators do not each pay TON gas.
+- **Threshold.** Run **7-of-11** rather than 8-of-11: it tolerates 4 simultaneous malicious *and* 4 offline (theft still needs 7 colluding), and gateway-signer uptime ≠ block-production uptime (the signer service can be down while the witness still produces blocks). Move to 8-of-11 only after measuring high signer uptime. Limitation: multisig-v2 uses *one* threshold for all orders, so a membership change has the same bar as a mint — to raise that bar you need the guardian to co-gate updates or a higher overall T (which costs liveness).
+
+### 11.4 Rotation policy (anti-capture)
+
+- **Seasoning**: a witness must hold TOP-11 continuously for, e.g., 7 days before being *added* as a TON signer; *removal* is immediate. Asymmetric: slow to grant power, fast to revoke.
+- **Rate-limit**: at most one signer change per epoch, so a flash vote-swarm cannot swap the set in a single block.
+- **Tolerate, don't churn**: brief signer outages are absorbed by the threshold's freeze tolerance (4 with 7-of-11), not by an immediate, gas-costly rotation. Rotate on *vote-driven* TOP-11 change or prolonged outage, not on every blip.
+
+### 11.5 Bounding the coupled risk
+
+Assume capture is *possible* and make it *bounded and slow*:
+
+- **Caps** (per-tx + rolling 24h) so a captured set cannot drain instantly — at most one cap-window before recon/attestations fire.
+- **Guardian pause key** — a pause-*only* power (halts mint/release, cannot move funds). Concentrating *pause* is safe; concentrating *spend* is not. This is the circuit breaker against an in-progress capture.
+- **Seasoning + rate-limit** so capture needs sustained, not flash, vote control.
+- **Monitor the attack cost** — track the VIZ stake/vote concentration required to seat 6+ colluding top witnesses and keep caps sized below that cost. If a majority is cheaper than the value locked, lower caps or tighten the set.
+
+### 11.6 Recommendation
+
+Run as TOP-11, but: VIZ custody via native `account_auths` (validators sign with
+their own keys) + a guardian master; TON custody via a 7-of-11 multisig-v2 whose
+signer set is *derived from the VIZ on-chain registry* and synced by deliberate,
+seasoned, rate-limited `update` orders; heartbeats/attestations free on VIZ, none
+on TON; gas + caps + guardian-pause as the safety envelope. This keeps the
+elegant "validators run it and announce it on VIZ for free" model while making
+the TON side event-driven and capture-resistant.
+
+Implied components to build: a VIZ `registry`/`heartbeat` module (publish + read
+the signer registry and attestations) and a `syncer` service that watches TOP-11
++ the registry and proposes the seasoned, rate-limited TON multisig `update`
+orders.
+
+## 12. Sources
 
 - VIZ accounts, authorities & multisig: https://docs.viz.cx/accounts.html
 - VIZ witnesses / DPoS / rounds / 17-of-21 quorum: https://docs.viz.cx/witnesses.html
