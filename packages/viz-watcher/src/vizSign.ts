@@ -30,8 +30,3 @@ export function signRelease(p: VizReleaseProposal, wif: string): string {
   if (!sig) throw new Error("signTransaction produced no signature");
   return sig;
 }
-
-/** Public key for a WIF (used to validate an operator's key is in the authority). */
-export function pubFromWif(wif: string): string {
-  return viz.auth.wifToPublic(wif);
-}

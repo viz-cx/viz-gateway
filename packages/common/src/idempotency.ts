@@ -21,31 +21,5 @@ export interface IdempotencyStore {
   setState(id: string, state: ActionState): Promise<void>;
 }
 
-/**
- * In-memory implementation for tests/dev. Production should back this with
- * SQLite (single operator) or Postgres (HA) and rely on a UNIQUE constraint
- * for the atomic claim. See STORE_URL in .env.
- */
-export class InMemoryIdempotencyStore implements IdempotencyStore {
-  private readonly map = new Map<string, LedgerRecord>();
-
-  async get(id: string): Promise<LedgerRecord | undefined> {
-    return this.map.get(id);
-  }
-
-  async claim(id: string): Promise<boolean> {
-    if (this.map.has(id)) return false;
-    this.map.set(id, { id, state: "SEEN", updatedAt: Date.now() });
-    return true;
-  }
-
-  async setState(id: string, state: ActionState): Promise<void> {
-    const rec = this.map.get(id);
-    if (rec) {
-      rec.state = state;
-      rec.updatedAt = Date.now();
-    } else {
-      this.map.set(id, { id, state, updatedAt: Date.now() });
-    }
-  }
-}
+// Implementations live in store.ts: SqliteGatewayStore (persistent, shared) and
+// InMemoryGatewayStore (tests). Both implement this interface via GatewayStore.

@@ -5,7 +5,6 @@ import {
   loadConfig,
   type TonChain,
 } from "@gateway/common";
-import { TonChainStub } from "./tonChainStub";
 import { TonHttpChain } from "./tonChain";
 
 /**
@@ -15,17 +14,18 @@ import { TonHttpChain } from "./tonChain";
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  // Use the live adapter once the Jetton minter is configured; otherwise the
-  // stub keeps the service bootable before the TON contracts are deployed.
-  const chain: TonChain = cfg.ton.jettonMinterAddress
-    ? new TonHttpChain(
-        cfg.ton.endpoint,
-        cfg.ton.apiKey,
-        cfg.ton.jettonMinterAddress,
-        cfg.ton.gatewayJettonWallet,
-        cfg.ton.finalityConfirmations,
-      )
-    : new TonChainStub(cfg.ton.endpoint, cfg.ton.jettonMinterAddress);
+  if (!cfg.ton.jettonMinterAddress) {
+    throw new Error(
+      "TON_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
+    );
+  }
+  const chain: TonChain = new TonHttpChain(
+    cfg.ton.endpoint,
+    cfg.ton.apiKey,
+    cfg.ton.jettonMinterAddress,
+    cfg.ton.gatewayJettonWallet,
+    cfg.ton.finalityConfirmations,
+  );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps);
 

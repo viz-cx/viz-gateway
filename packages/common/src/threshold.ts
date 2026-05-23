@@ -41,16 +41,3 @@ export class ApprovalSet {
     return Array.from(this.byAction.get(actionId)?.values() ?? []);
   }
 }
-
-/** Pure helper: tolerances for an N/T config (mirrors tools/threshold-calc.mjs). */
-export function tolerances(n: number, t: number): {
-  theftTolerated: number;
-  freezeTolerated: number;
-  bftFaultBudget: number;
-} {
-  return {
-    theftTolerated: t - 1,
-    freezeTolerated: n - t,
-    bftFaultBudget: Math.min(t - 1, n - t),
-  };
-}
