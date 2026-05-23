@@ -1,0 +1,15 @@
+# The untrusted coordinator. Holds no keys. Collects approvals and broadcasts
+# once the threshold is met. Any operator can run this; running more than one is
+# fine (broadcast is idempotent on the action id).
+
+services:
+  coordinator:
+    build: .
+    image: viz-ton-gateway:latest
+    env_file: .env
+    environment:
+      SERVICE: coordinator
+      COORDINATOR_LISTEN: 0.0.0.0:8080
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

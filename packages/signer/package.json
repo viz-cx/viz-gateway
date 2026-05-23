@@ -1,0 +1,12 @@
+{
+  "name": "@gateway/signer",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "@gateway/common": "0.1.0",
+    "@gateway/viz-watcher": "0.1.0",
+    "@gateway/ton-watcher": "0.1.0"
+  }
+}

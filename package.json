@@ -1,0 +1,30 @@
+{
+  "name": "viz-ton-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Federated multisig gateway between VIZ blockchain and TON (lock-and-mint wrapped VIZ).",
+  "workspaces": [
+    "packages/*",
+    "contracts-ton"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "threshold": "node tools/threshold-calc.mjs",
+    "start:viz-watcher": "node packages/viz-watcher/dist/index.js",
+    "start:ton-watcher": "node packages/ton-watcher/dist/index.js",
+    "start:signer": "node packages/signer/dist/index.js",
+    "start:coordinator": "node packages/coordinator/dist/index.js",
+    "start:recon": "node packages/recon/dist/index.js",
+    "deploy:multisig": "node contracts-ton/dist/deployMultisig.js",
+    "deploy:minter": "node contracts-ton/dist/deployJettonMinter.js",
+    "set-minter-admin": "node contracts-ton/dist/setMinterAdmin.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^22.0.0"
+  }
+}

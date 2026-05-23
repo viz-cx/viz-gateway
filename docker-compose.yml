@@ -1,0 +1,49 @@
+# One full OPERATOR node: watchers + signer + recon, sharing one built image.
+# Each trusted operator runs this on their own hardware with their own .env.
+# The coordinator runs separately (docker-compose.coordinator.yml) and may be
+# hosted by any one operator or rotated.
+
+services:
+  viz-watcher:
+    build: .
+    image: viz-ton-gateway:latest
+    env_file: .env
+    environment:
+      SERVICE: viz-watcher
+    restart: unless-stopped
+    volumes:
+      - gw-data:/app/data
+
+  ton-watcher:
+    image: viz-ton-gateway:latest
+    env_file: .env
+    environment:
+      SERVICE: ton-watcher
+    restart: unless-stopped
+    volumes:
+      - gw-data:/app/data
+    depends_on: [viz-watcher]
+
+  signer:
+    image: viz-ton-gateway:latest
+    env_file: .env
+    environment:
+      SERVICE: signer
+      SIGNER_LISTEN: 0.0.0.0:8090
+    restart: unless-stopped
+    # Keep the signer off the public internet; expose only on the operator LAN.
+    expose: ["8090"]
+    volumes:
+      - gw-data:/app/data
+    depends_on: [viz-watcher]
+
+  recon:
+    image: viz-ton-gateway:latest
+    env_file: .env
+    environment:
+      SERVICE: recon
+    restart: unless-stopped
+    depends_on: [viz-watcher, ton-watcher]
+
+volumes:
+  gw-data:
