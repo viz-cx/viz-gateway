@@ -1,5 +1,7 @@
 # viz-ton-gateway
 
+[![CI](https://github.com/viz-cx/viz-ton-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/viz-cx/viz-ton-gateway/actions/workflows/ci.yml)
+
 Federated multisig gateway between the **VIZ blockchain** and **TON**:
 lock VIZ on VIZ, mint wrapped VIZ (`wVIZ`, a TON Jetton) — and the reverse.
 Secured by an **M-of-N signer federation** that uses the native multisig of both

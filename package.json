@@ -11,6 +11,7 @@
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
     "threshold": "node tools/threshold-calc.mjs",
+    "verify": "node tools/threshold-calc.mjs && node tools/viz-multisig-spike.cjs && node tools/ton-notification-spike.cjs && node tools/writepaths-spike.cjs && node contracts-ton/tools/verify-offline.cjs",
     "start:viz-watcher": "node packages/viz-watcher/dist/index.js",
     "start:ton-watcher": "node packages/ton-watcher/dist/index.js",
     "start:signer": "node packages/signer/dist/index.js",

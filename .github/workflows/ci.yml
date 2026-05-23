@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc project references)
+        run: npm run build
+
+      # All verification spikes are offline (no chain RPC): threshold math,
+      # VIZ partial-signature merge, TON transfer_notification parser, the
+      # write-path signer, and the contract building blocks.
+      - name: Verify
+        run: npm run verify
