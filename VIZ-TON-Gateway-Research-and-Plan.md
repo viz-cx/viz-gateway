@@ -472,7 +472,42 @@ broadcast). It signs an `account_update` with the current master key and,
 optionally, `change_recovery_account`. The utility is not imported by the
 running gateway.
 
-## 12. Sources
+## 12. Fees, minimum, and economics
+
+VIZ side is always free (network cost is zero; peg-out is free). The only fee is
+on **peg-in**, and it exists solely to cover the unavoidable TON mint gas plus a
+small sustainability margin. It is collected in wVIZ **at mint time** — the full
+amount is minted, split *net to the user* and *fee to the treasury* — so the 1:1
+backing is preserved (`locked VIZ == minted wVIZ`).
+
+Worked at **1 VIZ = $0.005, 1 TON = $2** (so 1 TON = 400 VIZ):
+
+- Mint gas 0.05–0.10 TON = **$0.10–0.20 = 20–40 VIZ** per peg-in.
+- **Flat fee floor = 100 VIZ** (~$0.50 ~ 0.25 TON) — ~2.5× worst-case gas, to absorb TON price rises and the wVIZ→TON swap spread.
+- **Percentage = 0.30%**; it only overtakes the floor above **~33,333 VIZ (~$167)**.
+- **Fee = max(100 VIZ, 0.30% × amount)**.
+- **Minimum peg-in = 2,000 VIZ (~$10)** — below this, fixed gas dominates; the watcher rejects it and flags for a (free) VIZ refund.
+
+| Peg-in | Fee | Net to user | Effective rate |
+|---|---|---|---|
+| 2,000 VIZ ($10, the minimum) | 100 VIZ | 1,900 | 5.0% |
+| 10,000 VIZ ($50) | 100 VIZ | 9,900 | 1.0% |
+| 33,333 VIZ ($167) | ~100 VIZ | ~33,233 | 0.30% |
+| 100,000 VIZ ($500) | 300 VIZ | 99,700 | 0.30% |
+
+Per peg the gateway collects ~$0.50 and spends ≤$0.20 of gas → **~$0.30 margin**
+that funds the TON gas reserve (and an insurance buffer). Treasury loop: fees
+accrue as wVIZ on TON; periodically swap a slice to TON via the wVIZ/TON DEX pool
+to refill the gas wallet (seed a TON reserve at launch until that pool exists).
+Tie-in: peg-in should auto-pause if the gas wallet runs low (can't mint without
+gas), while peg-out stays available so users can always exit.
+
+These are config defaults (`FEE_FLOOR_MILLI_VIZ`, `FEE_BPS`, `MIN_PEGIN_MILLI_VIZ`),
+verified in `tools/fees-spike.cjs`. The three inputs that move the numbers —
+actual mint gas, TON/VIZ prices, and wVIZ pool liquidity — should be re-measured
+on testnet and the floor/minimum revisited.
+
+## 13. Sources
 
 - VIZ accounts, authorities & multisig: https://docs.viz.cx/accounts.html
 - VIZ witnesses / DPoS / rounds / 17-of-21 quorum: https://docs.viz.cx/witnesses.html

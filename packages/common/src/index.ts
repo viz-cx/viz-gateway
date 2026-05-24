@@ -4,6 +4,7 @@ export * from "./wire";
 export * from "./idempotency";
 export * from "./store";
 export * from "./caps";
+export * from "./fees";
 export * from "./threshold";
 export * from "./config";
 export * from "./adapters";

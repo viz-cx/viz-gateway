@@ -34,6 +34,18 @@ contracts-ton/         multisig-v2 + Jetton deploy scripts (dry-run by default) 
 tools/threshold-calc.mjs   the federation-size numbers
 ```
 
+## Fees & minimum
+
+VIZ side is free; peg-out is free. The only fee is on **peg-in**, to cover the
+TON mint gas (+ small margin), collected in wVIZ at mint time so the 1:1 backing
+holds. At 1 VIZ=$0.005, 1 TON=$2:
+
+- **Fee = max(100 VIZ, 0.30%)** — floor ~$0.50 ≈ 0.25 TON (~2.5× worst-case mint gas); 0.30% only bites above ~33,333 VIZ.
+- **Minimum peg-in = 2,000 VIZ (~$10)** — below this, gas dominates and it's flagged for refund.
+
+Config: `FEE_FLOOR_MILLI_VIZ`, `FEE_BPS`, `MIN_PEGIN_MILLI_VIZ` (see `.env.example`);
+math in plan §12, verified by `tools/fees-spike.cjs`.
+
 ## Status
 
 Early but partly live. The trust-critical core (`packages/common`) is

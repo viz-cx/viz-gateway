@@ -4,6 +4,7 @@ import {
   CircuitBreaker,
   createStore,
   loadConfig,
+  quotePegIn,
   type CanonicalAction,
   type VizChain,
 } from "@gateway/common";
@@ -60,6 +61,15 @@ async function main(): Promise<void> {
           const action = canonicalPegIn(dep);
           const first = await store.claim(action.id);
           if (!first) continue; // already handled
+          const quote = quotePegIn(action.amountMilliViz, cfg.fees);
+          if (!quote.ok) {
+            // Dust below the minimum: gas would dominate. Do not mint; flag for
+            // manual refund (a VIZ transfer back to the sender is free).
+            console.warn(
+              `[viz-watcher] deposit ${action.id} (${action.amountMilliViz} mVIZ) below minimum ${quote.minMilliViz}; flag for refund`,
+            );
+            continue;
+          }
           const decision = breaker.check(action.amountMilliViz);
           if (!decision.ok) {
             console.warn(`[viz-watcher] deposit ${action.id} held: ${decision.reason}`);
@@ -71,7 +81,7 @@ async function main(): Promise<void> {
           }
           breaker.record(action.amountMilliViz);
           console.log(
-            `[viz-watcher] peg-in ${action.id} -> mint ${action.amountMilliViz} mVIZ to ${action.recipient}`,
+            `[viz-watcher] peg-in ${action.id} -> mint net ${quote.net} mVIZ to ${action.recipient} (fee ${quote.fee}, gross ${quote.gross})`,
           );
           try {
             await submitToCoordinator(cfg.coordinator.url, action);

@@ -1,4 +1,5 @@
 import type { CapPolicy } from "./caps";
+import type { FeePolicy } from "./fees";
 import type { FederationManifest } from "./types";
 
 export interface GatewayConfig {
@@ -22,6 +23,7 @@ export interface GatewayConfig {
   };
   coordinator: { url: string; listen: string; signerEndpoints: string[] };
   caps: CapPolicy;
+  fees: FeePolicy;
   storeUrl: string;
   recon: { intervalMs: number; driftToleranceMilliViz: bigint };
 }
@@ -96,10 +98,19 @@ export function loadConfig(): GatewayConfig {
         .map((s) => s.trim())
         .filter(Boolean),
     },
+    // Conservative bootstrap caps (1 VIZ ~ $0.005): $500 / $1,000 / $10,000.
+    // Raise as TVL and the federation grow.
     caps: {
-      perTxMilliViz: big("CAP_PER_TX_MILLI_VIZ", "1000000"),
-      rolling24hMilliViz: big("CAP_24H_MILLI_VIZ", "20000000"),
-      manualReviewAboveMilliViz: big("MANUAL_REVIEW_ABOVE_MILLI_VIZ", "500000"),
+      perTxMilliViz: big("CAP_PER_TX_MILLI_VIZ", "200000000"), // 200,000 VIZ (~$1,000)
+      rolling24hMilliViz: big("CAP_24H_MILLI_VIZ", "2000000000"), // 2,000,000 VIZ (~$10,000)
+      manualReviewAboveMilliViz: big("MANUAL_REVIEW_ABOVE_MILLI_VIZ", "100000000"), // 100,000 VIZ (~$500)
+    },
+    // Peg-in fee covers TON mint gas + margin; collected in wVIZ. Peg-out free.
+    // floor 100 VIZ (~$0.50 ~ 0.25 TON); min peg-in 2,000 VIZ (~$10).
+    fees: {
+      flatFloorMilliViz: big("FEE_FLOOR_MILLI_VIZ", "100000"), // 100 VIZ
+      bps: int("FEE_BPS", 30), // 0.30%
+      minPegInMilliViz: big("MIN_PEGIN_MILLI_VIZ", "2000000"), // 2,000 VIZ
     },
     storeUrl: opt("STORE_URL", "sqlite:./data/gateway.sqlite"),
     recon: {
