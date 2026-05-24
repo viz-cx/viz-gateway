@@ -20,7 +20,7 @@ export interface GatewayConfig {
     signerMnemonic: string;
     finalityConfirmations: number;
   };
-  coordinator: { url: string; listen: string };
+  coordinator: { url: string; listen: string; signerEndpoints: string[] };
   caps: CapPolicy;
   storeUrl: string;
   recon: { intervalMs: number; driftToleranceMilliViz: bigint };
@@ -51,8 +51,10 @@ function big(name: string, dflt: string): bigint {
 
 /** Load and validate config from environment. Throws on invalid federation. */
 export function loadConfig(): GatewayConfig {
-  const n = int("FEDERATION_N", 7);
-  const threshold = int("FEDERATION_THRESHOLD", 5);
+  // Defaults to 1-of-1 for a solo bootstrap launch. Grow by adding signer keys
+  // (yours or validators') and raising the threshold — no redeploy required.
+  const n = int("FEDERATION_N", 1);
+  const threshold = int("FEDERATION_THRESHOLD", 1);
   if (threshold <= 0 || threshold > n) {
     throw new Error(`Invalid federation: threshold ${threshold} must be in 1..${n}`);
   }
@@ -88,6 +90,11 @@ export function loadConfig(): GatewayConfig {
     coordinator: {
       url: opt("COORDINATOR_URL", "http://coordinator:8080"),
       listen: opt("COORDINATOR_LISTEN", "0.0.0.0:8080"),
+      // Signer /approve endpoints the coordinator calls. Solo: one local signer.
+      signerEndpoints: opt("SIGNER_ENDPOINTS", "http://signer:8090")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     },
     caps: {
       perTxMilliViz: big("CAP_PER_TX_MILLI_VIZ", "1000000"),

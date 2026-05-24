@@ -6,5 +6,9 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "references": [{ "path": "../common" }]
+  "references": [
+    { "path": "../common" },
+    { "path": "../viz-watcher" },
+    { "path": "../ton-watcher" }
+  ]
 }

@@ -1,15 +1,15 @@
 import { createServer } from "node:http";
 import {
+  actionFromWire,
   createStore,
   loadConfig,
-  type CanonicalAction,
   type TonMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
 import { KeyedSigner } from "./keyedSigner";
 
 interface ApproveRequest {
-  action: CanonicalAction;
+  action: Record<string, unknown>;
   proposal: VizReleaseProposal | TonMintProposal;
 }
 
@@ -42,7 +42,9 @@ async function main(): Promise<void> {
             res.end(JSON.stringify({ error: "paused", reason: await store.pauseReason() }));
             return;
           }
-          const { action, proposal } = JSON.parse(body) as ApproveRequest;
+          const req = JSON.parse(body) as ApproveRequest;
+          const action = actionFromWire(req.action);
+          const proposal = req.proposal;
           const approval =
             action.direction === "PEG_IN"
               ? await signer.approveTonMint(action, proposal as TonMintProposal)

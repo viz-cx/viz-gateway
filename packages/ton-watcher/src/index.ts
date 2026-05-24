@@ -1,11 +1,22 @@
 import {
+  actionToWire,
   canonicalPegOut,
   CircuitBreaker,
   createStore,
   loadConfig,
+  type CanonicalAction,
   type TonChain,
 } from "@gateway/common";
 import { TonHttpChain } from "./tonChain";
+
+async function submitToCoordinator(url: string, action: CanonicalAction): Promise<void> {
+  const res = await fetch(`${url.replace(/\/$/, "")}/submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: actionToWire(action) }),
+  });
+  if (!res.ok) throw new Error(`coordinator -> HTTP ${res.status}`);
+}
 
 /**
  * ton-watcher: follows TON masterchain finality, detects wVIZ burns, derives
@@ -67,9 +78,13 @@ async function main(): Promise<void> {
           }
           breaker.record(action.amountMilliViz);
           console.log(
-            `[ton-watcher] peg-out ${action.id} -> release ${action.amountMilliViz} mVIZ to ${action.recipient}; digest=${action.digest}`,
+            `[ton-watcher] peg-out ${action.id} -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
           );
-          // TODO: POST { action } to coordinator; signer co-signs the VIZ transfer.
+          try {
+            await submitToCoordinator(cfg.coordinator.url, action);
+          } catch (err) {
+            console.error(`[ton-watcher] submit ${action.id} failed: ${String(err)}`);
+          }
         }
         cursor = finalHead;
       }

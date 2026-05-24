@@ -67,6 +67,15 @@ signatures merge to the same set as a single all-keys signing; the VIZ proposal
 builder derives live TaPoS from `node.viz.cx`; tampered proposals are rejected;
 the TON ed25519 mint approval verifies and a tampered order hash fails.
 
+**Orchestration is wired** (`coordinator` → `Orchestrator`): a watcher detects an
+event and POSTs it to the coordinator, which builds the one shared proposal, asks
+each signer to validate+sign, and broadcasts once the threshold is met. Verified
+(`tools/orchestration-spike.cjs`) to complete a peg at **1-of-1** and **2-of-3**
+with real signatures, stop collecting at threshold, and refuse under-threshold or
+rogue signers. Defaults to **1-of-1** so a single operator (you) can run a
+working bridge solo; grow by adding signer keys and raising the threshold — no
+redeploy.
+
 What still needs live contracts (not stubbed logic — missing on-chain targets):
 the actual `broadcastRelease` (needs a funded 5-of-7 gateway account on VIZ) and
 `submitMintOrder` (needs the deployed multisig-v2 to assemble the execute

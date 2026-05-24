@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./canonical";
+export * from "./wire";
 export * from "./idempotency";
 export * from "./store";
 export * from "./caps";

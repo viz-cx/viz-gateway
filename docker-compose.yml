@@ -45,5 +45,21 @@ services:
     restart: unless-stopped
     depends_on: [viz-watcher, ton-watcher]
 
+  # For a solo / bootstrap operator the coordinator runs in the same stack, so
+  # `docker compose up` is a complete working bridge. In a multi-operator
+  # federation, run the coordinator separately (docker-compose.coordinator.yml)
+  # and point COORDINATOR_URL / SIGNER_ENDPOINTS across hosts.
+  coordinator:
+    image: viz-ton-gateway:latest
+    env_file: .env
+    environment:
+      SERVICE: coordinator
+      COORDINATOR_LISTEN: 0.0.0.0:8080
+      SIGNER_ENDPOINTS: http://signer:8090
+    restart: unless-stopped
+    volumes:
+      - gw-data:/app/data
+    depends_on: [signer]
+
 volumes:
   gw-data:

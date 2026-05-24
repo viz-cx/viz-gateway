@@ -1,11 +1,22 @@
 import {
+  actionToWire,
   canonicalPegIn,
   CircuitBreaker,
   createStore,
   loadConfig,
+  type CanonicalAction,
   type VizChain,
 } from "@gateway/common";
 import { VizJsChain } from "./vizChain";
+
+async function submitToCoordinator(url: string, action: CanonicalAction): Promise<void> {
+  const res = await fetch(`${url.replace(/\/$/, "")}/submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: actionToWire(action) }),
+  });
+  if (!res.ok) throw new Error(`coordinator -> HTTP ${res.status}`);
+}
 
 /**
  * viz-watcher: follows the VIZ irreversible head, detects deposits to the
@@ -60,9 +71,16 @@ async function main(): Promise<void> {
           }
           breaker.record(action.amountMilliViz);
           console.log(
-            `[viz-watcher] peg-in ${action.id} -> mint ${action.amountMilliViz} mVIZ to ${action.recipient}; digest=${action.digest}`,
+            `[viz-watcher] peg-in ${action.id} -> mint ${action.amountMilliViz} mVIZ to ${action.recipient}`,
           );
-          // TODO: POST { action } to coordinator; signer approves the TON mint order.
+          try {
+            await submitToCoordinator(cfg.coordinator.url, action);
+          } catch (err) {
+            // Production: persist to an outbox and retry. The idempotency claim
+            // means this action won't be re-detected, so a failed submit needs
+            // operator follow-up until the outbox exists.
+            console.error(`[viz-watcher] submit ${action.id} failed: ${String(err)}`);
+          }
         }
         cursor = safeHead;
       }
