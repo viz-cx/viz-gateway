@@ -1,0 +1,10 @@
+{
+  "name": "@gateway/setup-viz",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/setupAccount.js",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "viz-js-lib": "^0.12.6"
+  }
+}

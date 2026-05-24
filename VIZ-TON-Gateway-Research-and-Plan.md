@@ -433,6 +433,45 @@ the signer registry and attestations) and a `syncer` service that watches TOP-11
 + the registry and proposes the seasoned, rate-limited TON multisig `update`
 orders.
 
+### 11.7 Guardian master — 3-of-4 (extreme-case recovery only)
+
+The gateway VIZ account's `master` authority is a small, fixed guardian council:
+**3-of-4** of `[on1x, lex, id, denis-skripnik]`. It is never on the operational
+path — it exists only to rotate the active set or to recover access if things go
+wrong. 3-of-4 stays convenable in a crisis (tolerates one guardian unreachable)
+while requiring three independent reputable validators to act (no single/double
+point).
+
+Be clear-eyed about the trust this places: on VIZ, `master` can do everything
+`active` can (replace keys *and* move assets), so it is strictly more powerful
+than the 7-of-11 active set, and **application-level caps do not constrain a
+master-signed transfer** (those run in the gateway software; a raw master tx
+bypasses it). With a 4-person council the master quorum (3) is by construction an
+easier path than 7-of-11, so it is the bridge's theft floor. That is an accepted
+trade for recoverability, anchored on: these specific reputable validators not
+having three collude; **cold/hardware key custody** for all four; the built-in
+VIZ rule that master keys change at most **once per hour**; a set
+**`recovery_account`** (a separate conservative account that can restore control
+if `master` is maliciously changed, within VIZ's owner-recovery window — though
+it cannot claw back already-transferred funds); and **monitoring/alerting** so
+any master action is seen immediately.
+
+The account's authority object (config, not gateway code):
+
+```
+active_authority:  { weight_threshold: <op>, account_auths: [<operational set>] }
+master_authority:  { weight_threshold: 3, account_auths: [
+                       [denis-skripnik,1], [id,1], [lex,1], [on1x,1] ] }   # sorted (canonical)
+regular_authority: = active
+recovery_account:  <separate conservative account>
+```
+
+This is applied once by the one-time `setup-viz` utility (`npm run
+setup:viz-account`, dry-run by default; `APPLY=1` + the current master key to
+broadcast). It signs an `account_update` with the current master key and,
+optionally, `change_recovery_account`. The utility is not imported by the
+running gateway.
+
 ## 12. Sources
 
 - VIZ accounts, authorities & multisig: https://docs.viz.cx/accounts.html

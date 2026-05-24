@@ -5,7 +5,8 @@
   "description": "Federated multisig gateway between VIZ blockchain and TON (lock-and-mint wrapped VIZ).",
   "workspaces": [
     "packages/*",
-    "contracts-ton"
+    "contracts-ton",
+    "setup-viz"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -19,7 +20,8 @@
     "start:recon": "node packages/recon/dist/index.js",
     "deploy:multisig": "node contracts-ton/dist/deployMultisig.js",
     "deploy:minter": "node contracts-ton/dist/deployJettonMinter.js",
-    "set-minter-admin": "node contracts-ton/dist/setMinterAdmin.js"
+    "set-minter-admin": "node contracts-ton/dist/setMinterAdmin.js",
+    "setup:viz-account": "node setup-viz/dist/setupAccount.js"
   },
   "engines": {
     "node": ">=20"
