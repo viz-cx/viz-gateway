@@ -9,6 +9,7 @@ chains. Default and recommended: **5-of-7**.
 
 The full research, security math, and rollout plan are in
 [`VIZ-TON-Gateway-Research-and-Plan.md`](./VIZ-TON-Gateway-Research-and-Plan.md).
+To stand it up solo on testnet, follow [`RUNBOOK.md`](./RUNBOOK.md).
 
 ## Why 5-of-7
 

@@ -95,14 +95,20 @@ export class TonHttpChain implements TonChain {
   }
 
   async submitMintOrder(proposal: TonMintProposal, signatures: string[]): Promise<string> {
-    // Operators ed25519-sign proposal.orderHashHex (see tonSign.ts). Executing
-    // the order requires assembling the multisig-v2 execute message with these
-    // >= T approvals using the official Multisig wrapper, which owns the exact
-    // order/approval cell layout. That assembly is wrapper-dependent and must
-    // not be hand-rolled for a custody contract.
+    // IMPORTANT — multisig-v2 approvals are ON-CHAIN, not off-chain signatures.
+    // To mint, the proposer sends a `new_order` to the multisig carrying the
+    // mint action (mint wVIZ to proposal.toAddress for proposal.amountMilliViz);
+    // each signer then approves by sending an `approve` message FROM the address
+    // at signers[index] (or the proposer approves on init). At threshold the
+    // order executes the mint. For a 1-of-1 bootstrap this is a single
+    // new_order with approve_on_init=true from your signer wallet.
+    //
+    // So `signatures` (the off-chain ed25519 model) does NOT apply here; the real
+    // integration creates/approves the order via the official Multisig wrapper.
+    // See RUNBOOK.md ("How peg-in mint works on TON").
     throw new Error(
-      `submitMintOrder needs the multisig-v2 wrapper to assemble the execute message ` +
-        `(order ${proposal.orderSeqno}, ${signatures.length} approvals). See contracts-ton/README.md.`,
+      `submitMintOrder: multisig-v2 mint is an on-chain new_order + approve flow via the ` +
+        `Multisig wrapper (order ${proposal.orderSeqno}, to ${proposal.toAddress}). See RUNBOOK.md.`,
     );
   }
 }
