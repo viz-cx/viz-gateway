@@ -507,7 +507,70 @@ verified in `tools/fees-spike.cjs`. The three inputs that move the numbers —
 actual mint gas, TON/VIZ prices, and wVIZ pool liquidity — should be re-measured
 on testnet and the floor/minimum revisited.
 
-## 13. Sources
+## 13. Multi-network extension (home / remote)
+
+VIZ is the **home chain** — the single place value is locked and released. Every
+other network is a **remote chain** that holds wrapped VIZ (wVIZ on TON today,
+wVIZ on Solana next, and so on). The network-agnostic core — canonical mapping,
+idempotency + pause store, caps, fees, reconciliation, the orchestrator — is
+shared; adding a network means implementing one interface plus a watcher.
+
+**The extension contract** (`RemoteChain<MintProposal>` in `common`):
+
+```
+finalizedHeight(): number                         // TON masterchain seqno / Solana finalized slot
+finalizedBurnsSince(from, to): RemoteBurn[]        // wVIZ returns -> {sourceId, from, amount, homeDestination}
+circulatingSupplyMilliViz(): bigint                // for the 1:1 recon invariant
+submitMint(proposal, mintAuth): txid               // authorize + mint wVIZ to the user
+```
+
+Plus a per-network watcher (like `ton-watcher`) and a chain-specific
+`MintProposal`. The home side (`VizChain`) and everything else stay unchanged.
+
+**Per-network mapping:**
+
+| Concern | VIZ (home) | TON (remote, live) | Solana (remote, next) |
+|---|---|---|---|
+| Wrapped token | — (native VIZ) | Jetton, `stablecoin-contract` (TEP-74/89) | SPL **Token-2022** + on-mint metadata extension |
+| Mint authority | account `active` = M-of-N | `multisig-contract-v2` | SPL native multisig (M-of-N) or Squads v4 |
+| Approval model | **off-chain** partial sigs, merged | **on-chain** approve messages | **in-tx** multi-sig (off-chain-collected, like VIZ) or Squads (on-chain) |
+| Finality | irreversible block (~14, ~42 s) | masterchain seqno (~6 s) | finalized slot |
+| Decimals | 3 | 3 | 3 |
+| Metadata | n/a | TEP-64 on-chain dict | Token-2022 metadata extension |
+
+The approval-model row is the important one: `submitMint(proposal, mintAuth)`
+absorbs both shapes — `mintAuth` carries the collected signatures where approval
+is off-chain (VIZ release, Solana SPL multisig), and is unused where approval is
+on-chain (TON v2, Squads). So Solana's SPL multisig actually resembles the VIZ
+side (M signatures on one transaction) more than TON's.
+
+**To add Solana:** deploy a Token-2022 wVIZ mint (3 decimals, metadata
+extension) whose mint+freeze authority is an SPL M-of-N multisig (or Squads);
+implement `RemoteChain<SolanaMintProposal>` over `@solana/web3.js` +
+`@solana/spl-token`; add a `solana-watcher`. The canonical actions, store, caps,
+fees, recon, and orchestrator are reused as-is.
+
+### 13.1 Wrapped-token metadata (wVIZ)
+
+One canonical definition (`metadata/wviz.json`) drives every chain:
+
+```
+name        Wrapped VIZ
+symbol      wVIZ
+decimals    3                    (matches VIZ so 1 wVIZ == 1 VIZ, recon is integer mVIZ)
+description 1:1 bridge claim on VIZ locked in the gateway multisig; redeemable for VIZ.
+image       <hosted logo>
+external_url https://github.com/viz-cx/viz-ton-gateway
+```
+
+- **TON (TEP-64):** on-chain content dictionary with name/symbol/decimals/description/image (built by `contracts-ton/src/metadata.ts`).
+- **Solana (Token-2022):** on-mint metadata extension storing name/symbol/`uri` → the off-chain `metadata/wviz.json`; decimals set at mint init.
+
+Naming note: the bridge's wrapped token is **wVIZ** (VIZ wrapped on a remote
+chain). A "wTON" would be the *reverse* direction (TON wrapped onto VIZ), which
+is a separate product and not part of this design.
+
+## 14. Sources
 
 - VIZ accounts, authorities & multisig: https://docs.viz.cx/accounts.html
 - VIZ witnesses / DPoS / rounds / 17-of-21 quorum: https://docs.viz.cx/witnesses.html

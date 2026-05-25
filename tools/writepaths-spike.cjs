@@ -23,11 +23,11 @@ const { mnemonicNew } = require("@ton/crypto");
   const wifB = viz.auth.toWif("gateway", "pwB", "active");
 
   const action = canonicalPegOut({
-    msgHash: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-    mcSeqno: 1,
+    sourceId: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    height: 1,
     from: "EQsender",
     amountMilliViz: 1068237n,
-    vizDestination: "alice",
+    homeDestination: "alice",
   });
   const proposal = {
     refBlockNum: 1234,

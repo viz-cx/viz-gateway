@@ -1,0 +1,13 @@
+{
+  "name": "Wrapped VIZ",
+  "symbol": "wVIZ",
+  "decimals": 3,
+  "description": "Wrapped VIZ is a 1:1 bridge claim on VIZ locked in the gateway multisig. Each wVIZ is redeemable for exactly 1 VIZ on the VIZ blockchain, issued by the VIZ gateway. This is the canonical metadata used across remote chains (TON Jetton, Solana SPL Token-2022).",
+  "image": "https://raw.githubusercontent.com/viz-cx/viz-ton-gateway/main/metadata/wviz.png",
+  "external_url": "https://github.com/viz-cx/viz-ton-gateway",
+  "extensions": {
+    "home_chain": "VIZ",
+    "backing": "1:1 VIZ locked in the gateway account",
+    "bridge": "viz-cx/viz-ton-gateway"
+  }
+}

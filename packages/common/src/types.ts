@@ -22,18 +22,23 @@ export interface VizDeposit {
   tonDestination: string;
 }
 
-/** A confirmed wVIZ burn on TON (peg-out source event). */
-export interface TonBurn {
-  /** TON message hash (hex). Unique source key for idempotency. */
-  msgHash: string;
-  /** Masterchain seqno at which it was observed final. */
-  mcSeqno: number;
-  /** Burner TON address. */
+/**
+ * A confirmed wrapped-VIZ burn/return on a REMOTE chain (peg-out source event).
+ * Chain-neutral so any remote network (TON, Solana, ...) maps onto it:
+ *   TON    -> sourceId = message hash, height = masterchain seqno
+ *   Solana -> sourceId = tx signature, height = slot
+ */
+export interface RemoteBurn {
+  /** Unique source-event id on the remote chain (idempotency key). */
+  sourceId: string;
+  /** Remote-chain height/seqno/slot at which it was observed final. */
+  height: number;
+  /** Burner address on the remote chain. */
   from: string;
   /** Amount in integer milli-VIZ. */
   amountMilliViz: bigint;
-  /** Destination VIZ account parsed from the burn comment. */
-  vizDestination: string;
+  /** Destination VIZ account parsed from the burn comment/memo. */
+  homeDestination: string;
 }
 
 /**

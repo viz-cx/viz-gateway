@@ -1,6 +1,6 @@
 import { Address, JettonMaster, TonClient } from "@ton/ton";
 import type { Slice } from "@ton/core";
-import type { TonBurn, TonChain, TonMintProposal } from "@gateway/common";
+import type { RemoteBurn, RemoteChain, TonMintProposal } from "@gateway/common";
 
 /**
  * Live TON read path via toncenter (HTTP API v2). Read-only methods need no
@@ -41,7 +41,7 @@ export function parseTransferNotification(
   return { amountBaseUnits, sender, comment };
 }
 
-export class TonHttpChain implements TonChain {
+export class TonHttpChain implements RemoteChain<TonMintProposal> {
   private readonly client: TonClient;
   private readonly minter: Address;
   private readonly gatewayWallet: Address | null;
@@ -62,7 +62,7 @@ export class TonHttpChain implements TonChain {
     this.finalityBufferSec = Math.max(6, finalityConfirmations * 5 + 5);
   }
 
-  async masterchainSeqno(): Promise<number> {
+  async finalizedHeight(): Promise<number> {
     return (await this.client.getMasterchainInfo()).latestSeqno;
   }
 
@@ -72,11 +72,11 @@ export class TonHttpChain implements TonChain {
     return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
   }
 
-  async finalBurnsSince(_fromSeqno: number, mcSeqno: number): Promise<TonBurn[]> {
+  async finalizedBurnsSince(_fromHeight: number, toHeight: number): Promise<RemoteBurn[]> {
     if (!this.gatewayWallet) return [];
     const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
     const txs = await this.client.getTransactions(this.gatewayWallet, { limit: 20 });
-    const burns: TonBurn[] = [];
+    const burns: RemoteBurn[] = [];
     for (const tx of txs) {
       if (tx.now > cutoff) continue; // not yet final per the time buffer
       const inMsg = tx.inMessage;
@@ -84,17 +84,17 @@ export class TonHttpChain implements TonChain {
       const parsed = parseTransferNotification(inMsg.body.beginParse());
       if (!parsed) continue;
       burns.push({
-        msgHash: tx.hash().toString("hex"),
-        mcSeqno,
+        sourceId: tx.hash().toString("hex"),
+        height: toHeight,
         from: parsed.sender,
         amountMilliViz: parsed.amountBaseUnits,
-        vizDestination: parsed.comment.trim(),
+        homeDestination: parsed.comment.trim(),
       });
     }
     return burns;
   }
 
-  async submitMintOrder(proposal: TonMintProposal, signatures: string[]): Promise<string> {
+  async submitMint(proposal: TonMintProposal, _mintAuth: string[]): Promise<string> {
     // IMPORTANT — multisig-v2 approvals are ON-CHAIN, not off-chain signatures.
     // To mint, the proposer sends a `new_order` to the multisig carrying the
     // mint action (mint wVIZ to proposal.toAddress for proposal.amountMilliViz);

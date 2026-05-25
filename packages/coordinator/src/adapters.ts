@@ -54,6 +54,6 @@ export class TonMintBroadcaster implements Broadcaster {
   }
 
   async broadcast(_action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
-    return this.chain.submitMintOrder(proposal as never, signatures);
+    return this.chain.submitMint(proposal as never, signatures);
   }
 }

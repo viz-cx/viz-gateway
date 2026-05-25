@@ -1,16 +1,22 @@
 import type {
   Approval,
   CanonicalAction,
-  TonBurn,
+  RemoteBurn,
   TonMintProposal,
   VizDeposit,
   VizReleaseProposal,
 } from "./types";
 
-// Chain adapters isolate the external SDKs (viz-js-lib, @ton/ton) behind narrow
-// interfaces. The trust-critical core depends only on these interfaces, so it
-// can be unit-tested with no network and so SDK upgrades stay contained.
+// Chain adapters isolate the external SDKs behind narrow interfaces. The
+// trust-critical core depends only on these interfaces, so it can be unit-tested
+// with no network and so SDK upgrades stay contained.
+//
+// Two roles:
+//   HomeChain   = VIZ — locks/releases the native asset (one home chain).
+//   RemoteChain = TON today, Solana next, ... — mints/burns wrapped VIZ.
+// Adding a network means implementing RemoteChain<ItsMintProposal> + a watcher.
 
+/** The home chain (VIZ): where value is locked and released. */
 export interface VizChain {
   /** Current last-irreversible block number (from get_dynamic_global_properties). */
   lastIrreversibleBlock(): Promise<number>;
@@ -24,21 +30,31 @@ export interface VizChain {
   broadcastRelease(proposal: VizReleaseProposal, signatures: string[]): Promise<string>;
 }
 
-export interface TonChain {
-  /** Current masterchain seqno. */
-  masterchainSeqno(): Promise<number>;
-  /** Burns of wVIZ observed final as of `mcSeqno`. */
-  finalBurnsSince(fromSeqno: number, mcSeqno: number): Promise<TonBurn[]>;
-  /** Circulating wVIZ total supply, in milli-VIZ (for reconciliation). */
+/**
+ * A remote chain that holds wrapped VIZ. `MintProposal` is the chain-specific
+ * payload operators authorize (TON: a multisig-v2 order; Solana: an SPL mint tx).
+ * The `mintAuth` argument carries whatever the chain needs to authorize the mint
+ * (off-chain signatures for VIZ/Solana-SPL, or is unused where approval is
+ * on-chain like TON multisig-v2).
+ */
+export interface RemoteChain<MintProposal = unknown> {
+  /** Finalized chain height (TON masterchain seqno, Solana finalized slot, ...). */
+  finalizedHeight(): Promise<number>;
+  /** wrapped-VIZ returns/burns observed final within (fromHeight, toHeight]. */
+  finalizedBurnsSince(fromHeight: number, toHeight: number): Promise<RemoteBurn[]>;
+  /** Circulating wrapped-VIZ supply, in milli-VIZ (for reconciliation). */
   circulatingSupplyMilliViz(): Promise<bigint>;
-  /** Submit a multisig order to mint wVIZ once approvals reach threshold. */
-  submitMintOrder(proposal: TonMintProposal, signatures: string[]): Promise<string>;
+  /** Authorize + submit a mint of wrapped VIZ. Returns a tx/op id. */
+  submitMint(proposal: MintProposal, mintAuth: string[]): Promise<string>;
 }
+
+/** Back-compat alias for the current TON implementation. */
+export type TonChain = RemoteChain<TonMintProposal>;
 
 export interface Signer {
   readonly operatorId: string;
   /** Validate the proposal against the action, then secp256k1-sign the VIZ release. */
   signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval>;
-  /** Validate the proposal against the action, then ed25519-sign the TON mint order. */
+  /** Validate the proposal against the action, then approve the remote mint. */
   approveTonMint(action: CanonicalAction, proposal: TonMintProposal): Promise<Approval>;
 }

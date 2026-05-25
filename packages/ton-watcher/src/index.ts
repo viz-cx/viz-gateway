@@ -56,13 +56,13 @@ async function main(): Promise<void> {
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
-      const mc = await chain.masterchainSeqno();
+      const mc = await chain.finalizedHeight();
       const finalHead = mc - cfg.ton.finalityConfirmations;
       if (cursor === 0) {
         cursor = finalHead;
         console.log(`[ton-watcher] starting at masterchain head ${cursor} (mc ${mc})`);
       } else if (finalHead > cursor) {
-        const burns = await chain.finalBurnsSince(cursor, finalHead);
+        const burns = await chain.finalizedBurnsSince(cursor, finalHead);
         for (const burn of burns) {
           const action = canonicalPegOut(burn);
           const first = await store.claim(action.id);

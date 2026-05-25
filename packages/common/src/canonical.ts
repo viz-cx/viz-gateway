@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CanonicalAction, TonBurn, VizDeposit } from "./types";
+import type { CanonicalAction, RemoteBurn, VizDeposit } from "./types";
 
 /**
  * Deterministic canonical encoding + digest.
@@ -39,20 +39,20 @@ export function canonicalPegIn(d: VizDeposit): CanonicalAction {
   };
 }
 
-/** TON burn -> VIZ release. */
-export function canonicalPegOut(b: TonBurn): CanonicalAction {
-  const id = b.msgHash;
+/** Remote-chain burn/return -> VIZ release. */
+export function canonicalPegOut(b: RemoteBurn): CanonicalAction {
+  const id = b.sourceId;
   const body = canonicalString([
     ["v", "1"],
     ["dir", "PEG_OUT"],
     ["src", id],
-    ["recipient", b.vizDestination],
+    ["recipient", b.homeDestination],
     ["amount_milli_viz", b.amountMilliViz.toString()],
   ]);
   return {
     direction: "PEG_OUT",
     id,
-    recipient: b.vizDestination,
+    recipient: b.homeDestination,
     amountMilliViz: b.amountMilliViz,
     digest: digestOf(body),
   };

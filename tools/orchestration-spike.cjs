@@ -40,11 +40,11 @@ function fakeBroadcaster(action) {
 
 (async () => {
   const action = canonicalPegOut({
-    msgHash: "aa".repeat(32),
-    mcSeqno: 1,
+    sourceId: "aa".repeat(32),
+    height: 1,
     from: "EQx",
     amountMilliViz: 5000n,
-    vizDestination: "alice",
+    homeDestination: "alice",
   });
   const wifA = viz.auth.toWif("gw", "pA", "active");
   const wifB = viz.auth.toWif("gw", "pB", "active");
