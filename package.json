@@ -1,8 +1,8 @@
 {
-  "name": "viz-ton-gateway",
+  "name": "viz-gateway",
   "version": "0.1.0",
   "private": true,
-  "description": "Federated multisig gateway between VIZ blockchain and TON (lock-and-mint wrapped VIZ).",
+  "description": "Federated multisig gateway between VIZ and remote chains (TON, Solana, ...): lock VIZ, mint wrapped VIZ.",
   "workspaces": [
     "packages/*",
     "contracts-ton",

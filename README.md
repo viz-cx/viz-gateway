@@ -1,6 +1,6 @@
-# viz-ton-gateway
+# viz-gateway
 
-[![CI](https://github.com/viz-cx/viz-ton-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/viz-cx/viz-ton-gateway/actions/workflows/ci.yml)
+[![CI](https://github.com/viz-cx/viz-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/viz-cx/viz-gateway/actions/workflows/ci.yml)
 
 Federated multisig gateway between the **VIZ blockchain** and **TON**:
 lock VIZ on VIZ, mint wrapped VIZ (`wVIZ`, a TON Jetton) — and the reverse.
@@ -8,7 +8,7 @@ Secured by an **M-of-N signer federation** that uses the native multisig of both
 chains. Default and recommended: **5-of-7**.
 
 The full research, security math, and rollout plan are in
-[`VIZ-TON-Gateway-Research-and-Plan.md`](./VIZ-TON-Gateway-Research-and-Plan.md).
+[`VIZ-Gateway-Research-and-Plan.md`](./VIZ-Gateway-Research-and-Plan.md).
 To stand it up solo on testnet, follow [`RUNBOOK.md`](./RUNBOOK.md).
 
 ## Why 5-of-7

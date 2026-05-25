@@ -6,7 +6,7 @@
 services:
   viz-watcher:
     build: .
-    image: viz-ton-gateway:latest
+    image: viz-gateway:latest
     env_file: .env
     environment:
       SERVICE: viz-watcher
@@ -15,7 +15,7 @@ services:
       - gw-data:/app/data
 
   ton-watcher:
-    image: viz-ton-gateway:latest
+    image: viz-gateway:latest
     env_file: .env
     environment:
       SERVICE: ton-watcher
@@ -25,7 +25,7 @@ services:
     depends_on: [viz-watcher]
 
   signer:
-    image: viz-ton-gateway:latest
+    image: viz-gateway:latest
     env_file: .env
     environment:
       SERVICE: signer
@@ -38,7 +38,7 @@ services:
     depends_on: [viz-watcher]
 
   recon:
-    image: viz-ton-gateway:latest
+    image: viz-gateway:latest
     env_file: .env
     environment:
       SERVICE: recon
@@ -50,7 +50,7 @@ services:
   # federation, run the coordinator separately (docker-compose.coordinator.yml)
   # and point COORDINATOR_URL / SIGNER_ENDPOINTS across hosts.
   coordinator:
-    image: viz-ton-gateway:latest
+    image: viz-gateway:latest
     env_file: .env
     environment:
       SERVICE: coordinator

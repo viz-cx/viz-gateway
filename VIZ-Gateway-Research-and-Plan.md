@@ -273,7 +273,7 @@ T-of-N** (deliberate, consensual restart).
 ### 8.1 Repository layout (monorepo, npm workspaces)
 
 ```
-viz-ton-gateway/
+viz-gateway/
 ├─ package.json                # workspaces root
 ├─ tsconfig.base.json
 ├─ docker-compose.yml          # one full operator node (watchers + signer)
@@ -560,7 +560,7 @@ symbol      wVIZ
 decimals    3                    (matches VIZ so 1 wVIZ == 1 VIZ, recon is integer mVIZ)
 description 1:1 bridge claim on VIZ locked in the gateway multisig; redeemable for VIZ.
 image       <hosted logo>
-external_url https://github.com/viz-cx/viz-ton-gateway
+external_url https://github.com/viz-cx/viz-gateway
 ```
 
 - **TON (TEP-64):** on-chain content dictionary with name/symbol/decimals/description/image (built by `contracts-ton/src/metadata.ts`).

@@ -5,7 +5,7 @@
 services:
   coordinator:
     build: .
-    image: viz-ton-gateway:latest
+    image: viz-gateway:latest
     env_file: .env
     environment:
       SERVICE: coordinator

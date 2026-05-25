@@ -45,7 +45,7 @@ export function loadSolanaDeployConfig(): SolanaDeployConfig {
     symbol: opt("WVIZ_SYMBOL", "wVIZ"),
     uri: opt(
       "WVIZ_URI",
-      "https://raw.githubusercontent.com/viz-cx/viz-ton-gateway/main/metadata/wviz.json",
+      "https://raw.githubusercontent.com/viz-cx/viz-gateway/main/metadata/wviz.json",
     ),
     apply: opt("DEPLOY_SEND", "0") === "1",
   };
