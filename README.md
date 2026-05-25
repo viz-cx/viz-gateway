@@ -31,7 +31,10 @@ packages/ton-watcher   follows TON finality, detects wVIZ burns (peg-out)
 packages/signer        the only component with keys; validates + signs (one per operator)
 packages/coordinator   UNTRUSTED; collects approvals, broadcasts once threshold met
 packages/recon         enforces locked-VIZ == circulating-wVIZ; auto-pauses on drift
+packages/solana-watcher  Solana remote-chain adapter + watcher (read path live; mint deferred)
 contracts-ton/         multisig-v2 + Jetton deploy scripts (dry-run by default) + setup
+contracts-solana/      Token-2022 wVIZ mint + SPL multisig deploy script (dry-run by default)
+setup-viz/             one-time VIZ gateway account setup (3-of-4 guardian master)
 tools/threshold-calc.mjs   the federation-size numbers
 ```
 
@@ -89,11 +92,17 @@ rogue signers. Defaults to **1-of-1** so a single operator (you) can run a
 working bridge solo; grow by adding signer keys and raising the threshold — no
 redeploy.
 
+**Solana is prepped** (`packages/solana-watcher`, `contracts-solana`) as the
+second remote chain via the shared `RemoteChain` interface: the read adapter
+(finalized slot, supply, burn detection) is verified against live RPC, and the
+Token-2022 + SPL-multisig deploy script dry-runs. Solana's mint write-path is
+deferred until the TON round-trip validates the interface.
+
 What still needs live contracts (not stubbed logic — missing on-chain targets):
-the actual `broadcastRelease` (needs a funded 5-of-7 gateway account on VIZ) and
-`submitMintOrder` (needs the deployed multisig-v2 to assemble the execute
-message via its wrapper). The 24h cap counters are still per-process (the pause
-they trigger is shared). Nothing here moves real funds yet.
+the actual `broadcastRelease` (needs a funded gateway account on VIZ) and the
+remote `submitMint` (TON: on-chain multisig-v2 order; Solana: SPL-multisig mint).
+The 24h cap counters are still per-process (the pause they trigger is shared).
+Nothing here moves real funds yet.
 
 ## Build & run (local)
 

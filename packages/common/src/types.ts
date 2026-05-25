@@ -97,6 +97,17 @@ export interface TonMintProposal {
   orderHashHex: string; // exact 32-byte order hash operators sign (hex)
 }
 
+/**
+ * A Solana mint proposal. SPL multisig collects M signatures on a SINGLE
+ * transaction (off-chain-collected, like VIZ), so the wired write-path will
+ * carry the unsigned mint_to transaction for signers to co-sign. Deferred until
+ * the TON round-trip validates the RemoteChain interface.
+ */
+export interface SolanaMintProposal {
+  recipient: string; // base58 owner address to receive wVIZ
+  amountMilliViz: string;
+}
+
 export interface FederationManifest {
   /** Total signers N. */
   n: number;

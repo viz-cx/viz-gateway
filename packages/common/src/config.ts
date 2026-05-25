@@ -21,6 +21,12 @@ export interface GatewayConfig {
     signerMnemonic: string;
     finalityConfirmations: number;
   };
+  solana: {
+    rpcUrl: string;
+    wvizMint: string;
+    gatewayTokenAccount: string;
+    finalitySlots: number;
+  };
   coordinator: { url: string; listen: string; signerEndpoints: string[] };
   caps: CapPolicy;
   fees: FeePolicy;
@@ -88,6 +94,12 @@ export function loadConfig(): GatewayConfig {
       gatewayJettonWallet: opt("TON_GATEWAY_JETTON_WALLET", ""),
       signerMnemonic: opt("TON_SIGNER_MNEMONIC", ""),
       finalityConfirmations: int("TON_FINALITY_CONFIRMATIONS", 1),
+    },
+    solana: {
+      rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
+      wvizMint: opt("SOLANA_WVIZ_MINT", ""),
+      gatewayTokenAccount: opt("SOLANA_GATEWAY_TOKEN_ACCOUNT", ""),
+      finalitySlots: int("SOLANA_FINALITY_SLOTS", 0),
     },
     coordinator: {
       url: opt("COORDINATOR_URL", "http://coordinator:8080"),
