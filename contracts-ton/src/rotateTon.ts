@@ -143,7 +143,7 @@ async function approveTon(): Promise<void> {
     return;
   }
 
-  const approved = od.approvals.filter(Boolean).length;
+  const approved = od.approvals_num ?? od.approvals.filter(Boolean).length;
   if (od.expiration_date !== null && od.expiration_date < BigInt(Math.floor(Date.now() / 1000))) {
     throw new Error(`[approve-ton] order expired at ${new Date(Number(od.expiration_date) * 1000).toISOString()}`);
   }
@@ -164,6 +164,7 @@ async function status(): Promise<void> {
   if (!MULTISIG) throw new Error("TON_MULTISIG_ADDRESS is required");
 
   const proposal = readProposal(file);
+  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now(), skipExpiry: true });
   const c = client();
   const multisig = c.open(Multisig.createFromAddress(Address.parse(MULTISIG)));
   const data = await multisig.getMultisigData();
@@ -181,7 +182,10 @@ async function status(): Promise<void> {
     try {
       const order = c.open(Order.createFromAddress(Address.parse(st.tonOrderAddress)));
       const od = await order.getOrderData();
-      const approved = od.approvals.filter(Boolean).length;
+      const approved = od.approvals_num ?? od.approvals.filter(Boolean).length;
+      if (od.expiration_date !== null && od.expiration_date < BigInt(Math.floor(Date.now() / 1000))) {
+        console.log(`[status] order EXPIRED at ${new Date(Number(od.expiration_date) * 1000).toISOString()} — re-submit needed`);
+      }
       console.log(`[status] order ${st.tonOrderAddress}: executed=${od.executed} approvals=${approved}/${od.threshold ?? "?"}`);
     } catch {
       console.log(`[status] order ${st.tonOrderAddress}: not readable (may have executed + been cleaned up).`);
