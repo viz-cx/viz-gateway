@@ -59,7 +59,7 @@ async function submitTon(): Promise<void> {
   if (!MULTISIG) throw new Error("TON_MULTISIG_ADDRESS is required");
 
   const proposal = readProposal(file);
-  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now() }); // chainId + version + (VIZ) shape
+  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now(), skipExpiry: true }); // chainId + version + (VIZ) shape; TaPoS window already closed by broadcast viz
 
   const c = client();
   // Use createFromAddress for the initial data fetch (no configuration needed for getters).
