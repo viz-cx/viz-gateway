@@ -8,3 +8,4 @@ export * from "./fees";
 export * from "./threshold";
 export * from "./config";
 export * from "./adapters";
+export * from "./rotation";
