@@ -187,3 +187,16 @@ export function addPartial(p: RotationProposal, signature: string): RotationProp
   if (p.vizTx.signatures.includes(signature)) return p;
   return { ...p, vizTx: { ...p.vizTx, signatures: [...p.vizTx.signatures, signature] } };
 }
+
+/** The cross-chain rotation checkpoint, written alongside the proposal. */
+export interface RotationState {
+  proposalFile: string;
+  vizDone: boolean;
+  tonOrderAddress: string;
+  tonDone: boolean;
+}
+
+/** Pure merge: overlay `patch` onto `state`, preserving untouched fields. */
+export function mergeState(state: RotationState, patch: Partial<RotationState>): RotationState {
+  return { ...state, ...patch };
+}

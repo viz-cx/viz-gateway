@@ -16,6 +16,7 @@ const {
   buildProposal,
   validateProposal,
   addPartial,
+  mergeState,
 } = require("../packages/common/dist/index.js");
 
 // A real, serializable memo pubkey (the gateway's memo_key). signTransaction
@@ -152,6 +153,20 @@ console.log("[proposal] independent-partial merge + dedup OK");
   }
   assert.strictEqual(pp.vizTx.signatures.length, 3);
   console.log("[co-sign] multi-operator accumulate OK");
+}
+
+// --- rotation state merge (shared by VIZ broadcast + TON tool) ---
+{
+  const s0 = { proposalFile: "rotation-proposal.json", vizDone: false, tonOrderAddress: "", tonDone: false };
+  const s1 = mergeState(s0, { vizDone: true });
+  assert.strictEqual(s1.vizDone, true);
+  assert.strictEqual(s1.tonDone, false);
+  const s2 = mergeState(s1, { tonOrderAddress: "EQabc", tonDone: false });
+  assert.strictEqual(s2.tonOrderAddress, "EQabc");
+  assert.strictEqual(s2.vizDone, true); // unchanged fields preserved
+  const s3 = mergeState(s2, { tonDone: true });
+  assert.strictEqual(s3.tonDone, true);
+  console.log("[state] mergeState preserves prior fields OK");
 }
 
 console.log("\nrotation-spike assertions passed.");
