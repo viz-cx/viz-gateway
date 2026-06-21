@@ -2,6 +2,7 @@ import type {
   Approval,
   CanonicalAction,
   RemoteBurn,
+  SolanaMintProposal,
   TonMintProposal,
   VizDeposit,
   VizReleaseProposal,
@@ -57,4 +58,6 @@ export interface Signer {
   signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval>;
   /** Validate the proposal against the action, then approve the remote mint. */
   approveTonMint(action: CanonicalAction, proposal: TonMintProposal): Promise<Approval>;
+  /** Validate the proposal against the action, then approve the remote Solana mint. */
+  approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval>;
 }
