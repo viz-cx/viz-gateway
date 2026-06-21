@@ -18,6 +18,11 @@ const {
   addPartial,
 } = require("../packages/common/dist/index.js");
 
+// A real, serializable memo pubkey (the gateway's memo_key). signTransaction
+// serializes the whole account_update op — memo_key included — so the signing
+// tests need a valid key here, not a placeholder.
+const MEMO = viz.auth.wifToPublic(viz.auth.toWif("gateway", "pw-memo", "memo"));
+
 // --- parse/serialize round-trip ---
 const ops = parseOperators("op-1=VIZ1aaa:11aa,op-2=VIZ1bbb:22bb,op-3=VIZ1ccc:33cc");
 assert.strictEqual(ops.length, 3);
@@ -36,8 +41,8 @@ assert.deepStrictEqual(auth2.key_auths, [["VIZ1aaa", 1], ["VIZ1zzz", 1]]);
 console.log("[authority] keys-only + sorted OK");
 
 // --- buildRotationOp is deterministic and omits master ---
-const op1 = buildRotationOp("viz-gateway", ops, 2, "VIZ1memo", "{}");
-const op2 = buildRotationOp("viz-gateway", ops, 2, "VIZ1memo", "{}");
+const op1 = buildRotationOp("viz-gateway", ops, 2, MEMO, "{}");
+const op2 = buildRotationOp("viz-gateway", ops, 2, MEMO, "{}");
 assert.strictEqual(JSON.stringify(op1), JSON.stringify(op2), "op build is non-deterministic");
 assert.strictEqual(op1[0], "account_update");
 assert.strictEqual(op1[1].account, "viz-gateway");
@@ -80,9 +85,7 @@ const proposal = buildProposal({
   account: "viz-gateway",
   newOperators: newOps,
   newThreshold: 2,
-  // memo_key must be a real serializable pubkey: signTransaction serializes the
-  // whole account_update op (memo_key included) before signing.
-  memoKey: A.pub,
+  memoKey: MEMO,
   jsonMetadata: "{}",
   currentActiveHash,
   taPoS,
@@ -140,7 +143,7 @@ console.log("[proposal] independent-partial merge + dedup OK");
 {
   let pp = buildProposal({
     chainId: "viz-gateway", account: "viz-gateway",
-    newOperators: newOps, newThreshold: 2, memoKey: A.pub, jsonMetadata: "{}",
+    newOperators: newOps, newThreshold: 2, memoKey: MEMO, jsonMetadata: "{}",
     currentActiveHash: "x", taPoS,
   });
   for (const op of [A, B, C]) {
