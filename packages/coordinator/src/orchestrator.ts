@@ -2,11 +2,12 @@ import {
   ApprovalSet,
   type Approval,
   type CanonicalAction,
+  type SolanaMintProposal,
   type TonMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
 
-export type Proposal = VizReleaseProposal | TonMintProposal;
+export type Proposal = VizReleaseProposal | TonMintProposal | SolanaMintProposal;
 
 /** Asks one operator's signer to validate + sign a proposal. */
 export interface SignerClient {

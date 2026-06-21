@@ -9,6 +9,7 @@
   "references": [
     { "path": "../common" },
     { "path": "../viz-watcher" },
-    { "path": "../ton-watcher" }
+    { "path": "../ton-watcher" },
+    { "path": "../solana-watcher" }
   ]
 }

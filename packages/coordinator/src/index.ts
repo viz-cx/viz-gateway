@@ -2,8 +2,9 @@ import { createServer } from "node:http";
 import { actionFromWire, createStore, loadConfig, type CanonicalAction } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { Orchestrator } from "./orchestrator";
-import { HttpSignerClient, TonMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
+import { HttpSignerClient, SolanaMintBroadcaster, TonMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
 
 /**
  * coordinator: UNTRUSTED, keyless. On POST /submit { action } it builds the one
@@ -34,10 +35,38 @@ async function main(): Promise<void> {
         ),
       )
     : null;
+  const solanaBroadcaster =
+    cfg.solana.wvizMint && cfg.solana.multisig && cfg.solana.submitterSecret
+      ? new SolanaMintBroadcaster(
+          new SolanaChain(
+            cfg.solana.rpcUrl,
+            cfg.solana.wvizMint,
+            cfg.solana.gatewayTokenAccount,
+            cfg.solana.finalitySlots,
+            {
+              multisig: cfg.solana.multisig,
+              nonceAccount: cfg.solana.nonceAccount,
+              submitterSecret: cfg.solana.submitterSecret,
+            },
+          ),
+          cfg.solana.signers,
+        )
+      : null;
+
+  const pegInBroadcaster = (action: CanonicalAction) => {
+    if (action.remoteChain === "SOLANA") {
+      if (!solanaBroadcaster) throw new Error(`Solana PEG_IN ${action.id} but Solana mint not configured`);
+      return solanaBroadcaster;
+    }
+    if (action.remoteChain === "TON") {
+      if (!tonBroadcaster) throw new Error(`TON PEG_IN ${action.id} but TON minter not configured`);
+      return tonBroadcaster;
+    }
+    throw new Error(`PEG_IN ${action.id} has unknown/absent remoteChain`);
+  };
 
   const orchestrate = (action: CanonicalAction) => {
-    const broadcaster = action.direction === "PEG_OUT" ? vizBroadcaster : tonBroadcaster;
-    if (!broadcaster) throw new Error("PEG_IN requested but TON minter not configured");
+    const broadcaster = action.direction === "PEG_OUT" ? vizBroadcaster : pegInBroadcaster(action);
     return new Orchestrator(
       cfg.federation.threshold,
       cfg.federation.operators.map((o) => o.id),

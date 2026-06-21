@@ -1,6 +1,7 @@
-import { actionToWire, type Approval, type CanonicalAction } from "@gateway/common";
+import { actionToWire, type Approval, type CanonicalAction, type SolanaMintProposal } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import type { Broadcaster, Proposal, SignerClient } from "./orchestrator";
 
 /** Calls an operator's signer /approve endpoint over HTTP (push model). */
@@ -55,5 +56,22 @@ export class TonMintBroadcaster implements Broadcaster {
 
   async broadcast(_action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
     return this.chain.submitMint(proposal as never, signatures);
+  }
+}
+
+/** PEG_IN (Solana): build a durable-nonce SPL mint proposal and submit the signed tx. */
+export class SolanaMintBroadcaster implements Broadcaster {
+  constructor(
+    private readonly chain: SolanaChain,
+    /** Committed signing subset (the M multiSigners that must all sign). */
+    private readonly signerSet: string[],
+  ) {}
+
+  async buildProposal(action: CanonicalAction): Promise<Proposal> {
+    return this.chain.buildMintProposal(action, this.signerSet);
+  }
+
+  async broadcast(_action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
+    return this.chain.submitMint(proposal as SolanaMintProposal, signatures);
   }
 }
