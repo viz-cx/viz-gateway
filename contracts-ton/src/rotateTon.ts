@@ -9,9 +9,11 @@ import {
   type RotationState,
 } from "@gateway/common";
 import { Multisig } from "./wrappers/Multisig";
+import { Order } from "./wrappers/Order";
 import {
   buildUpdateAction,
   tonSignerAddress,
+  validateTonOrder,
 } from "./tonRotation";
 
 function arg(name: string): string | undefined {
@@ -109,10 +111,54 @@ async function submitTon(): Promise<void> {
   console.log(`[submit-ton] share that address; each other signer runs: rotate:ton approve-ton ${orderAddr.toString()}`);
 }
 
+async function approveTon(): Promise<void> {
+  const orderArg = process.argv[3];
+  const fileFromFlag = arg("proposal");
+  const apply = process.env.APPLY === "1";
+  if (!orderArg) throw new Error("approve-ton needs the order address (rotate:ton approve-ton <order-address>)");
+
+  // Proposal is the spec each approver re-validates against. Default to the
+  // standard filename; allow --proposal to override.
+  const proposal = readProposal(fileFromFlag || "rotation-proposal.json");
+  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now() });
+
+  const c = client();
+  const order = c.open(Order.createFromAddress(Address.parse(orderArg)));
+  const od = await order.getOrderData();
+  if (od.executed) {
+    console.log("[approve-ton] order already executed — nothing to do.");
+    return;
+  }
+  if (!od.order) throw new Error("order not initialized yet (proposer must submit-ton first)");
+
+  // Trust-critical: the on-chain order's action must match the proposal exactly.
+  validateTonOrder(od.order, proposal);
+
+  const { wallet, secretKey } = await signerWallet();
+  const myIdx = od.signers.findIndex((s) => s.equals(wallet.address));
+  if (myIdx < 0) throw new Error(`your wallet ${wallet.address.toString()} is not a signer on this order`);
+  if (od.approvals[myIdx]) {
+    console.log("[approve-ton] you already approved this order.");
+    return;
+  }
+
+  const approved = od.approvals.filter(Boolean).length;
+  console.log(`[approve-ton] order validated; ${approved}/${od.threshold ?? "?"} approved; your signer index ${myIdx}`);
+  if (!apply) {
+    console.log("[approve-ton] DRY-RUN. Set APPLY=1 to send your on-chain approve.");
+    return;
+  }
+
+  const sender = c.open(wallet).sender(secretKey);
+  await order.sendApprove(sender, myIdx);
+  console.log("[approve-ton] approve sent. At threshold the order auto-executes and the multisig params update.");
+}
+
 async function main(): Promise<void> {
   const sub = process.argv[2];
   if (sub === "submit-ton") return submitTon();
-  // approve-ton / status added in later tasks
+  if (sub === "approve-ton") return approveTon();
+  // status added in later tasks
   throw new Error(`unknown subcommand: ${sub ?? ""}`.trim());
 }
 
