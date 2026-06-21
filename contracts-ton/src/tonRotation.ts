@@ -22,6 +22,10 @@ export function buildUpdateAction(operators: OperatorRef[], newThreshold: number
   }
   // Signer index order = operators array order (kept consistent across submit/approve).
   const signers = operators.map((o) => tonSignerAddress(o.tonPubkey));
+  const addrs = signers.map((a) => a.toString());
+  if (new Set(addrs).size !== addrs.length) {
+    throw new Error("duplicate tonPubkey in operator set");
+  }
   return { type: "update", threshold: newThreshold, signers, proposers: [] };
 }
 
@@ -55,7 +59,7 @@ export function tonSignerSetHash(signers: Address[], threshold: number): string 
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
-/** Order-independent equality of two signer sets (ignores threshold). */
+/** Order-independent equality of two signer sets (ignores threshold — use tonSignerSetHash when threshold must also match). */
 export function sameSignerSet(a: Address[], b: Address[]): boolean {
   if (a.length !== b.length) return false;
   const sa = a.map((x) => x.toString()).sort();

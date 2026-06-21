@@ -58,5 +58,15 @@ const {
   assert.strictEqual(sameSignerSet([a1], [a1, tonSignerAddress(pub2)]), false);
   console.log("[ton] signer-set hash + sameSignerSet OK");
 
+  // --- duplicate tonPubkey guard ---
+  assert.throws(
+    () => packRotationOrder([
+      { id: "op-1", vizPubkey: "V1", tonPubkey: pub1 },
+      { id: "op-2", vizPubkey: "V2", tonPubkey: pub1 }, // same pubkey
+    ], 1),
+    /duplicate tonPubkey/
+  );
+  console.log("[ton] duplicate tonPubkey guard OK");
+
   console.log("\nton-rotation-spike assertions passed.");
 })().catch((e) => { console.error(e); process.exit(1); });
