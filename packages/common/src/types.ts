@@ -108,11 +108,21 @@ export interface SolanaMintProposal {
   amountMilliViz: string;
 }
 
+/** An operator's public identity on both chains. */
+export interface OperatorRef {
+  /** Public operator id, e.g. "op-1". */
+  id: string;
+  /** VIZ secp256k1 public key (the "VIZ..."-prefixed string), used in the active key_auths. */
+  vizPubkey: string;
+  /** TON ed25519 public key (hex), used by the TON rotation path (follow-up plan). */
+  tonPubkey: string;
+}
+
 export interface FederationManifest {
   /** Total signers N. */
   n: number;
   /** Threshold T. */
   threshold: number;
-  /** Public operator ids. */
-  operators: string[];
+  /** Public operator set. */
+  operators: OperatorRef[];
 }

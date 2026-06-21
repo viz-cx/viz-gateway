@@ -40,7 +40,7 @@ async function main(): Promise<void> {
     if (!broadcaster) throw new Error("PEG_IN requested but TON minter not configured");
     return new Orchestrator(
       cfg.federation.threshold,
-      cfg.federation.operators,
+      cfg.federation.operators.map((o) => o.id),
       signers,
       broadcaster,
     ).process(action);

@@ -73,7 +73,11 @@ export function loadConfig(): GatewayConfig {
     );
   }
 
-  const operators = Array.from({ length: n }, (_, i) => `op-${i + 1}`);
+  const operators = Array.from({ length: n }, (_, i) => ({
+    id: `op-${i + 1}`,
+    vizPubkey: "",
+    tonPubkey: "",
+  }));
 
   return {
     service: opt("SERVICE", "signer"),
