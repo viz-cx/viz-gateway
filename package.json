@@ -30,6 +30,9 @@
   "engines": {
     "node": ">=20"
   },
+  "overrides": {
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^22.0.0"
