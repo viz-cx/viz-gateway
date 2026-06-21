@@ -3,7 +3,9 @@
   "compilerOptions": {
     "composite": true,
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "noUncheckedIndexedAccess": false
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [{ "path": "../packages/common" }]
 }
