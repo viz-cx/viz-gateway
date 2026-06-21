@@ -168,6 +168,46 @@ treasury), with `approve_on_init=true` (1-of-1 executes immediately). Wire it
 using the `Multisig` wrapper from step 1. Once wired, the user receives wVIZ and
 `recon` shows `locked == circulating`.
 
+## How peg-in mint works on Solana
+
+wVIZ on Solana is an SPL Token-2022 mint (3 decimals) whose mint+freeze
+authority is an SPL M-of-N multisig (deployed by `npm run deploy:solana`).
+Minting is **M ed25519 signatures over one transaction**, collected off-chain —
+the same shape as a VIZ release, not TON's on-chain approvals.
+
+The transaction uses a **durable nonce** instead of a recent blockhash, so the
+signed bytes never expire while operators sign asynchronously. Two signature
+roles share the tx:
+
+- **operator members** — the M multisig signatures = the mint authorization,
+  collected via pass-around (`mintAuth`).
+- **submitter** — fee payer + nonce authority + ATA-create funder, added last at
+  broadcast. The submitter is NOT a multisig member and holds no mint power.
+
+One-time setup (deferred live steps):
+
+1. Deploy the wVIZ mint + SPL multisig: `npm run deploy:solana` (set
+   `SOLANA_SIGNERS`, `SOLANA_THRESHOLD`, `DEPLOY_SEND=1`, a funded
+   `SOLANA_PAYER_SECRET`).
+2. Create a durable nonce account owned by the submitter (nonce authority), and
+   set `SOLANA_NONCE_ACCOUNT`, `SOLANA_MULTISIG`, `SOLANA_WVIZ_MINT`.
+3. Each operator sets `SOLANA_SIGNER_SECRET` (its own member key); the submitter
+   sets `SOLANA_SUBMITTER_SECRET`.
+
+Mint flow per peg-in:
+
+1. Proposer: `SolanaChain.buildMintProposal(action, signerSet)` fetches the nonce
+   and pins the exact message (`messageB64`).
+2. Each operator validates the proposal (recipient + amount) and signs via
+   `approveSolanaMint`, returning `"<memberPubkey>:<sigHex>"`.
+3. Submitter: `SolanaChain.submitMint(proposal, mintAuth)` assembles, verifies all
+   signatures, and broadcasts.
+
+The cryptographic assembly is verified offline by
+`tools/solana-writepath-spike.cjs` (in `npm run verify`). The nonce-fetch,
+broadcast, and routing Solana peg-ins through the signer service are deferred to
+a manual devnet validation run.
+
 ## 10. Verify & drills
 
 - `RECON_ONCE=1 npm run start:recon` (or the running recon) → `status=OK`, drift 0.
