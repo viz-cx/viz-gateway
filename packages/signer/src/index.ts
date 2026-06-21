@@ -3,14 +3,16 @@ import {
   actionFromWire,
   createStore,
   loadConfig,
+  type SolanaMintProposal,
   type TonMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
 import { KeyedSigner } from "./keyedSigner";
+import { routeApproval } from "./routeApproval";
 
 interface ApproveRequest {
   action: Record<string, unknown>;
-  proposal: VizReleaseProposal | TonMintProposal;
+  proposal: VizReleaseProposal | TonMintProposal | SolanaMintProposal;
 }
 
 /**
@@ -49,11 +51,7 @@ async function main(): Promise<void> {
           }
           const req = JSON.parse(body) as ApproveRequest;
           const action = actionFromWire(req.action);
-          const proposal = req.proposal;
-          const approval =
-            action.direction === "PEG_IN"
-              ? await signer.approveTonMint(action, proposal as TonMintProposal)
-              : await signer.signVizRelease(action, proposal as VizReleaseProposal);
+          const approval = await routeApproval(signer, action, req.proposal);
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify(approval));
         } catch (err) {
