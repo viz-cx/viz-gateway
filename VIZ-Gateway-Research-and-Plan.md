@@ -288,7 +288,7 @@ viz-gateway/
 │  ├─ signer/                  # per-operator: validate event → sign VIZ partial / approve TON order
 │  ├─ coordinator/             # untrusted: collect T sigs, assemble + broadcast
 │  └─ recon/                   # supply vs locked reconciliation + auto-pause
-└─ contracts-ton/              # jetton minter (from stablecoin-contract) + multisig-v2 deploy scripts
+└─ contracts/ton/              # jetton minter (from stablecoin-contract) + multisig-v2 deploy scripts
 ```
 
 The accompanying scaffold in this repo implements the structure above with
@@ -305,7 +305,7 @@ multi-stage Dockerfiles, and `docker-compose` for a complete operator node.
 - **signer** — the only component with keys. Validates an event independently against its own nodes + caps + idempotency, then produces either a VIZ partial signature (secp256k1) or a TON multisig approval (ed25519). Keys behind a `Signer` interface: file-backed for dev, HSM/KMS for prod.
 - **coordinator** — keyless. Holds the canonical tx, collects approvals, broadcasts once `T` reached. Stateless w.r.t. trust; can be self-hosted by any operator.
 - **recon** — recomputes `wVIZ totalSupply` vs `gateway VIZ balance` every N seconds; trips the global pause on drift.
-- **contracts-ton** — deploy/init scripts for `multisig-contract-v2` (set 7 signers, threshold 5) and the Jetton minter (`stablecoin-contract`, admin = multisig address).
+- **contracts/ton** — deploy/init scripts for `multisig-contract-v2` (set 7 signers, threshold 5) and the Jetton minter (`stablecoin-contract`, admin = multisig address).
 
 ### 8.3 Phased delivery
 
@@ -345,7 +345,7 @@ separate compose file so any operator can run it.
 
 - **VIZ exact irreversibility count. [MEASURED].** Sampled on `https://node.viz.cx`: `head - last_irreversible_block_num` held steady at **14 blocks (~42 s)** — close to the ~15-block derivation. The wired watcher acts on `last_irreversible_block_num` minus a configurable safety margin (`VIZ_EXTRA_CONFIRMATIONS`, default 2), so it self-adjusts if the lag moves.
 - **viz-js-lib multisig signing path. [RESOLVED — see `tools/viz-multisig-spike.cjs`].** Verified: `auth.signTransaction(trx, keys)` signs a deterministic `chain_id + toBuffer(trx)` buffer and *appends* to `trx.signatures`. Signing is canonical/deterministic, and each operator's independently-produced signature is byte-identical to the one it would produce in a group signing — so operators sign in isolation and a keyless coordinator simply concatenates. The signature also binds to tx content (changing the amount changes the signature), so a malicious coordinator cannot swap the action under collected signatures. **One gotcha:** the returned `signatures` array is *unordered* (the library returned a rotated order); treat it as a set, never rely on position. The fallback (raw-transaction signing) is therefore not needed.
-- **TON multisig-v2 + jetton admin handoff. [SCRIPTS READY].** Deploy scripts exist in `contracts-ton/` (`deploy:multisig`, `deploy:minter`, `set-minter-admin`), dry-run-verified offline (metadata, init data, address calc, change_admin body, wallet derivation). Remaining: build the audited bytecode via Blueprint, deploy on testnet, and confirm the `stablecoin-contract` admin transfers to the multisig and mint/burn execute. The scripts deploy operator-supplied audited bytecode — they do not re-implement the contracts.
+- **TON multisig-v2 + jetton admin handoff. [SCRIPTS READY].** Deploy scripts exist in `contracts/ton/` (`deploy:multisig`, `deploy:minter`, `set-minter-admin`), dry-run-verified offline (metadata, init data, address calc, change_admin body, wallet derivation). Remaining: build the audited bytecode via Blueprint, deploy on testnet, and confirm the `stablecoin-contract` admin transfers to the multisig and mint/burn execute. The scripts deploy operator-supplied audited bytecode — they do not re-implement the contracts.
 - **TON finality buffer. [PARTIAL].** The wired `TonHttpChain` currently treats a burn as final using a *time* buffer derived from `TON_FINALITY_CONFIRMATIONS` (~5 s/masterchain block + margin). Refinement: gate precisely on masterchain block depth (map seqno → logical time) rather than wall-clock; measure on testnet. Live reads (seqno, jetton supply) and the `transfer_notification` parser are verified.
 - **Cap calibration.** Set per-tx / 24 h caps against realistic volume once you have it.
 
@@ -574,7 +574,7 @@ image       <hosted logo>
 external_url https://github.com/viz-cx/viz-gateway
 ```
 
-- **TON (TEP-64):** on-chain content dictionary with name/symbol/decimals/description/image (built by `contracts-ton/src/metadata.ts`).
+- **TON (TEP-64):** on-chain content dictionary with name/symbol/decimals/description/image (built by `contracts/ton/src/metadata.ts`).
 - **Solana (Token-2022):** on-mint metadata extension storing name/symbol/`uri` → the off-chain `metadata/wviz.json`; decimals set at mint init.
 
 Naming note: the bridge's wrapped token is **wVIZ** (VIZ wrapped on a remote

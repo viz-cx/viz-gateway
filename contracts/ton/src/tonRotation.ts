@@ -7,7 +7,7 @@ import type { OperatorRef, RotationProposal } from "@gateway/common";
 /**
  * An operator's multisig-v2 signer address = WalletContractV4(workchain 0) over
  * their ed25519 tonPubkey. Operators MUST use a V4 wallet on workchain 0 to be a
- * valid signer (matches contracts-ton/src/wallet.ts deployer derivation).
+ * valid signer (matches contracts/ton/src/wallet.ts deployer derivation).
  */
 export function tonSignerAddress(tonPubkeyHex: string): Address {
   const publicKey = Buffer.from(tonPubkeyHex, "hex");

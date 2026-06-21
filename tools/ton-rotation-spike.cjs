@@ -13,7 +13,7 @@ const {
   validateTonOrder,
   tonSignerSetHash,
   sameSignerSet,
-} = require("../contracts-ton/dist/tonRotation.js");
+} = require("../contracts/ton/dist/tonRotation.js");
 
 (async () => {
   // Two deterministic operator keypairs from fixed mnemonics.

@@ -33,8 +33,8 @@ packages/signer        the only component with keys; validates + signs (one per 
 packages/coordinator   UNTRUSTED; collects approvals, broadcasts once threshold met
 packages/recon         enforces locked-VIZ == circulating-wVIZ; auto-pauses on drift
 packages/solana-watcher  Solana remote-chain adapter + watcher (read path live; mint deferred)
-contracts-ton/         multisig-v2 + Jetton deploy scripts (dry-run by default) + setup
-contracts-solana/      Token-2022 wVIZ mint + SPL multisig deploy script (dry-run by default)
+contracts/ton/         multisig-v2 + Jetton deploy scripts (dry-run by default) + setup
+contracts/solana/      Token-2022 wVIZ mint + SPL multisig deploy script (dry-run by default)
 setup-viz/             one-time VIZ gateway account setup (3-of-4 guardian master)
 tools/threshold-calc.mjs   the federation-size numbers
 ```
@@ -110,7 +110,7 @@ secrets stay in each operator's `.env`. The TON side is on-chain and asynchronou
 `update_multisig_params` order, each current signer runs `rotate:ton approve-ton`,
 and `rotate:ton status` confirms once the multisig signer set has changed.
 
-**Solana is prepped** (`packages/solana-watcher`, `contracts-solana`) as the
+**Solana is prepped** (`packages/solana-watcher`, `contracts/solana`) as the
 second remote chain via the shared `RemoteChain` interface: the read adapter
 (finalized slot, supply, burn detection) is verified against live RPC, and the
 Token-2022 + SPL-multisig deploy script dry-runs. Solana's mint write-path is

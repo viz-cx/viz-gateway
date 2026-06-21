@@ -7,13 +7,13 @@ Fetched: 2026-06-21
 These are the official multisig-contract-v2 TypeScript wrappers, copied verbatim
 (cell encoding + get-methods only — no contract bytecode). Do not edit; re-vendor
 from a newer pinned commit if upstream changes. The audited compiled code BOC is
-supplied separately via MULTISIG_CODE_BOC (see contracts-ton/README.md).
+supplied separately via MULTISIG_CODE_BOC (see contracts/ton/README.md).
 
 ## tsconfig note
 
 The upstream repo does not set `noUncheckedIndexedAccess`; our base tsconfig does.
 This caused TS2345/TS18048 errors on loop-indexed arrays in Multisig.ts and Order.ts.
-`contracts-ton/tsconfig.json` overrides `noUncheckedIndexedAccess: false` to compile
+`contracts/ton/tsconfig.json` overrides `noUncheckedIndexedAccess: false` to compile
 these vendored files without modification.
 
 ## sha256

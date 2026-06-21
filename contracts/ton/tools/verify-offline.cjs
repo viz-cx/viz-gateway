@@ -2,7 +2,7 @@
 // code BOCs needed): wVIZ metadata round-trip, standard minter init data +
 // deterministic address, change_admin body, and deployer wallet derivation.
 //
-// Run: node contracts-ton/tools/verify-offline.cjs
+// Run: node contracts/ton/tools/verify-offline.cjs
 const assert = require("node:assert");
 const { Address, beginCell } = require("@ton/core");
 const { mnemonicNew } = require("@ton/crypto");

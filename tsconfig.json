@@ -8,8 +8,8 @@
     { "path": "packages/coordinator" },
     { "path": "packages/recon" },
     { "path": "packages/solana-watcher" },
-    { "path": "contracts-ton" },
-    { "path": "contracts-solana" },
+    { "path": "contracts/ton" },
+    { "path": "contracts/solana" },
     { "path": "setup-viz" }
   ]
 }

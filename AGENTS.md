@@ -20,7 +20,7 @@ active set governs itself via T-of-N rotation (see `setup-viz/src/rotate.ts` and
 | `packages/coordinator` | Keyless orchestration of a peg: builds the one shared proposal, collects partials, broadcasts. Not involved in operator rotation. |
 | `packages/recon` | Reconciliation / circuit-breaker. |
 | `setup-viz` | One-time VIZ account setup (`setupAccount.ts`) + the operator-rotation CLI (`rotate.ts`). |
-| `contracts-ton` / `contracts-solana` | Remote-chain contracts + deploy scripts. |
+| `contracts/ton` / `contracts/solana` | Remote-chain contracts + deploy scripts. |
 | `tools/*.cjs`, `tools/*.mjs` | Offline `node:assert` test/spike scripts — **this is the test suite** (no jest/vitest). |
 
 ## Build & test
@@ -76,6 +76,6 @@ revisit that override.
 `active`/`regular` to the new key set; `master` is omitted so only the current active T-of-N is required (no
 guardian). All partials bind the same TaPoS-fixed tx, so the ceremony must complete within VIZ's 1-hour
 window. The TON side (`npm run rotate:ton -- submit-ton|approve-ton|status`) is on-chain async
-approval via the vendored multisig-v2 wrappers (`contracts-ton/src/wrappers`, pinned);
+approval via the vendored multisig-v2 wrappers (`contracts/ton/src/wrappers`, pinned);
 signers are WalletV4 addresses derived from each operator's `tonPubkey`.
 See `RUNBOOK.md` → "Rotating the operator set".

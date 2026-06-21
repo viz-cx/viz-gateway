@@ -25,7 +25,7 @@ import { loadSolanaDeployConfig } from "./config";
  * Dry-run by default (prints the mint + multisig addresses and the metadata,
  * no network writes). Set DEPLOY_SEND=1 with SOLANA_PAYER_SECRET (+ a funded
  * devnet payer) to broadcast. Construction is verified offline
- * (contracts-solana/tools/verify-offline.cjs); validate the live deploy on devnet.
+ * (contracts/solana/tools/verify-offline.cjs); validate the live deploy on devnet.
  */
 async function main(): Promise<void> {
   const cfg = loadSolanaDeployConfig();

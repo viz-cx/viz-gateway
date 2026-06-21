@@ -120,7 +120,7 @@ DEPLOY_SEND=1 MINTER_ADDRESS=... MULTISIG_ADDRESS=... npm run set-minter-admin
 
 ### Offline verification
 
-`node contracts-ton/tools/verify-offline.cjs` checks the wVIZ metadata
+`node contracts/ton/tools/verify-offline.cjs` checks the wVIZ metadata
 round-trip, the standard minter init-data + address computation, the
 `change_admin` body, and deployer-wallet derivation — no network or BOCs needed.
 
