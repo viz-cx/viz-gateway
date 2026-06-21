@@ -27,6 +27,11 @@ export interface GatewayConfig {
     wvizMint: string;
     gatewayTokenAccount: string;
     finalitySlots: number;
+    multisig: string; // SPL multisig = mint authority (base58)
+    nonceAccount: string; // durable nonce account (base58)
+    signers: string[]; // multisig member pubkeys (base58)
+    signerSecret: Uint8Array | null; // THIS operator's solana key (for signing approvals)
+    submitterSecret: Uint8Array | null; // fee payer + nonce authority (proposer/submitter)
   };
   coordinator: { url: string; listen: string; signerEndpoints: string[] };
   caps: CapPolicy;
@@ -56,6 +61,16 @@ function int(name: string, dflt: number): number {
 
 function big(name: string, dflt: string): bigint {
   return BigInt(opt(name, dflt));
+}
+
+/** Parse a solana-keygen JSON byte-array secret into bytes (null if unset). */
+function solanaSecret(name: string): Uint8Array | null {
+  const v = process.env[name];
+  if (v === undefined || v.trim() === "") return null;
+  if (!v.trim().startsWith("[")) {
+    throw new Error(`${name} must be a JSON byte array (solana-keygen format).`);
+  }
+  return Uint8Array.from(JSON.parse(v) as number[]);
 }
 
 /**
@@ -150,6 +165,14 @@ export function loadConfig(): GatewayConfig {
       wvizMint: opt("SOLANA_WVIZ_MINT", ""),
       gatewayTokenAccount: opt("SOLANA_GATEWAY_TOKEN_ACCOUNT", ""),
       finalitySlots: int("SOLANA_FINALITY_SLOTS", 0),
+      multisig: opt("SOLANA_MULTISIG", ""),
+      nonceAccount: opt("SOLANA_NONCE_ACCOUNT", ""),
+      signers: opt("SOLANA_SIGNERS", "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      signerSecret: solanaSecret("SOLANA_SIGNER_SECRET"),
+      submitterSecret: solanaSecret("SOLANA_SUBMITTER_SECRET"),
     },
     coordinator: {
       url: opt("COORDINATOR_URL", "http://coordinator:8080"),

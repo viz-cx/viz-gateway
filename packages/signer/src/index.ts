@@ -21,7 +21,12 @@ interface ApproveRequest {
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  const signer = new KeyedSigner(cfg.operatorId, cfg.viz.signingWif, cfg.ton.signerMnemonic);
+  const signer = new KeyedSigner(
+    cfg.operatorId,
+    cfg.viz.signingWif,
+    cfg.ton.signerMnemonic,
+    cfg.solana.signerSecret,
+  );
   const store = createStore(cfg.storeUrl);
   const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8090").split(":");
   const port = Number.parseInt(portStr ?? "8090", 10);
