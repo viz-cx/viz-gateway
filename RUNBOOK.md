@@ -201,8 +201,7 @@ APPLY=1 VIZ_SIGNING_WIF=<op1-active-wif> npm run rotate -- broadcast viz rotatio
 `rotation-state.json { vizDone: true }`. Confirm with
 `viz.api.getAccounts(["<gateway>"])` that `active_authority.key_auths` equals the new
 set — this proves an active-only `account_update` lands with only active-authority
-signatures (no master). The TON side (`submit-ton`/`approve-ton`) ships in a
-follow-up.
+signatures (no master).
 
 > **Verification record — TODO (live testnet).** Everything in the rotation tool
 > is verified offline (`tools/rotation-spike.cjs`); the one claim still needing an
@@ -213,6 +212,32 @@ follow-up.
 > - [ ] broadcast tx id / block num
 > - [ ] confirmed `active_authority.key_auths` equals the new set
 >       (`viz.api.getAccounts(["<gateway>"])`)
+
+### TON side of a rotation (on-chain, asynchronous)
+
+After `broadcast viz` lands the VIZ side, rotate the TON multisig to the same new
+operator set. TON approval is **on-chain**: there is no off-chain signature file —
+each current signer sends their own `approve`. Signers are WalletV4 (workchain 0)
+addresses derived from each operator's `tonPubkey`.
+
+```bash
+# 1. A current signer submits the update order (dry-run, then APPLY=1)
+APPLY=1 TON_MULTISIG_ADDRESS=<addr> TON_SIGNER_MNEMONIC="<24 words>" \
+  npm run rotate:ton -- submit-ton rotation-proposal.json     # prints ORDER_ADDR
+# 2. Each OTHER current signer approves on-chain (validates the order vs the proposal first)
+APPLY=1 TON_SIGNER_MNEMONIC="<24 words>" npm run rotate:ton -- approve-ton <ORDER_ADDR>
+# 3. Anyone polls both chains; sets tonDone once the multisig signer set changed
+TON_MULTISIG_ADDRESS=<addr> npm run rotate:ton -- status
+```
+
+Because TON serializes config changes (a pending order is rejected once any update
+lands), only one rotation may be in flight at a time. `approve-ton` re-derives the
+expected order from the proposal and aborts unless the on-chain order is byte-identical.
+
+> **Verification record — TODO (live testnet).** Run the ceremony on TON testnet and record:
+> - [ ] date + endpoint + multisig address
+> - [ ] order address + executed=true
+> - [ ] `status` shows the multisig signer set == the new operator set
 
 ## Known gaps to close during bring-up
 

@@ -75,5 +75,7 @@ revisit that override.
 `npm run rotate -- propose|co-sign|broadcast viz`. A rotation is one VIZ `account_update` rewriting
 `active`/`regular` to the new key set; `master` is omitted so only the current active T-of-N is required (no
 guardian). All partials bind the same TaPoS-fixed tx, so the ceremony must complete within VIZ's 1-hour
-window. The TON side (`submit-ton`/`approve-ton`/`status`, on-chain async approval) is a deferred follow-up.
+window. The TON side (`npm run rotate:ton -- submit-ton|approve-ton|status`) is on-chain async
+approval via the vendored multisig-v2 wrappers (`contracts-ton/src/wrappers`, pinned);
+signers are WalletV4 addresses derived from each operator's `tonPubkey`.
 See `RUNBOOK.md` → "Rotating the operator set".

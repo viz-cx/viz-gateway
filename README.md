@@ -106,8 +106,9 @@ You can self-remove up to **N − T** operators while keeping liveness; below th
 recovery falls to the guardians. VIZ partials must be collected and broadcast within
 one hour (the chain's TaPoS window), so a rotation is a short coordinated ceremony.
 The public `federation.json` (operator ids + pubkeys) is committable; per-operator
-secrets stay in each operator's `.env`. (The TON side of rotation ships in a
-follow-up.)
+secrets stay in each operator's `.env`. The TON side is on-chain and asynchronous: `rotate:ton submit-ton` posts an
+`update_multisig_params` order, each current signer runs `rotate:ton approve-ton`,
+and `rotate:ton status` confirms once the multisig signer set has changed.
 
 **Solana is prepped** (`packages/solana-watcher`, `contracts-solana`) as the
 second remote chain via the shared `RemoteChain` interface: the read adapter
