@@ -176,6 +176,33 @@ using the `Multisig` wrapper from step 1. Once wired, the user receives wVIZ and
 - Confirm a below-minimum deposit (< 2,000 VIZ) is logged "below minimum; flag
   for refund" and not minted.
 
+## Rotating the operator set
+
+Any current operator can rotate the VIZ `active`/`regular` authority to a new
+operator set + threshold — no guardian, no master key. The new set is the
+**complete replacement**, given as `op-id=<vizPub>:<tonPub>` entries. All VIZ
+partials sign the same TaPoS-bound `account_update`, so the T partials must be
+collected and `broadcast` within VIZ's 1-hour window (the tool uses 55min). If the
+window lapses, restart from `propose`.
+
+```bash
+# 1. A current operator proposes (signs first partial, writes rotation-proposal.json)
+VIZ_SIGNING_WIF=<op1-active-wif> npm run rotate -- propose \
+  --operators "op-1=<k1>:aa,op-2=<k2>:bb,op-3=<k3>:cc" --threshold 2
+# 2. Other operators co-sign the SAME file (validates byte-identity, appends a partial)
+VIZ_SIGNING_WIF=<op2-active-wif> npm run rotate -- co-sign rotation-proposal.json
+# 3. Once T partials are collected, broadcast (dry-run by default; APPLY=1 to send)
+APPLY=1 VIZ_SIGNING_WIF=<op1-active-wif> npm run rotate -- broadcast viz rotation-proposal.json
+```
+
+`broadcast viz` re-reads the live `active` authority and aborts if it changed since
+`propose` (anti-rollback), then rewrites `federation.json` and writes
+`rotation-state.json { vizDone: true }`. Confirm with
+`viz.api.getAccounts(["<gateway>"])` that `active_authority.key_auths` equals the new
+set — this proves an active-only `account_update` lands with only active-authority
+signatures (no master). The TON side (`submit-ton`/`approve-ton`) ships in a
+follow-up.
+
 ## Known gaps to close during bring-up
 
 - **`submitMintOrder`** — wire the on-chain `new_order`/approve via the Multisig

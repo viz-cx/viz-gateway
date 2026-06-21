@@ -109,13 +109,76 @@ function coSign(): void {
   }
 }
 
+function diffOperators(prevKeys: string[], next: { id: string; vizPubkey: string }[]): string {
+  const prev = new Set(prevKeys);
+  const nextKeys = new Set(next.map((o) => o.vizPubkey));
+  const added = next.filter((o) => !prev.has(o.vizPubkey)).map((o) => o.id);
+  const removed = prevKeys.filter((k) => !nextKeys.has(k));
+  return `added: [${added.join(", ") || "none"}]  removed-keys: ${removed.length}`;
+}
+
+async function broadcastViz(): Promise<void> {
+  const file = process.argv[4] || "rotation-proposal.json"; // argv[3] is "viz"
+  const stateFile = arg("state") || "rotation-state.json";
+  const manifestOut = arg("manifest") || "federation.json";
+  const apply = process.env.APPLY === "1";
+
+  const proposal = JSON.parse(readFileSync(file, "utf8")) as RotationProposal;
+  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now() });
+  const have = proposal.vizTx.signatures.length;
+  if (have < proposal.newThreshold) {
+    throw new Error(`only ${have}/${proposal.newThreshold} partials collected`);
+  }
+
+  // Anti-rollback: the live active authority must still match propose-time.
+  const account = await readGatewayAccount();
+  const liveHash = authorityHash(account.active_authority);
+  if (liveHash !== proposal.currentActiveHash) {
+    throw new Error(
+      "live active authority changed since propose (another rotation landed?). " +
+        "Re-run propose against the current set.",
+    );
+  }
+
+  const prevKeys = account.active_authority.key_auths.map((k) => k[0]);
+  console.log(`[broadcast viz] ${diffOperators(prevKeys, proposal.newOperators)}`);
+  console.log(`[broadcast viz] new threshold ${proposal.newThreshold}-of-${proposal.newOperators.length}`);
+
+  if (!apply) {
+    console.log("[broadcast viz] DRY-RUN. Set APPLY=1 to broadcast.");
+    return;
+  }
+
+  const res = await call<BroadcastResult>((cb) =>
+    viz.api.broadcastTransactionSynchronous(
+      { ...proposal.vizTx, signatures: proposal.vizTx.signatures },
+      cb,
+    ),
+  );
+  console.log(`[broadcast viz] account_update broadcast: ${res.id ?? "(no id)"}`);
+
+  writeFileSync(
+    stateFile,
+    JSON.stringify({ proposalFile: file, vizDone: true, tonOrderAddress: "", tonDone: false }, null, 2),
+  );
+  writeFileSync(
+    manifestOut,
+    JSON.stringify(
+      { chainId: proposal.chainId, n: proposal.newOperators.length, threshold: proposal.newThreshold, operators: proposal.newOperators },
+      null,
+      2,
+    ),
+  );
+  console.log(`[broadcast viz] wrote ${stateFile} and ${manifestOut}. TON side: run the follow-up plan's submit-ton/approve-ton.`);
+}
+
 async function main(): Promise<void> {
   viz.config.set("websocket", NODE_URL);
   const sub = process.argv[2];
   const action = process.argv[3];
   if (sub === "propose") return propose();
   if (sub === "co-sign") return coSign();
-  // broadcast added in a later task
+  if (sub === "broadcast" && action === "viz") return broadcastViz();
   throw new Error(`unknown subcommand: ${sub} ${action ?? ""}`.trim());
 }
 
