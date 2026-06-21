@@ -44,6 +44,21 @@ The repo pins `typescript ^5.4.0`. TS **6.x/7.x hard-errors** on this repo's `ba
 the build fails with `TS5101`/`TS5107`. **Always `npm install` first** so the local pinned 5.x tsc
 (`node_modules/.bin/tsc`) is used.
 
+## Dependency security
+
+`npm audit` flags advisories in transitive deps of `@solana/web3.js` and `viz-js-lib`, none in our own code.
+Triaged 2026-06-21 — **accepted** (don't re-triage; revisit only on dependency upgrades):
+
+| Advisory | Sev | Via | Why accepted |
+|----------|-----|-----|--------------|
+| `babel-traverse@6.26.0` (ACE on compile) | critical | `viz-js-lib`→`babel-preset-env@1.7.0` | Build-time transpiler only; viz-js-lib ships precompiled `lib/`, gateway never runs babel. No fix (babel 6 EOL; no `babel-traverse@7`). |
+| `bigint-buffer@1.1.5` (buffer overflow) | high | `@solana/spl-token`→`buffer-layout-utils` | No upstream patch (1.1.5 is latest). Solana write-path deferred; read path parses trusted-RPC data. Clears when spl-token drops the dep. |
+| `uuid@8.3.2` (bounds check) | moderate | `@solana/web3.js`→`jayson` | Not exploitable — jayson uses `v4()`, never the vulnerable `buf` arg. |
+
+The one advisory that **was** fixed: `ws` (high DoS) — patched via the `overrides: { "ws": "^8.18.0" }` in the
+root `package.json` (viz-js-lib pins `ws@^1.x`, no in-range fix). If you add a dep that needs ws@1 behavior,
+revisit that override.
+
 ## Conventions
 
 - **Match the surrounding file**: comment density, naming, idiom. Code is terse and well-commented at decision points.
