@@ -9,6 +9,7 @@ import {
   validateProposal,
   addPartial,
   type RotationProposal,
+  type RotationState,
 } from "@gateway/common";
 
 function call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
@@ -157,10 +158,8 @@ async function broadcastViz(): Promise<void> {
   );
   console.log(`[broadcast viz] account_update broadcast: ${res.id ?? "(no id)"}`);
 
-  writeFileSync(
-    stateFile,
-    JSON.stringify({ proposalFile: file, vizDone: true, tonOrderAddress: "", tonDone: false }, null, 2),
-  );
+  const initialState: RotationState = { proposalFile: file, vizDone: true, tonOrderAddress: "", tonDone: false };
+  writeFileSync(stateFile, JSON.stringify(initialState, null, 2));
   writeFileSync(
     manifestOut,
     JSON.stringify(
