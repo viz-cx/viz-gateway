@@ -98,14 +98,27 @@ export interface TonMintProposal {
 }
 
 /**
- * A Solana mint proposal. SPL multisig collects M signatures on a SINGLE
- * transaction (off-chain-collected, like VIZ), so the wired write-path will
- * carry the unsigned mint_to transaction for signers to co-sign. Deferred until
- * the TON round-trip validates the RemoteChain interface.
+ * A Solana mint proposal. The SPL multisig collects M ed25519 signatures on a
+ * SINGLE transaction (off-chain, like VIZ). The tx uses a durable NONCE instead
+ * of a recent blockhash, so the signed bytes never expire until the nonce is
+ * consumed — operators sign asynchronously. `messageB64` is the exact compiled
+ * (legacy) message every operator signs; the structured fields let each operator
+ * rebuild and verify those bytes before signing.
+ *
+ * `signers` is the chosen signing SUBSET (size = threshold M), sorted ascending:
+ * mint_to marks every listed signer as required, so all of them must sign.
  */
 export interface SolanaMintProposal {
   recipient: string; // base58 owner address to receive wVIZ
   amountMilliViz: string;
+  mint: string; // wVIZ Token-2022 mint (base58)
+  multisig: string; // SPL multisig = mint authority (base58)
+  signers: string[]; // M member pubkeys (base58), sorted ascending — the multiSigners
+  feePayer: string; // submitter pubkey: fee payer + nonce authority + ATA funder (base58)
+  nonceAccount: string; // durable nonce account (base58)
+  nonceValue: string; // stored nonce (blockhash-equivalent) at proposal time (base58)
+  decimals: number; // 3
+  messageB64: string; // base64 of the compiled legacy message bytes (the signed digest)
 }
 
 /** An operator's public identity on both chains. */
