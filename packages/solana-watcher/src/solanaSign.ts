@@ -36,20 +36,26 @@ export function recipientAta(p: SolanaMintProposal): PublicKey {
   );
 }
 
-/** Rebuild the EXACT unsigned mint transaction from a proposal. */
+/**
+ * Rebuild the EXACT unsigned mint transaction from a proposal.
+ *
+ * Durable-nonce shape: `recentBlockhash` is set to the stored nonce value and
+ * the first instruction is `nonceAdvance` — the runtime treats this as a nonce
+ * transaction (the bytes never expire until the nonce is consumed).
+ */
 export function buildMintTx(p: SolanaMintProposal): Transaction {
   const submitter = new PublicKey(p.feePayer);
   const advance = SystemProgram.nonceAdvance({
     noncePubkey: new PublicKey(p.nonceAccount),
     authorizedPubkey: submitter,
   });
-  const tx = new Transaction({
-    feePayer: submitter,
-    nonceInfo: { nonce: p.nonceValue, nonceInstruction: advance },
-  });
+  const tx = new Transaction();
+  tx.feePayer = submitter;
+  tx.recentBlockhash = p.nonceValue;
   const ata = recipientAta(p);
   const multiSigners = p.signers.map((s) => new PublicKey(s));
   tx.add(
+    advance,
     createAssociatedTokenAccountIdempotentInstruction(
       submitter,
       ata,
