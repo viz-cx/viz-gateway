@@ -120,7 +120,7 @@ async function approveTon(): Promise<void> {
   // Proposal is the spec each approver re-validates against. Default to the
   // standard filename; allow --proposal to override.
   const proposal = readProposal(fileFromFlag || "rotation-proposal.json");
-  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now() });
+  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now(), skipExpiry: true });
 
   const c = client();
   const order = c.open(Order.createFromAddress(Address.parse(orderArg)));
@@ -143,6 +143,9 @@ async function approveTon(): Promise<void> {
   }
 
   const approved = od.approvals.filter(Boolean).length;
+  if (od.expiration_date !== null && od.expiration_date < BigInt(Math.floor(Date.now() / 1000))) {
+    throw new Error(`[approve-ton] order expired at ${new Date(Number(od.expiration_date) * 1000).toISOString()}`);
+  }
   console.log(`[approve-ton] order validated; ${approved}/${od.threshold ?? "?"} approved; your signer index ${myIdx}`);
   if (!apply) {
     console.log("[approve-ton] DRY-RUN. Set APPLY=1 to send your on-chain approve.");

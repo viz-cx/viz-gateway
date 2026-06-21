@@ -156,7 +156,7 @@ export function buildProposal(a: BuildProposalArgs): RotationProposal {
  */
 export function validateProposal(
   p: RotationProposal,
-  ctx: { chainId: string; nowMs: number },
+  ctx: { chainId: string; nowMs: number; skipExpiry?: boolean },
 ): void {
   if (p.version !== 1) throw new Error(`unsupported proposal version ${p.version}`);
   if (p.chainId !== ctx.chainId) {
@@ -179,7 +179,7 @@ export function validateProposal(
   // VIZ expiration is UTC without suffix; treat as UTC.
   const expMs = Date.parse(`${p.vizTx.expiration}Z`);
   if (Number.isNaN(expMs)) throw new Error(`bad expiration: ${p.vizTx.expiration}`);
-  if (ctx.nowMs >= expMs) throw new Error("proposal expired (re-run propose for a fresh TaPoS window)");
+  if (!ctx.skipExpiry && ctx.nowMs >= expMs) throw new Error("proposal expired (re-run propose for a fresh TaPoS window)");
 }
 
 /** Append a partial signature (deduped, order-independent). Returns a new proposal. */
