@@ -93,6 +93,22 @@ rogue signers. Defaults to **1-of-1** so a single operator (you) can run a
 working bridge solo; grow by adding signer keys and raising the threshold — no
 redeploy.
 
+### Open operator set & rotation
+
+Operators need **no VIZ validator status** — an operator is just a VIZ secp256k1 +
+TON ed25519 keypair the existing operators chose to trust. The active set governs
+itself: any operator runs `rotate propose` with the new set + threshold, others
+`rotate co-sign`, and once T partials are collected `rotate broadcast viz` rewrites
+the gateway's VIZ `active` authority. No guardian on the normal path; the
+`MASTER_GUARDIANS` council is last-resort recovery only.
+
+You can self-remove up to **N − T** operators while keeping liveness; below that,
+recovery falls to the guardians. VIZ partials must be collected and broadcast within
+one hour (the chain's TaPoS window), so a rotation is a short coordinated ceremony.
+The public `federation.json` (operator ids + pubkeys) is committable; per-operator
+secrets stay in each operator's `.env`. (The TON side of rotation ships in a
+follow-up.)
+
 **Solana is prepped** (`packages/solana-watcher`, `contracts-solana`) as the
 second remote chain via the shared `RemoteChain` interface: the read adapter
 (finalized slot, supply, burn detection) is verified against live RPC, and the

@@ -353,6 +353,17 @@ separate compose file so any operator can run it.
 
 ## 11. Validator-run federation (dynamic TOP-11)
 
+> **Superseded (2026-06-21).** This section's validator-tied federation is replaced
+> by the open trusted-operator model — operators need no validator status, and the
+> active set rotates itself by T-of-N consensus. See
+> `specs/2026-06-21-open-operator-rotation-design.md`.
+>
+> **Correction to §11.2:** the "master may be required for account_update" caveat is
+> **false** for active-set rotation. Verified in `viz-cpp-node`
+> (`chain_operations.hpp` / `chain_evaluator.cpp`): changing `active` alone requires
+> only the current **active** authority; `master` is required only when the op changes
+> `master` itself. The active T-of-N rotates itself with no guardian.
+
 A natural way to run this gateway is to let VIZ's existing **TOP-11 witnesses**
 (the eleven top-voted delegates, the stable core of the 21-slot round) be the
 federation operators. They already run hardened infrastructure, are continuously
