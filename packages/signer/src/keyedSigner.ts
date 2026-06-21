@@ -2,12 +2,14 @@ import type {
   Approval,
   CanonicalAction,
   Signer,
+  SolanaMintProposal,
   TonMintProposal,
   VizReleaseProposal,
 } from "@gateway/common";
 import { milliToViz } from "@gateway/viz-watcher/dist/vizChain";
 import { signRelease } from "@gateway/viz-watcher/dist/vizSign";
 import { keyPairFromMnemonic, signMintApproval } from "@gateway/ton-watcher/dist/tonSign";
+import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
 
 /**
  * The ONLY component that holds keys. Each operator runs exactly one.
@@ -25,6 +27,7 @@ export class KeyedSigner implements Signer {
     public readonly operatorId: string,
     private readonly vizWif: string,
     private readonly tonMnemonic: string,
+    private readonly solanaSecret: Uint8Array | null = null,
   ) {}
 
   async signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval> {
@@ -53,6 +56,19 @@ export class KeyedSigner implements Signer {
     if (!this.tonMnemonic) throw new Error("TON signer mnemonic not set; refusing to sign");
     const { secretKey } = await keyPairFromMnemonic(this.tonMnemonic);
     const signature = signMintApproval(proposal, secretKey);
+    return { actionId: action.id, operatorId: this.operatorId, signature };
+  }
+
+  async approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval> {
+    if (action.direction !== "PEG_IN") throw new Error("approveSolanaMint expects a PEG_IN action");
+    if (proposal.recipient !== action.recipient) {
+      throw new Error(`proposal.recipient (${proposal.recipient}) != action.recipient (${action.recipient})`);
+    }
+    if (proposal.amountMilliViz !== action.amountMilliViz.toString()) {
+      throw new Error(`proposal amount (${proposal.amountMilliViz}) != action amount (${action.amountMilliViz})`);
+    }
+    if (!this.solanaSecret) throw new Error("Solana signer secret not set; refusing to sign");
+    const signature = signMint(proposal, this.solanaSecret);
     return { actionId: action.id, operatorId: this.operatorId, signature };
   }
 }
