@@ -88,8 +88,9 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
       );
     }
     const raw = buildSignedMintTx(proposal, mintAuth, this.writer.submitterSecret);
+    // Returns the tx signature once accepted by the cluster (like TON's op id).
+    // Finality is observed separately via the recon loop's supply read.
     const sig = await this.conn.sendRawTransaction(raw, { skipPreflight: false });
-    await this.conn.confirmTransaction(sig, "finalized");
     return sig;
   }
 
