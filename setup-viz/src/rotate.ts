@@ -86,12 +86,36 @@ async function propose(): Promise<void> {
   console.log(`[propose] expires ${withSig.vizTx.expiration}Z — collect ${newThreshold} partials and broadcast within the hour.`);
 }
 
+function coSign(): void {
+  const file = process.argv[3];
+  const wif = process.env.VIZ_SIGNING_WIF || "";
+  if (!file) throw new Error("co-sign needs a proposal file path");
+  if (!wif) throw new Error("VIZ_SIGNING_WIF (your operator active key) is required to co-sign");
+
+  const proposal = JSON.parse(readFileSync(file, "utf8")) as RotationProposal;
+  // Trust-critical: rebuild the op and reject anything not matching the claimed
+  // set/threshold, wrong chainId, or expired. Network not required.
+  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now() });
+
+  const signed = viz.auth.signTransaction({ ...proposal.vizTx, signatures: [] }, [wif]);
+  const mySig = signed.signatures?.[signed.signatures.length - 1];
+  if (!mySig) throw new Error("signTransaction produced no signature");
+  const updated = addPartial(proposal, mySig);
+
+  writeFileSync(file, JSON.stringify(updated, null, 2));
+  console.log(`[co-sign] appended partial; ${updated.vizTx.signatures.length} collected (need ${updated.newThreshold}).`);
+  if (updated.vizTx.signatures.length >= updated.newThreshold) {
+    console.log("[co-sign] threshold reached — ready for `rotate broadcast viz`.");
+  }
+}
+
 async function main(): Promise<void> {
   viz.config.set("websocket", NODE_URL);
   const sub = process.argv[2];
   const action = process.argv[3];
   if (sub === "propose") return propose();
-  // co-sign / broadcast added in later tasks
+  if (sub === "co-sign") return coSign();
+  // broadcast added in a later task
   throw new Error(`unknown subcommand: ${sub} ${action ?? ""}`.trim());
 }
 
