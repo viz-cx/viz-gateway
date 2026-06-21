@@ -1,5 +1,6 @@
-import { Connection, PublicKey } from "@solana/web3.js";
-import type { RemoteBurn, RemoteChain, SolanaMintProposal } from "@gateway/common";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import type { CanonicalAction, RemoteBurn, RemoteChain, SolanaMintProposal } from "@gateway/common";
+import { buildSignedMintTx, mintMessageB64 } from "./solanaSign";
 
 /**
  * Solana remote-chain adapter (read paths live; mint write-path deferred).
@@ -21,17 +22,25 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
   private readonly gatewayTokenAccount: PublicKey | null;
   /** Confirmations buffer in slots, on top of 'finalized'. */
   private readonly finalitySlots: number;
+  /** Write-path (mint) config; null on read-only watchers. */
+  private readonly writer: {
+    multisig: string;
+    nonceAccount: string;
+    submitterSecret: Uint8Array;
+  } | null;
 
   constructor(
     rpcUrl: string,
     mintAddress: string,
     gatewayTokenAccount: string,
     finalitySlots: number,
+    writer: { multisig: string; nonceAccount: string; submitterSecret: Uint8Array } | null = null,
   ) {
     this.conn = new Connection(rpcUrl, "finalized");
     this.mint = new PublicKey(mintAddress);
     this.gatewayTokenAccount = gatewayTokenAccount ? new PublicKey(gatewayTokenAccount) : null;
     this.finalitySlots = Math.max(0, finalitySlots);
+    this.writer = writer;
   }
 
   async finalizedHeight(): Promise<number> {
@@ -70,14 +79,45 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     return burns;
   }
 
-  async submitMint(proposal: SolanaMintProposal, _mintAuth: string[]): Promise<string> {
-    // Deferred: build a mint_to instruction with the SPL multisig as authority,
-    // collect M signer signatures on the one transaction (off-chain, like VIZ),
-    // and submit. Wire after the TON round-trip validates RemoteChain.
-    throw new Error(
-      `Solana submitMint deferred (recipient ${proposal.recipient}). SPL multisig mint = ` +
-        `M signatures on one tx; wire after TON validates the interface. See plan §13.`,
-    );
+  async submitMint(proposal: SolanaMintProposal, mintAuth: string[]): Promise<string> {
+    if (!this.writer) throw new Error("SolanaChain has no writer config; cannot submit a mint");
+    if (proposal.signers.length === 0) throw new Error("proposal has no signers");
+    if (mintAuth.length < proposal.signers.length) {
+      throw new Error(
+        `mintAuth has ${mintAuth.length} signatures; proposal requires all ${proposal.signers.length}`,
+      );
+    }
+    const raw = buildSignedMintTx(proposal, mintAuth, this.writer.submitterSecret);
+    const sig = await this.conn.sendRawTransaction(raw, { skipPreflight: false });
+    await this.conn.confirmTransaction(sig, "finalized");
+    return sig;
+  }
+
+  /**
+   * Proposer side: build the shared mint proposal for a PEG_IN action. Fetches
+   * the durable nonce (live RPC), derives the recipient ATA, and pins the exact
+   * message bytes every operator will sign. `signerSet` is the chosen signing
+   * subset (size = threshold M); all of them must sign.
+   */
+  async buildMintProposal(action: CanonicalAction, signerSet: string[]): Promise<SolanaMintProposal> {
+    if (action.direction !== "PEG_IN") throw new Error("buildMintProposal expects a PEG_IN action");
+    if (!this.writer) throw new Error("SolanaChain has no writer config; cannot build a mint proposal");
+    const nonce = await this.conn.getNonce(new PublicKey(this.writer.nonceAccount));
+    if (!nonce) throw new Error(`nonce account ${this.writer.nonceAccount} not found`);
+    const proposal: SolanaMintProposal = {
+      recipient: action.recipient,
+      amountMilliViz: action.amountMilliViz.toString(),
+      mint: this.mint.toBase58(),
+      multisig: this.writer.multisig,
+      signers: [...signerSet].sort(),
+      feePayer: Keypair.fromSecretKey(this.writer.submitterSecret).publicKey.toBase58(),
+      nonceAccount: this.writer.nonceAccount,
+      nonceValue: nonce.nonce,
+      decimals: 3,
+      messageB64: "",
+    };
+    proposal.messageB64 = mintMessageB64(proposal);
+    return proposal;
   }
 }
 
