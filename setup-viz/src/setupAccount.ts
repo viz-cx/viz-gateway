@@ -9,7 +9,7 @@ import { multisigAuthority } from "./authority";
  *
  * It sets:
  *   active  = the operational signer set (e.g. 1-of-1 at bootstrap, 7-of-11 later)
- *   master  = the 3-of-4 guardian council [on1x, lex, id, denis-skripnik]
+ *   master  = the guardian council (MASTER_GUARDIANS, e.g. 3-of-4); recovery only
  *   regular = same as active (non-fund operations)
  * and optionally change_recovery_account to a separate conservative account.
  *
@@ -26,6 +26,9 @@ async function main(): Promise<void> {
 
   if (cfg.activeAccounts.length === 0 && cfg.activeKeys.length === 0) {
     throw new Error("Set ACTIVE_ACCOUNTS and/or ACTIVE_KEYS (the operational signer set).");
+  }
+  if (cfg.guardians.length === 0) {
+    throw new Error("Set MASTER_GUARDIANS (the guardian council accounts) — no default is provided.");
   }
 
   const active = multisigAuthority(cfg.activeAccounts, cfg.activeThreshold, cfg.activeKeys);

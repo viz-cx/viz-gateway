@@ -42,8 +42,9 @@ export function loadSetupConfig(): SetupConfig {
     activeKeys: list(opt("ACTIVE_KEYS", "")),
     activeThreshold: int("ACTIVE_THRESHOLD", 1),
 
-    // The 3-of-4 guardian council. Defaults to the named validators.
-    guardians: list(opt("MASTER_GUARDIANS", "on1x,lex,id,denis-skripnik")),
+    // The guardian council (last-resort recovery only). No default — must be set
+    // explicitly so a deployment never silently inherits example validator names.
+    guardians: list(opt("MASTER_GUARDIANS", "")),
     masterThreshold: int("MASTER_THRESHOLD", 3),
 
     recoveryAccount: opt("RECOVERY_ACCOUNT", ""),
