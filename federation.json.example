@@ -1,0 +1,10 @@
+{
+  "chainId": "viz-gateway",
+  "n": 3,
+  "threshold": 2,
+  "operators": [
+    { "id": "op-1", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" },
+    { "id": "op-2", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" },
+    { "id": "op-3", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" }
+  ]
+}

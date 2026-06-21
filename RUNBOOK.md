@@ -106,15 +106,16 @@ initial master key. Then set its authorities with the setup utility:
 VIZ_NODE_URL=https://node.viz.cx \
 GATEWAY_ACCOUNT=viz-gateway \
 ACTIVE_ACCOUNTS=<your_viz_account>   ACTIVE_THRESHOLD=1 \
-MASTER_GUARDIANS=on1x,lex,id,denis-skripnik   MASTER_THRESHOLD=3 \
+MASTER_GUARDIANS=<guardian-1,guardian-2,...>   MASTER_THRESHOLD=3 \
 RECOVERY_ACCOUNT=<separate conservative account> \
 npm run setup:viz-account          # dry-run prints the authorities + current state
 APPLY=1 GATEWAY_MASTER_WIF=<current master key> npm run setup:viz-account
 ```
 
-After this: `active` = your key (1-of-1), `master` = the 3-of-4 guardian council,
-`recovery_account` set. Note: `change_recovery_account` takes effect after VIZ's
-owner-recovery delay.
+`MASTER_GUARDIANS` has **no default** — set it explicitly to the recovery council
+accounts (the setup aborts if unset). After this: `active` = your key (1-of-1),
+`master` = the guardian council (e.g. 3-of-4, recovery only), `recovery_account`
+set. Note: `change_recovery_account` takes effect after VIZ's owner-recovery delay.
 
 ## 5. Configure `.env`
 
@@ -202,6 +203,16 @@ APPLY=1 VIZ_SIGNING_WIF=<op1-active-wif> npm run rotate -- broadcast viz rotatio
 set — this proves an active-only `account_update` lands with only active-authority
 signatures (no master). The TON side (`submit-ton`/`approve-ton`) ships in a
 follow-up.
+
+> **Verification record — TODO (live testnet).** Everything in the rotation tool
+> is verified offline (`tools/rotation-spike.cjs`); the one claim still needing an
+> on-chain proof is that VIZ accepts an active-only `account_update` with no master
+> signature. Run the 3-command ceremony above on VIZ **testnet** against a gateway
+> account whose `active` is a key-set you control, then record here:
+> - [ ] date + node URL
+> - [ ] broadcast tx id / block num
+> - [ ] confirmed `active_authority.key_auths` equals the new set
+>       (`viz.api.getAccounts(["<gateway>"])`)
 
 ## Known gaps to close during bring-up
 
