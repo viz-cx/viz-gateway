@@ -5,6 +5,7 @@
   "main": "dist/setupAccount.js",
   "scripts": { "build": "tsc -b" },
   "dependencies": {
+    "@gateway/common": "0.1.0",
     "viz-js-lib": "^0.12.6"
   }
 }
