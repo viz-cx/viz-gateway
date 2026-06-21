@@ -1,6 +1,7 @@
+import { readFileSync, existsSync } from "node:fs";
 import type { CapPolicy } from "./caps";
 import type { FeePolicy } from "./fees";
-import type { FederationManifest } from "./types";
+import type { FederationManifest, OperatorRef } from "./types";
 
 export interface GatewayConfig {
   service: string;
@@ -57,6 +58,37 @@ function big(name: string, dflt: string): bigint {
   return BigInt(opt(name, dflt));
 }
 
+/**
+ * Parse a federation manifest object (the committed federation.json). The
+ * running gateway reads this to know the operator set + their pubkeys; the
+ * rotation tool rewrites it after a successful rotation.
+ */
+export function parseManifest(raw: unknown): FederationManifest {
+  const o = raw as Record<string, unknown>;
+  const n = Number(o["n"]);
+  const threshold = Number(o["threshold"]);
+  const opsRaw = o["operators"];
+  if (!Array.isArray(opsRaw)) throw new Error("federation manifest: operators must be an array");
+  const operators: OperatorRef[] = opsRaw.map((x, i) => {
+    const e = x as Record<string, unknown>;
+    const id = String(e["id"] ?? "");
+    const vizPubkey = String(e["vizPubkey"] ?? "");
+    const tonPubkey = String(e["tonPubkey"] ?? "");
+    if (!id) throw new Error(`federation manifest: operators[${i}] missing id`);
+    return { id, vizPubkey, tonPubkey };
+  });
+  if (!Number.isInteger(n) || !Number.isInteger(threshold)) {
+    throw new Error("federation manifest: n and threshold must be integers");
+  }
+  if (operators.length !== n) {
+    throw new Error(`federation manifest: operators.length ${operators.length} != n ${n}`);
+  }
+  if (threshold <= 0 || threshold > n) {
+    throw new Error(`federation manifest: threshold ${threshold} must be in 1..${n}`);
+  }
+  return { n, threshold, operators };
+}
+
 /** Load and validate config from environment. Throws on invalid federation. */
 export function loadConfig(): GatewayConfig {
   // Defaults to 1-of-1 for a solo bootstrap launch. Grow by adding signer keys
@@ -73,16 +105,30 @@ export function loadConfig(): GatewayConfig {
     );
   }
 
-  const operators = Array.from({ length: n }, (_, i) => ({
-    id: `op-${i + 1}`,
-    vizPubkey: "",
-    tonPubkey: "",
-  }));
+  // Prefer a committed manifest (operator pubkeys); fall back to count-only
+  // synthesis so a fresh 1-of-1 bootstrap still boots before any rotation.
+  const manifestPath = opt("FEDERATION_MANIFEST", "./federation.json");
+  let federation: FederationManifest;
+  if (existsSync(manifestPath)) {
+    federation = parseManifest(JSON.parse(readFileSync(manifestPath, "utf8")));
+    if (federation.threshold <= Math.floor(federation.n / 2)) {
+      console.warn(
+        `[config] WARNING: threshold ${federation.threshold}-of-${federation.n} is not a strict majority; theft tolerance is only ${federation.threshold - 1}.`,
+      );
+    }
+  } else {
+    const operators: OperatorRef[] = Array.from({ length: n }, (_, i) => ({
+      id: `op-${i + 1}`,
+      vizPubkey: "",
+      tonPubkey: "",
+    }));
+    federation = { n, threshold, operators };
+  }
 
   return {
     service: opt("SERVICE", "signer"),
     operatorId: opt("OPERATOR_ID", "op-1"),
-    federation: { n, threshold, operators },
+    federation,
     viz: {
       // Accepts http(s):// or ws(s)://; viz-js-lib picks the transport from the scheme.
       nodeUrl: opt("VIZ_NODE_URL", opt("VIZ_NODE_WS", "https://node.viz.cx")),
