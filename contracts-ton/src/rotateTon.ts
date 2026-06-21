@@ -1,0 +1,126 @@
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { Address, toNano } from "@ton/core";
+import { TonClient, WalletContractV4 } from "@ton/ton";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import {
+  validateProposal,
+  mergeState,
+  type RotationProposal,
+  type RotationState,
+} from "@gateway/common";
+import { Multisig } from "./wrappers/Multisig";
+import type { Order } from "./wrappers/Order";
+import {
+  buildUpdateAction,
+  packRotationOrder,
+  validateTonOrder,
+  tonSignerAddress,
+  sameSignerSet,
+} from "./tonRotation";
+
+function arg(name: string): string | undefined {
+  const pfx = `--${name}=`;
+  const hit = process.argv.find((a) => a.startsWith(pfx));
+  if (hit) return hit.slice(pfx.length);
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+const ENDPOINT = process.env.TON_ENDPOINT || "https://toncenter.com/api/v2/jsonRPC";
+const API_KEY = process.env.TON_API_KEY || "";
+const MULTISIG = process.env.TON_MULTISIG_ADDRESS || "";
+const CHAIN_ID = process.env.ROTATION_CHAIN_ID || "viz-gateway";
+const MNEMONIC = process.env.TON_SIGNER_MNEMONIC || "";
+// Orders allow a long expiration (unlike VIZ's 1h); default 48h for async approval.
+const ORDER_TTL_SEC = Number.parseInt(process.env.TON_ORDER_TTL_SEC || "172800", 10);
+
+function client(): TonClient {
+  return new TonClient({ endpoint: ENDPOINT, apiKey: API_KEY || undefined, timeout: 15000 });
+}
+
+function readProposal(file: string): RotationProposal {
+  return JSON.parse(readFileSync(file, "utf8")) as RotationProposal;
+}
+
+function readState(file: string): RotationState {
+  if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8")) as RotationState;
+  return { proposalFile: "", vizDone: false, tonOrderAddress: "", tonDone: false };
+}
+
+async function signerWallet(): Promise<{ wallet: WalletContractV4; secretKey: Buffer }> {
+  if (!MNEMONIC) throw new Error("TON_SIGNER_MNEMONIC (your operator TON wallet) is required");
+  const kp = await mnemonicToPrivateKey(MNEMONIC.trim().split(/\s+/));
+  return { wallet: WalletContractV4.create({ workchain: 0, publicKey: kp.publicKey }), secretKey: kp.secretKey };
+}
+
+async function submitTon(): Promise<void> {
+  const file = process.argv[3] || "rotation-proposal.json";
+  const stateFile = arg("state") || "rotation-state.json";
+  const apply = process.env.APPLY === "1";
+  if (!MULTISIG) throw new Error("TON_MULTISIG_ADDRESS is required");
+
+  const proposal = readProposal(file);
+  validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now() }); // chainId + version + (VIZ) shape
+
+  const c = client();
+  // Use createFromAddress for the initial data fetch (no configuration needed for getters).
+  const multisigAddr = Address.parse(MULTISIG);
+  const dataMultisig = c.open(Multisig.createFromAddress(multisigAddr));
+  const data = await dataMultisig.getMultisigData(); // { nextOrderSeqno, threshold, signers, proposers }
+
+  const { wallet, secretKey } = await signerWallet();
+  const myIdx = data.signers.findIndex((s) => s.equals(wallet.address));
+  if (myIdx < 0) {
+    throw new Error(`your wallet ${wallet.address.toString()} is not a current multisig signer`);
+  }
+
+  const action = buildUpdateAction(proposal.newOperators, proposal.newThreshold);
+  const newSigners = proposal.newOperators.map((o) => tonSignerAddress(o.tonPubkey));
+  console.log(`[submit-ton] update to ${proposal.newThreshold}-of-${newSigners.length}; proposer signer index ${myIdx}`);
+  console.log(`[submit-ton] new signers:\n  ${newSigners.map((a) => a.toString()).join("\n  ")}`);
+
+  const expiration = Math.floor(Date.now() / 1000) + ORDER_TTL_SEC;
+  const orderAddr = await dataMultisig.getOrderAddress(data.nextOrderSeqno);
+
+  if (!apply) {
+    console.log(`[submit-ton] order seqno ${data.nextOrderSeqno}, address ${orderAddr.toString()}`);
+    console.log("[submit-ton] DRY-RUN. Set APPLY=1 to send the new_order.");
+    return;
+  }
+
+  // sendNewOrder requires configuration to be set for the auto-detect signer/proposer path.
+  // Re-open with a synthetic configuration built from on-chain data so validation passes.
+  const multisigWithConfig = new Multisig(multisigAddr, undefined, {
+    threshold: Number(data.threshold),
+    signers: data.signers,
+    proposers: data.proposers,
+    allowArbitrarySeqno: false,
+  });
+  const openedMultisig = c.open(multisigWithConfig);
+
+  const opened = c.open(wallet);
+  const sender = opened.sender(secretKey);
+  // isSigner=true auto-detected from configuration + sender.address; approve on init.
+  await openedMultisig.sendNewOrder(sender, [action], expiration, toNano("1"), myIdx, true);
+
+  const state = mergeState(readState(stateFile), {
+    proposalFile: file,
+    tonOrderAddress: orderAddr.toString(),
+    tonDone: false,
+  });
+  writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  console.log(`[submit-ton] sent. Order address: ${orderAddr.toString()}`);
+  console.log(`[submit-ton] share that address; each other signer runs: rotate:ton approve-ton ${orderAddr.toString()}`);
+}
+
+async function main(): Promise<void> {
+  const sub = process.argv[2];
+  if (sub === "submit-ton") return submitTon();
+  // approve-ton / status added in later tasks
+  throw new Error(`unknown subcommand: ${sub ?? ""}`.trim());
+}
+
+main().catch((e) => {
+  console.error(e instanceof Error ? e.message : e);
+  process.exit(1);
+});
