@@ -13,6 +13,7 @@ import { Order } from "./wrappers/Order";
 import {
   buildUpdateAction,
   tonSignerAddress,
+  sameSignerSet,
   validateTonOrder,
 } from "./tonRotation";
 
@@ -157,11 +158,47 @@ async function approveTon(): Promise<void> {
   console.log("[approve-ton] approve sent. At threshold the order auto-executes and the multisig params update.");
 }
 
+async function status(): Promise<void> {
+  const file = arg("proposal") || "rotation-proposal.json";
+  const stateFile = arg("state") || "rotation-state.json";
+  if (!MULTISIG) throw new Error("TON_MULTISIG_ADDRESS is required");
+
+  const proposal = readProposal(file);
+  const c = client();
+  const multisig = c.open(Multisig.createFromAddress(Address.parse(MULTISIG)));
+  const data = await multisig.getMultisigData();
+
+  const expectedSigners = proposal.newOperators.map((o) => tonSignerAddress(o.tonPubkey));
+  const tonDone = sameSignerSet(data.signers, expectedSigners) && Number(data.threshold) === proposal.newThreshold;
+
+  const st = readState(stateFile);
+  console.log(`[status] VIZ done:  ${st.vizDone}`);
+  console.log(`[status] TON multisig now: ${data.threshold}-of-${data.signers.length}`);
+  console.log(`[status] TON matches new set: ${tonDone}`);
+
+  // Show order progress if we have an address checkpointed.
+  if (st.tonOrderAddress) {
+    try {
+      const order = c.open(Order.createFromAddress(Address.parse(st.tonOrderAddress)));
+      const od = await order.getOrderData();
+      const approved = od.approvals.filter(Boolean).length;
+      console.log(`[status] order ${st.tonOrderAddress}: executed=${od.executed} approvals=${approved}/${od.threshold ?? "?"}`);
+    } catch {
+      console.log(`[status] order ${st.tonOrderAddress}: not readable (may have executed + been cleaned up).`);
+    }
+  }
+
+  if (tonDone && !st.tonDone) {
+    writeFileSync(stateFile, JSON.stringify(mergeState(st, { tonDone: true }), null, 2));
+    console.log("[status] recorded tonDone=true. Rotation complete on both chains once vizDone is also true.");
+  }
+}
+
 async function main(): Promise<void> {
   const sub = process.argv[2];
   if (sub === "submit-ton") return submitTon();
   if (sub === "approve-ton") return approveTon();
-  // status added in later tasks
+  if (sub === "status") return status();
   throw new Error(`unknown subcommand: ${sub ?? ""}`.trim());
 }
 
