@@ -9,13 +9,9 @@ import {
   type RotationState,
 } from "@gateway/common";
 import { Multisig } from "./wrappers/Multisig";
-import type { Order } from "./wrappers/Order";
 import {
   buildUpdateAction,
-  packRotationOrder,
-  validateTonOrder,
   tonSignerAddress,
-  sameSignerSet,
 } from "./tonRotation";
 
 function arg(name: string): string | undefined {
