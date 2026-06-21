@@ -1,4 +1,4 @@
-import type { CanonicalAction } from "./types";
+import type { CanonicalAction, RemoteChainId } from "./types";
 
 // CanonicalAction.amountMilliViz is a bigint, which JSON.stringify cannot
 // serialize. These helpers convert it to/from a string at HTTP boundaries
@@ -9,9 +9,11 @@ export function actionToWire(a: CanonicalAction): Record<string, unknown> {
 }
 
 export function actionFromWire(o: Record<string, unknown>): CanonicalAction {
+  const remoteChain = o["remoteChain"];
   return {
     direction: o["direction"] as CanonicalAction["direction"],
     id: String(o["id"]),
+    remoteChain: remoteChain ? (String(remoteChain) as RemoteChainId) : undefined,
     recipient: String(o["recipient"]),
     amountMilliViz: BigInt(String(o["amountMilliViz"])),
     digest: String(o["digest"]),

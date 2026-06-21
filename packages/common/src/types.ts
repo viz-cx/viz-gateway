@@ -4,6 +4,9 @@
 
 export type Direction = "PEG_IN" | "PEG_OUT";
 
+/** Remote chains the gateway can mint wrapped VIZ on. */
+export type RemoteChainId = "TON" | "SOLANA";
+
 /** A confirmed VIZ -> gateway deposit (peg-in source event). */
 export interface VizDeposit {
   /** VIZ transaction id (hex). Unique source key for idempotency. */
@@ -18,8 +21,10 @@ export interface VizDeposit {
   to: string;
   /** Amount in integer milli-VIZ (1 VIZ = 1000). */
   amountMilliViz: bigint;
-  /** Destination TON address parsed from the transfer memo. */
-  tonDestination: string;
+  /** Remote chain to mint wrapped VIZ on, parsed from the memo's "<chain>:" prefix. */
+  remoteChain: RemoteChainId;
+  /** Destination address on `remoteChain`, parsed from the transfer memo. */
+  remoteDestination: string;
 }
 
 /**
@@ -49,6 +54,11 @@ export interface RemoteBurn {
  */
 export interface CanonicalAction {
   direction: Direction;
+  /**
+   * Target remote chain for a PEG_IN mint, committed into the digest. Absent for
+   * PEG_OUT, which always releases on the VIZ home chain.
+   */
+  remoteChain?: RemoteChainId;
   /** Idempotency key = source event key (trxId:opIndex or msgHash). */
   id: string;
   /** Recipient on the destination chain. */

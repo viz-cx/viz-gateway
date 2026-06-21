@@ -4,7 +4,14 @@ import viz, {
   type DynamicGlobalProperties,
   type OpWrapper,
 } from "viz-js-lib";
-import type { CanonicalAction, VizChain, VizDeposit, VizReleaseProposal } from "@gateway/common";
+import {
+  parseRemoteTarget,
+  type CanonicalAction,
+  type RemoteChainId,
+  type VizChain,
+  type VizDeposit,
+  type VizReleaseProposal,
+} from "@gateway/common";
 import { buildReleaseTx } from "./vizSign";
 
 /**
@@ -73,6 +80,18 @@ export class VizJsChain implements VizChain {
         const [name, payload] = w.op;
         if (name !== "transfer") continue;
         if (payload["to"] !== this.gatewayAccount) continue;
+        const memo = String(payload["memo"] ?? "");
+        let target: { chain: RemoteChainId; destination: string };
+        try {
+          // Memo is "<chain>:<address>"; the target chain is committed in the digest.
+          // Remote address-format validation happens before signing (signer-side).
+          target = parseRemoteTarget(memo);
+        } catch (err) {
+          // Unparseable/prefixless memo: not a valid peg-in target. Skip and warn
+          // (flag for manual refund); never silently default the destination chain.
+          console.warn(`[viz-chain] skipping deposit ${w.trx_id}:${w.op_in_trx}: ${String(err)}`);
+          continue;
+        }
         deposits.push({
           trxId: w.trx_id,
           opIndex: w.op_in_trx,
@@ -80,9 +99,8 @@ export class VizJsChain implements VizChain {
           from: String(payload["from"] ?? ""),
           to: String(payload["to"] ?? ""),
           amountMilliViz: vizToMilli(String(payload["amount"] ?? "0.000 VIZ")),
-          // The transfer memo carries the user's TON destination. Validation of
-          // the TON address format happens before signing (signer-side).
-          tonDestination: String(payload["memo"] ?? "").trim(),
+          remoteChain: target.chain,
+          remoteDestination: target.destination,
         });
       }
     }

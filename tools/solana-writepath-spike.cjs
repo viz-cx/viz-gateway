@@ -35,7 +35,8 @@ const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
     from: "viz-user",
     to: "viz-gateway",
     amountMilliViz: 1068237n,
-    tonDestination: recipient,
+    remoteChain: "SOLANA",
+    remoteDestination: recipient,
   });
 
   function makeProposal(amountMilliViz) {

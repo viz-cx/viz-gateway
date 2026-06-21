@@ -69,7 +69,8 @@ const { mnemonicNew } = require("@ton/crypto");
     from: "viz-user",
     to: "viz-gateway",
     amountMilliViz: 1068237n,
-    tonDestination: "EQrecipient_addr",
+    remoteChain: "TON",
+    remoteDestination: "EQrecipient_addr",
   });
   const orderHashHex = createHash("sha256").update("mint-order-1").digest("hex");
   const mintProposal = {
