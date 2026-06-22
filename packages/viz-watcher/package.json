@@ -6,6 +6,6 @@
   "scripts": { "build": "tsc -b" },
   "dependencies": {
     "@gateway/common": "0.1.0",
-    "viz-js-lib": "^0.12.6"
+    "viz-js-lib": "github:VIZ-Blockchain/viz-js-lib#879e0699083ee6c191225a4aefb04e82bb719252"
   }
 }
