@@ -10,7 +10,13 @@ const assert = require("node:assert");
 const { createHash } = require("node:crypto");
 const viz = require("viz-js-lib");
 
-const { canonicalPegOut, canonicalPegIn } = require("@gateway/common");
+const { canonicalPegOut, canonicalPegIn, quotePegIn, pegInFeePolicyFor } = require("@gateway/common");
+const FEES = {
+  floorMilliViz: 10000n,
+  bps: 20,
+  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+};
 const { milliToViz } = require("../packages/viz-watcher/dist/vizChain.js");
 const { buildReleaseTx } = require("../packages/viz-watcher/dist/vizSign.js");
 const { signMintApproval, verifyMintApproval, keyPairFromMnemonic } = require("../packages/ton-watcher/dist/tonSign.js");
@@ -39,8 +45,8 @@ const { mnemonicNew } = require("@ton/crypto");
     memo: action.id,
   };
 
-  const opA = new KeyedSigner("op-1", wifA, "");
-  const opB = new KeyedSigner("op-2", wifB, "");
+  const opA = new KeyedSigner("op-1", wifA, "", FEES);
+  const opB = new KeyedSigner("op-2", wifB, "", FEES);
   const apprA = await opA.signVizRelease(action, proposal);
   const apprB = await opB.signVizRelease(action, proposal);
   const merged = [apprA.signature, apprB.signature];
@@ -73,14 +79,18 @@ const { mnemonicNew } = require("@ton/crypto");
     remoteDestination: "EQrecipient_addr",
   });
   const orderHashHex = createHash("sha256").update("mint-order-1").digest("hex");
+  // Proposal carries NET (gross − fee); destination provisioned -> no surcharge.
+  const qTon = quotePegIn(pegIn.amountMilliViz, true, pegInFeePolicyFor(FEES, "TON"));
+  assert.ok(qTon.ok, "expected a valid TON quote");
   const mintProposal = {
     orderSeqno: "1",
     toAddress: pegIn.recipient, // "EQrecipient_addr"
-    amountMilliViz: pegIn.amountMilliViz.toString(),
+    amountMilliViz: qTon.b.net.toString(),
+    destProvisioned: true,
     orderHashHex,
   };
 
-  const opTon = new KeyedSigner("op-1", "", mnemonic);
+  const opTon = new KeyedSigner("op-1", "", mnemonic, FEES);
   const tonAppr = await opTon.approveTonMint(pegIn, mintProposal);
   assert.ok(verifyMintApproval(mintProposal, tonAppr.signature, publicKey), "ed25519 approval failed to verify");
   console.log("[ton] ed25519 mint approval verifies against the operator pubkey OK");
@@ -88,8 +98,8 @@ const { mnemonicNew } = require("@ton/crypto");
   // tampered order hash must fail verification
   const tampered = { ...mintProposal, orderHashHex: createHash("sha256").update("mint-order-2").digest("hex") };
   assert.strictEqual(verifyMintApproval(tampered, tonAppr.signature, publicKey), false);
-  // amount mismatch must be rejected by the signer
-  await assert.rejects(opTon.approveTonMint(pegIn, { ...mintProposal, amountMilliViz: "1" }), /amount/);
+  // net mismatch must be rejected by the signer
+  await assert.rejects(opTon.approveTonMint(pegIn, { ...mintProposal, amountMilliViz: "1" }), /net/);
   console.log("[ton] tampered order hash fails verify; amount mismatch REJECTED OK");
 
   console.log("\nRESULT: VIZ release signing+merge and TON mint approval signing both work");

@@ -1,13 +1,11 @@
 {
-  "name": "@gateway/solana-watcher",
+  "name": "@gateway/dispatcher",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
   "scripts": { "build": "tsc -b" },
   "dependencies": {
     "@gateway/common": "0.1.0",
-    "@gateway/log": "0.1.0",
-    "@solana/web3.js": "^1.98.0",
-    "@solana/spl-token": "^0.4.0"
+    "@gateway/log": "0.1.0"
   }
 }

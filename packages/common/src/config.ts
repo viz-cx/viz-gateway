@@ -1,7 +1,30 @@
 import { readFileSync, existsSync } from "node:fs";
 import type { CapPolicy } from "./caps";
-import type { FeePolicy } from "./fees";
-import type { FederationManifest, OperatorRef } from "./types";
+import type { PegInFeePolicy } from "./fees";
+import type { FederationManifest, OperatorRef, RemoteChainId } from "./types";
+
+/**
+ * Shared fee constants. For the multisig to merge signatures, every operator must
+ * derive the SAME net, so these MUST be identical across operators — keep them in
+ * the committed federation manifest / shared env, never diverge per-operator.
+ * Per-chain values cover the different rent (Solana ATA vs TON jetton-wallet).
+ */
+export interface GatewayFeeConfig {
+  floorMilliViz: bigint;
+  bps: number;
+  activationSurchargeMilliViz: Record<RemoteChainId, bigint>;
+  mintGasFloorMilliViz: Record<RemoteChainId, bigint>;
+}
+
+/** Build the per-chain PegInFeePolicy the fee math consumes. */
+export function pegInFeePolicyFor(fees: GatewayFeeConfig, chain: RemoteChainId): PegInFeePolicy {
+  return {
+    floorMilliViz: fees.floorMilliViz,
+    bps: fees.bps,
+    activationSurchargeMilliViz: fees.activationSurchargeMilliViz[chain],
+    mintGasFloorMilliViz: fees.mintGasFloorMilliViz[chain],
+  };
+}
 
 export interface GatewayConfig {
   service: string;
@@ -21,6 +44,7 @@ export interface GatewayConfig {
     gatewayJettonWallet: string;
     signerMnemonic: string;
     finalityConfirmations: number;
+    scanMaxTransactions: number; // txs fetched per peg-out scan (RPC rate-limit tuning)
   };
   solana: {
     rpcUrl: string;
@@ -32,10 +56,18 @@ export interface GatewayConfig {
     signers: string[]; // multisig member pubkeys (base58)
     signerSecret: Uint8Array | null; // THIS operator's solana key (for signing approvals)
     submitterSecret: Uint8Array | null; // fee payer + nonce authority (proposer/submitter)
+    scanMaxSignatures: number; // signatures fetched per scan (RPC rate-limit tuning)
+    scanTxDelayMs: number; // delay between per-tx parses (429 avoidance)
+    submitterMinLamports: number; // reserve alert floor for the submitter SOL balance
+    depositMasterSeed: string; // hot seed deriving per-VIZ-account peg-out deposit addresses
+    lookupListen: string; // host:port for the deposit-address lookup service
   };
   coordinator: { url: string; listen: string; signerEndpoints: string[] };
+  dispatcher: { intervalMs: number; retryIntervalMs: number; windowMs: number };
+  /** Service VIZ account that collects swept peg-in fees (single-key, no multisig). */
+  feesGateAccount: string;
   caps: CapPolicy;
-  fees: FeePolicy;
+  fees: GatewayFeeConfig;
   storeUrl: string;
   recon: { intervalMs: number; driftToleranceMilliViz: bigint };
 }
@@ -159,6 +191,7 @@ export function loadConfig(): GatewayConfig {
       gatewayJettonWallet: opt("TON_GATEWAY_JETTON_WALLET", ""),
       signerMnemonic: opt("TON_SIGNER_MNEMONIC", ""),
       finalityConfirmations: int("TON_FINALITY_CONFIRMATIONS", 1),
+      scanMaxTransactions: int("TON_MAX_TRANSACTIONS", 20),
     },
     solana: {
       rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
@@ -173,6 +206,11 @@ export function loadConfig(): GatewayConfig {
         .filter(Boolean),
       signerSecret: solanaSecret("SOLANA_SIGNER_SECRET"),
       submitterSecret: solanaSecret("SOLANA_SUBMITTER_SECRET"),
+      scanMaxSignatures: int("SOLANA_MAX_SIGNATURES", 25),
+      scanTxDelayMs: int("SOLANA_RPC_TX_DELAY_MS", 250),
+      submitterMinLamports: int("SOLANA_SUBMITTER_MIN_LAMPORTS", 50_000_000), // ~0.05 SOL
+      depositMasterSeed: opt("SOLANA_DEPOSIT_MASTER_SEED", ""),
+      lookupListen: opt("LOOKUP_LISTEN", "127.0.0.1:8095"),
     },
     coordinator: {
       url: opt("COORDINATOR_URL", "http://coordinator:8080"),
@@ -183,6 +221,14 @@ export function loadConfig(): GatewayConfig {
         .map((s) => s.trim())
         .filter(Boolean),
     },
+    // Dispatcher: drains QUEUED outbox rows to the coordinator with retries.
+    // P3 policy: retry every 10s for 3 min, then REFUND. intervalMs is the loop tick.
+    dispatcher: {
+      intervalMs: int("DISPATCHER_INTERVAL_MS", 5000),
+      retryIntervalMs: int("DISPATCHER_RETRY_INTERVAL_MS", 10000),
+      windowMs: int("DISPATCHER_WINDOW_MS", 180000),
+    },
+    feesGateAccount: opt("FEES_GATE_ACCOUNT", "fees.gate"),
     // Conservative bootstrap caps (1 VIZ ~ $0.005): $500 / $1,000 / $10,000.
     // Raise as TVL and the federation grow.
     caps: {
@@ -190,12 +236,21 @@ export function loadConfig(): GatewayConfig {
       rolling24hMilliViz: big("CAP_24H_MILLI_VIZ", "2000000000"), // 2,000,000 VIZ (~$10,000)
       manualReviewAboveMilliViz: big("MANUAL_REVIEW_ABOVE_MILLI_VIZ", "100000000"), // 100,000 VIZ (~$500)
     },
-    // Peg-in fee covers TON mint gas + margin; collected in wVIZ. Peg-out free.
-    // floor 100 VIZ (~$0.50 ~ 0.25 TON); min peg-in 2,000 VIZ (~$10).
+    // Peg-in fee held in VIZ: base = max(10 VIZ, 0.20%); + per-chain activation
+    // surcharge when the destination isn't provisioned (Solana ATA / TON jetton-wallet
+    // rent). net = gross − fee must cover the per-chain mint-gas floor, else refund.
+    // These MUST match across operators (determinism) — keep them in shared config.
     fees: {
-      flatFloorMilliViz: big("FEE_FLOOR_MILLI_VIZ", "100000"), // 100 VIZ
-      bps: int("FEE_BPS", 30), // 0.30%
-      minPegInMilliViz: big("MIN_PEGIN_MILLI_VIZ", "2000000"), // 2,000 VIZ
+      floorMilliViz: big("FEE_FLOOR_MILLI_VIZ", "10000"), // 10 VIZ
+      bps: int("FEE_BPS", 20), // 0.20%
+      activationSurchargeMilliViz: {
+        SOLANA: big("FEE_ACTIVATION_SOLANA_MILLI_VIZ", "10000"), // ~ATA rent
+        TON: big("FEE_ACTIVATION_TON_MILLI_VIZ", "10000"), // ~jetton-wallet rent
+      },
+      mintGasFloorMilliViz: {
+        SOLANA: big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"), // net must clear this
+        TON: big("MINT_GAS_FLOOR_TON_MILLI_VIZ", "1000"),
+      },
     },
     storeUrl: opt("STORE_URL", "sqlite:./data/gateway.sqlite"),
     recon: {

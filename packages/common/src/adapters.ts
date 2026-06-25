@@ -45,6 +45,13 @@ export interface RemoteChain<MintProposal = unknown> {
   finalizedBurnsSince(fromHeight: number, toHeight: number): Promise<RemoteBurn[]>;
   /** Circulating wrapped-VIZ supply, in milli-VIZ (for reconciliation). */
   circulatingSupplyMilliViz(): Promise<bigint>;
+  /**
+   * Whether the recipient's wVIZ holding account already exists (Solana ATA /
+   * TON jetton-wallet). Read ONCE by the proposer and pinned into the proposal
+   * (`destProvisioned`); a false value means the gateway pays rent to create it,
+   * which the peg-in activation surcharge compensates. See fees.ts.
+   */
+  isDestinationProvisioned(recipient: string): Promise<boolean>;
   /** Authorize + submit a mint of wrapped VIZ. Returns a tx/op id. */
   submitMint(proposal: MintProposal, mintAuth: string[]): Promise<string>;
 }

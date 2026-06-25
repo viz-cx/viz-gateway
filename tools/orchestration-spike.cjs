@@ -12,8 +12,15 @@ const { milliToViz } = require("../packages/viz-watcher/dist/vizChain.js");
 const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js");
 const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
 
+const FEES = {
+  floorMilliViz: 10000n,
+  bps: 20,
+  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+};
+
 function signerClient(operatorId, wif) {
-  const ks = new KeyedSigner(operatorId, wif, "");
+  const ks = new KeyedSigner(operatorId, wif, "", FEES);
   return { operatorId, approve: (action, proposal) => ks.signVizRelease(action, proposal) };
 }
 
@@ -30,7 +37,7 @@ function fakeBroadcaster(action) {
   const calls = [];
   return {
     calls,
-    buildProposal: async () => proposal,
+    buildProposal: async () => ({ proposal, feeMilliViz: 0n }),
     broadcast: async (_a, _p, signatures) => {
       calls.push(signatures);
       return "TXID_" + signatures.length;

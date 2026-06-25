@@ -15,9 +15,15 @@ export interface SignerClient {
   approve(action: CanonicalAction, proposal: Proposal): Promise<Approval>;
 }
 
+/** A built proposal plus the fee withheld (0 unless it is a PEG_IN mint). */
+export interface BuildResult {
+  proposal: Proposal;
+  feeMilliViz: bigint;
+}
+
 /** Builds the shared proposal for an action and broadcasts it once signed. */
 export interface Broadcaster {
-  buildProposal(action: CanonicalAction): Promise<Proposal>;
+  buildProposal(action: CanonicalAction): Promise<BuildResult>;
   broadcast(action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string>;
 }
 
@@ -27,6 +33,8 @@ export interface OrchestrationResult {
   threshold: number;
   broadcast: boolean;
   txid?: string;
+  /** Fee withheld for a PEG_IN (drives the FEE_SWEEP); 0 otherwise. */
+  feeMilliViz?: string;
   error?: string;
 }
 
@@ -46,7 +54,8 @@ export class Orchestrator {
   ) {}
 
   async process(action: CanonicalAction): Promise<OrchestrationResult> {
-    const proposal = await this.broadcaster.buildProposal(action);
+    const { proposal, feeMilliViz } = await this.broadcaster.buildProposal(action);
+    const fee = feeMilliViz.toString();
     const set = new ApprovalSet(this.threshold, this.operators);
 
     for (const signer of this.signers) {
@@ -62,7 +71,7 @@ export class Orchestrator {
 
     const approvals = set.count(action.id);
     if (!set.isMet(action.id)) {
-      return { actionId: action.id, approvals, threshold: this.threshold, broadcast: false };
+      return { actionId: action.id, approvals, threshold: this.threshold, broadcast: false, feeMilliViz: fee };
     }
 
     try {
@@ -71,13 +80,14 @@ export class Orchestrator {
         proposal,
         set.approvals(action.id).map((a) => a.signature),
       );
-      return { actionId: action.id, approvals, threshold: this.threshold, broadcast: true, txid };
+      return { actionId: action.id, approvals, threshold: this.threshold, broadcast: true, txid, feeMilliViz: fee };
     } catch (err) {
       return {
         actionId: action.id,
         approvals,
         threshold: this.threshold,
         broadcast: false,
+        feeMilliViz: fee,
         error: String(err),
       };
     }

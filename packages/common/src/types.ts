@@ -103,7 +103,9 @@ export interface VizReleaseProposal {
 export interface TonMintProposal {
   orderSeqno: string;
   toAddress: string; // recipient TON address
-  amountMilliViz: string;
+  amountMilliViz: string; // = NET (gross − fee); the amount actually minted
+  /** Pinned by the proposer: was the destination jetton-wallet already provisioned? */
+  destProvisioned: boolean;
   orderHashHex: string; // exact 32-byte order hash operators sign (hex)
 }
 
@@ -120,7 +122,9 @@ export interface TonMintProposal {
  */
 export interface SolanaMintProposal {
   recipient: string; // base58 owner address to receive wVIZ
-  amountMilliViz: string;
+  amountMilliViz: string; // = NET (gross − fee); the amount actually minted
+  /** Pinned by the proposer: was the destination ATA already provisioned? */
+  destProvisioned: boolean;
   mint: string; // wVIZ Token-2022 mint (base58)
   multisig: string; // SPL multisig = mint authority (base58)
   signers: string[]; // M member pubkeys (base58), sorted ascending — the multiSigners

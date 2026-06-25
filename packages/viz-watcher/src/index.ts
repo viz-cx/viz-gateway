@@ -1,28 +1,18 @@
 import {
-  actionToWire,
   canonicalPegIn,
   CircuitBreaker,
   createStore,
   loadConfig,
-  quotePegIn,
-  type CanonicalAction,
   type VizChain,
 } from "@gateway/common";
 import { VizJsChain } from "./vizChain";
 
-async function submitToCoordinator(url: string, action: CanonicalAction): Promise<void> {
-  const res = await fetch(`${url.replace(/\/$/, "")}/submit`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: actionToWire(action) }),
-  });
-  if (!res.ok) throw new Error(`coordinator -> HTTP ${res.status}`);
-}
-
 /**
- * viz-watcher: follows the VIZ irreversible head, detects deposits to the
- * gateway account, derives the canonical peg-in action, applies idempotency +
- * caps, and forwards an approval request to the coordinator/signer.
+ * viz-watcher: follows the VIZ irreversible head, detects deposits to the gateway
+ * account, derives the canonical peg-in action (amount = GROSS; the fee/net are
+ * finalized at proposal-build in the coordinator), applies idempotency + caps,
+ * and ENQUEUES a durable PEG_IN action. The separate dispatcher delivers it to
+ * the coordinator with retries — no action is lost on a failed submit.
  *
  * Only acts on irreversible blocks (no reorg exposure).
  */
@@ -30,19 +20,23 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const chain: VizChain = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
   const store = createStore(cfg.storeUrl);
-  const breaker = new CircuitBreaker(cfg.caps);
+  const breaker = new CircuitBreaker(cfg.caps, store);
 
-  // Last processed block. In production, persist this and backfill from the last
-  // processed block on restart. Cold start (0) begins at the current safe head;
+  // Last processed block. Cold start (0) begins at the current safe head;
   // historical backfill is a separate, deliberate operation.
   let cursor = 0;
+  let running = true;
+  const stop = () => {
+    running = false;
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 
   console.log(
     `[viz-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} gateway=${cfg.viz.gatewayAccount}`,
   );
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  while (running) {
     try {
       if (await store.isPaused()) {
         console.warn(`[viz-watcher] gateway paused (${await store.pauseReason()}); skipping scan`);
@@ -52,45 +46,39 @@ async function main(): Promise<void> {
       const lib = await chain.lastIrreversibleBlock();
       const safeHead = lib - cfg.viz.extraConfirmations;
       if (cursor === 0) {
-        // Cold start: begin at the current safe head; don't scan from genesis.
         cursor = safeHead;
         console.log(`[viz-watcher] starting at irreversible head ${cursor} (LIB ${lib})`);
       } else if (safeHead > cursor) {
         const deposits = await chain.irreversibleDepositsSince(cursor, safeHead);
         for (const dep of deposits) {
           const action = canonicalPegIn(dep);
-          const first = await store.claim(action.id);
+          const first = await store.enqueue({
+            id: action.id,
+            direction: "PEG_IN",
+            remoteChain: action.remoteChain,
+            recipient: action.recipient,
+            sender: dep.from, // VIZ sender — refund target if delivery fails
+            amountMilliViz: action.amountMilliViz, // GROSS; fee/net finalized at proposal build
+            digest: action.digest,
+            status: "SEEN",
+          });
           if (!first) continue; // already handled
-          const quote = quotePegIn(action.amountMilliViz, cfg.fees);
-          if (!quote.ok) {
-            // Dust below the minimum: gas would dominate. Do not mint; flag for
-            // manual refund (a VIZ transfer back to the sender is free).
-            console.warn(
-              `[viz-watcher] deposit ${action.id} (${action.amountMilliViz} mVIZ) below minimum ${quote.minMilliViz}; flag for refund`,
-            );
-            continue;
-          }
-          const decision = breaker.check(action.amountMilliViz);
+          const decision = await breaker.check(action.amountMilliViz);
           if (!decision.ok) {
+            // Caps are on the GROSS deposit. Hold (do not drop) — the deposit is
+            // recoverable: an operator can release the cap or refund.
             console.warn(`[viz-watcher] deposit ${action.id} held: ${decision.reason}`);
+            await store.setStatus(action.id, "HELD", { lastError: decision.reason });
             if (decision.reason === "OVER_24H") {
-              breaker.pause("24h cap exceeded");
               await store.pause("VIZ peg-in 24h cap exceeded"); // shared, cross-process
             }
             continue;
           }
-          breaker.record(action.amountMilliViz);
+          await breaker.record(action.amountMilliViz);
+          await store.setStatus(action.id, "QUEUED");
           console.log(
-            `[viz-watcher] peg-in ${action.id} -> mint net ${quote.net} mVIZ to ${action.recipient} (fee ${quote.fee}, gross ${quote.gross})`,
+            `[viz-watcher] peg-in ${action.id} QUEUED -> mint to ${action.recipient} on ${action.remoteChain} (gross ${action.amountMilliViz} mVIZ)`,
           );
-          try {
-            await submitToCoordinator(cfg.coordinator.url, action);
-          } catch (err) {
-            // Production: persist to an outbox and retry. The idempotency claim
-            // means this action won't be re-detected, so a failed submit needs
-            // operator follow-up until the outbox exists.
-            console.error(`[viz-watcher] submit ${action.id} failed: ${String(err)}`);
-          }
         }
         cursor = safeHead;
       }
@@ -99,6 +87,9 @@ async function main(): Promise<void> {
     }
     await new Promise((r) => setTimeout(r, 3000)); // VIZ block interval
   }
+
+  await store.close();
+  console.log("[viz-watcher] stopped");
 }
 
 main().catch((e) => {
