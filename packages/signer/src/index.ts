@@ -27,6 +27,7 @@ async function main(): Promise<void> {
     cfg.operatorId,
     cfg.viz.signingWif,
     cfg.ton.signerMnemonic,
+    cfg.fees,
     cfg.solana.signerSecret,
   );
   const store = createStore(cfg.storeUrl);
@@ -67,6 +68,14 @@ async function main(): Promise<void> {
       `[signer] operator=${cfg.operatorId} listening on ${host}:${port} (federation ${cfg.federation.threshold}-of-${cfg.federation.n})`,
     );
   });
+
+  const shutdown = () => {
+    server.close(() => {
+      void store.close().then(() => process.exit(0));
+    });
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((e) => {
