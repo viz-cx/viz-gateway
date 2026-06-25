@@ -9,12 +9,21 @@
 // Run (after `npm run build`): node tools/solana-writepath-spike.cjs
 const assert = require("node:assert");
 const { Keypair } = require("@solana/web3.js");
-const { canonicalPegIn } = require("@gateway/common");
+const { canonicalPegIn, quotePegIn, pegInFeePolicyFor } = require("@gateway/common");
 const {
   mintMessageB64,
   buildSignedMintTx,
 } = require("../packages/solana-watcher/dist/solanaSign.js");
 const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
+
+// Shared fee config (must match across operators). The action carries GROSS; the
+// proposal carries NET = gross - base - activation; the signer re-derives base.
+const FEES = {
+  floorMilliViz: 10000n,
+  bps: 20,
+  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+};
 
 (async () => {
   const submitter = Keypair.generate();
@@ -27,6 +36,7 @@ const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
   const recipient = Keypair.generate().publicKey.toBase58();
   const signers = [opA.publicKey.toBase58(), opB.publicKey.toBase58()].sort();
 
+  const GROSS = 1068237n;
   // recipient is the remote destination; canonicalPegIn maps it to action.recipient.
   const pegIn = canonicalPegIn({
     trxId: "t1",
@@ -34,15 +44,21 @@ const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
     blockNum: 1,
     from: "viz-user",
     to: "viz-gateway",
-    amountMilliViz: 1068237n,
+    amountMilliViz: GROSS, // GROSS; fee applied at proposal build
     remoteChain: "SOLANA",
     remoteDestination: recipient,
   });
 
-  function makeProposal(amountMilliViz) {
+  // Destination already provisioned -> no activation surcharge.
+  const q = quotePegIn(GROSS, true, pegInFeePolicyFor(FEES, "SOLANA"));
+  assert.ok(q.ok, "expected a valid quote");
+  const NET = q.b.net;
+
+  function makeProposal(netMilliViz, destProvisioned = true) {
     const p = {
       recipient,
-      amountMilliViz: String(amountMilliViz),
+      amountMilliViz: String(netMilliViz),
+      destProvisioned,
       mint,
       multisig,
       signers,
@@ -56,29 +72,29 @@ const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
     return p;
   }
 
-  const proposal = makeProposal(1068237n);
+  const proposal = makeProposal(NET, true);
 
-  const sA = new KeyedSigner("op-1", "", "", opA.secretKey);
-  const sB = new KeyedSigner("op-2", "", "", opB.secretKey);
+  const sA = new KeyedSigner("op-1", "", "", FEES, opA.secretKey);
+  const sB = new KeyedSigner("op-2", "", "", FEES, opB.secretKey);
   const apprA = await sA.approveSolanaMint(pegIn, proposal);
   const apprB = await sB.approveSolanaMint(pegIn, proposal);
   const mintAuth = [apprA.signature, apprB.signature];
 
   const raw = buildSignedMintTx(proposal, mintAuth, submitter.secretKey);
   assert.ok(Buffer.isBuffer(raw) && raw.length > 0, "expected a serialized signed tx");
-  console.log(`[solana] ${mintAuth.length} operators signed; partials merge into one valid tx (${raw.length} bytes) OK`);
+  console.log(`[solana] mint NET=${NET} (gross ${GROSS}, fee ${q.b.fee}); ${mintAuth.length} operators merged into one tx (${raw.length} bytes) OK`);
 
   await assert.rejects(
     sA.approveSolanaMint(pegIn, { ...proposal, recipient: Keypair.generate().publicKey.toBase58() }),
     /recipient/,
   );
   await assert.rejects(
-    sA.approveSolanaMint(pegIn, { ...proposal, amountMilliViz: "9999999" }),
-    /amount/,
+    sA.approveSolanaMint(pegIn, makeProposal(9999999n, true)),
+    /net/,
   );
-  console.log("[solana] tampered proposals (wrong recipient / amount) REJECTED OK");
+  console.log("[solana] tampered proposals (wrong recipient / net) REJECTED OK");
 
-  const badProposal = makeProposal(9999999n);
+  const badProposal = makeProposal(NET - 1n, true);
   assert.throws(() => buildSignedMintTx(badProposal, mintAuth, submitter.secretKey), /verification/);
   console.log("[solana] partials over a different amount fail signature verification OK");
 

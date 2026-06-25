@@ -11,7 +11,13 @@
 // Run (after `npm run build`): node tools/solana-orchestration-spike.cjs
 const assert = require("node:assert");
 const { Keypair } = require("@solana/web3.js");
-const { canonicalPegIn, parseRemoteTarget } = require("@gateway/common");
+const { canonicalPegIn, parseRemoteTarget, quotePegIn, pegInFeePolicyFor } = require("@gateway/common");
+const FEES = {
+  floorMilliViz: 10000n,
+  bps: 20,
+  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+};
 const {
   mintMessageB64,
   buildSignedMintTx,
@@ -60,10 +66,14 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   assert.notStrictEqual(action.digest, tonTwin.digest, "digest must commit to the target chain");
   console.log("[canonical] action tagged SOLANA; chain committed in digest (SOLANA != TON) OK");
 
-  function makeProposal(amountMilliViz) {
+  const q = quotePegIn(action.amountMilliViz, true, pegInFeePolicyFor(FEES, "SOLANA"));
+  assert.ok(q.ok, "expected a valid quote");
+
+  function makeProposal(netMilliViz, destProvisioned = true) {
     const p = {
       recipient,
-      amountMilliViz: String(amountMilliViz),
+      amountMilliViz: String(netMilliViz),
+      destProvisioned,
       mint,
       multisig,
       signers,
@@ -76,11 +86,11 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
     p.messageB64 = mintMessageB64(p);
     return p;
   }
-  const proposal = makeProposal(action.amountMilliViz);
+  const proposal = makeProposal(q.b.net, true);
 
   // ---- fake broadcaster: build the prebuilt proposal, assemble on broadcast --
   const broadcaster = {
-    buildProposal: async () => proposal,
+    buildProposal: async () => ({ proposal, feeMilliViz: q.b.fee }),
     broadcast: async (_a, p, signatures) => {
       const raw = buildSignedMintTx(p, signatures, submitter.secretKey);
       assert.ok(Buffer.isBuffer(raw) && raw.length > 0, "merged tx must serialize");
@@ -89,8 +99,8 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   };
 
   // ---- real signers wrapped by routeApproval (exercises shape routing) -----
-  const ksA = new KeyedSigner("op-1", "", "", opA.secretKey);
-  const ksB = new KeyedSigner("op-2", "", "", opB.secretKey);
+  const ksA = new KeyedSigner("op-1", "", "", FEES, opA.secretKey);
+  const ksB = new KeyedSigner("op-2", "", "", FEES, opB.secretKey);
   const signerClient = (id, ks) => ({ operatorId: id, approve: (a, p) => routeApproval(ks, a, p) });
 
   const result = await new Orchestrator(
@@ -106,7 +116,7 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   console.log("[orchestrate] 2-of-2 Solana peg-in -> routed by shape, merged, broadcast OK");
 
   // ---- negatives ----------------------------------------------------------
-  const tonProposal = { orderSeqno: "1", toAddress: recipient, amountMilliViz: action.amountMilliViz.toString(), orderHashHex: action.digest };
+  const tonProposal = { orderSeqno: "1", toAddress: recipient, amountMilliViz: q.b.net.toString(), destProvisioned: true, orderHashHex: action.digest };
   await assert.rejects(routeApproval(ksA, action, tonProposal), /TON proposal for a SOLANA action/);
   await assert.rejects(routeApproval(ksA, action, { foo: "bar" }), /shape not recognized/);
   console.log("[orchestrate] TON-shaped proposal on a SOLANA action + unknown shape REJECTED OK");
