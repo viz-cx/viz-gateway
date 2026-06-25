@@ -33,6 +33,7 @@ async function main(): Promise<void> {
           cfg.ton.gatewayJettonWallet,
           cfg.ton.finalityConfirmations,
         ),
+        cfg.fees,
       )
     : null;
   const solanaBroadcaster =
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
             },
           ),
           cfg.solana.signers,
+          cfg.fees,
         )
       : null;
 
@@ -117,6 +119,14 @@ async function main(): Promise<void> {
       `[coordinator] listening on ${host}:${port}; threshold=${cfg.federation.threshold}-of-${cfg.federation.n}; signers=${signers.length}`,
     );
   });
+
+  const shutdown = () => {
+    server.close(() => {
+      void store.close().then(() => process.exit(0));
+    });
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((e) => {
