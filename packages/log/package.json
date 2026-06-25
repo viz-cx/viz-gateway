@@ -1,0 +1,11 @@
+{
+  "name": "@gateway/log",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "winston": "^3.14.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  }
+}
