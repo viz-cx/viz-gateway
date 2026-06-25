@@ -1,27 +1,10 @@
-import {
-  actionToWire,
-  canonicalPegOut,
-  CircuitBreaker,
-  createStore,
-  loadConfig,
-  type CanonicalAction,
-  type TonChain,
-} from "@gateway/common";
+import { canonicalPegOut, CircuitBreaker, createStore, loadConfig, type TonChain } from "@gateway/common";
 import { TonHttpChain } from "./tonChain";
 
-async function submitToCoordinator(url: string, action: CanonicalAction): Promise<void> {
-  const res = await fetch(`${url.replace(/\/$/, "")}/submit`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: actionToWire(action) }),
-  });
-  if (!res.ok) throw new Error(`coordinator -> HTTP ${res.status}`);
-}
-
 /**
- * ton-watcher: follows TON masterchain finality, detects wVIZ burns, derives
- * the canonical peg-out action, applies idempotency + caps, and forwards an
- * approval request for the VIZ release.
+ * ton-watcher: follows TON masterchain finality, detects wVIZ burns, and
+ * ENQUEUES a durable PEG_OUT action. The separate dispatcher delivers it to the
+ * coordinator with retries — the watcher never loses an action on a failed submit.
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -36,20 +19,24 @@ async function main(): Promise<void> {
     cfg.ton.jettonMinterAddress,
     cfg.ton.gatewayJettonWallet,
     cfg.ton.finalityConfirmations,
+    cfg.ton.scanMaxTransactions,
   );
   const store = createStore(cfg.storeUrl);
-  const breaker = new CircuitBreaker(cfg.caps);
+  const breaker = new CircuitBreaker(cfg.caps, store);
 
-  // In production, persist this cursor. Cold start (0) begins at the current
-  // masterchain head; historical backfill is a separate, deliberate operation.
   let cursor = 0;
+  let running = true;
+  const stop = () => {
+    running = false;
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 
   console.log(
     `[ton-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} minter=${cfg.ton.jettonMinterAddress || "unset"}`,
   );
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  while (running) {
     try {
       if (await store.isPaused()) {
         console.warn(`[ton-watcher] gateway paused (${await store.pauseReason()}); skipping scan`);
@@ -65,26 +52,29 @@ async function main(): Promise<void> {
         const burns = await chain.finalizedBurnsSince(cursor, finalHead);
         for (const burn of burns) {
           const action = canonicalPegOut(burn);
-          const first = await store.claim(action.id);
+          const first = await store.enqueue({
+            id: action.id,
+            direction: "PEG_OUT",
+            recipient: action.recipient,
+            amountMilliViz: action.amountMilliViz,
+            digest: action.digest,
+            status: "SEEN",
+          });
           if (!first) continue;
-          const decision = breaker.check(action.amountMilliViz);
+          const decision = await breaker.check(action.amountMilliViz);
           if (!decision.ok) {
             console.warn(`[ton-watcher] burn ${action.id} held: ${decision.reason}`);
+            await store.setStatus(action.id, "HELD", { lastError: decision.reason });
             if (decision.reason === "OVER_24H") {
-              breaker.pause("24h cap exceeded");
               await store.pause("TON peg-out 24h cap exceeded"); // shared, cross-process
             }
             continue;
           }
-          breaker.record(action.amountMilliViz);
+          await breaker.record(action.amountMilliViz);
+          await store.setStatus(action.id, "QUEUED");
           console.log(
-            `[ton-watcher] peg-out ${action.id} -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
+            `[ton-watcher] peg-out ${action.id} QUEUED -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
           );
-          try {
-            await submitToCoordinator(cfg.coordinator.url, action);
-          } catch (err) {
-            console.error(`[ton-watcher] submit ${action.id} failed: ${String(err)}`);
-          }
         }
         cursor = finalHead;
       }
@@ -93,6 +83,9 @@ async function main(): Promise<void> {
     }
     await new Promise((r) => setTimeout(r, 3000));
   }
+
+  await store.close();
+  console.log("[ton-watcher] stopped");
 }
 
 main().catch((e) => {

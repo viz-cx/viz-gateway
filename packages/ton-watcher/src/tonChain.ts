@@ -47,6 +47,7 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
   private readonly gatewayWallet: Address | null;
   /** wVIZ uses 3 decimals to match VIZ, so 1 base unit == 1 milli-VIZ. */
   private readonly finalityBufferSec: number;
+  private readonly maxTransactions: number;
 
   constructor(
     endpoint: string,
@@ -54,12 +55,14 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     minterAddress: string,
     gatewayJettonWallet: string,
     finalityConfirmations: number,
+    maxTransactions = 20,
   ) {
     this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
     this.minter = Address.parse(minterAddress);
     this.gatewayWallet = gatewayJettonWallet ? Address.parse(gatewayJettonWallet) : null;
     // ~5s per masterchain block; convert the confirmation count to a time buffer.
     this.finalityBufferSec = Math.max(6, finalityConfirmations * 5 + 5);
+    this.maxTransactions = Math.max(1, maxTransactions);
   }
 
   async finalizedHeight(): Promise<number> {
@@ -72,10 +75,18 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
   }
 
+  /** Is the recipient's jetton-wallet already deployed? (else minting deploys it, costing gas). */
+  async isDestinationProvisioned(recipient: string): Promise<boolean> {
+    const master = this.client.open(JettonMaster.create(this.minter));
+    const jettonWallet = await master.getWalletAddress(Address.parse(recipient));
+    const state = await this.client.getContractState(jettonWallet);
+    return state.state === "active";
+  }
+
   async finalizedBurnsSince(_fromHeight: number, toHeight: number): Promise<RemoteBurn[]> {
     if (!this.gatewayWallet) return [];
     const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
-    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: 20 });
+    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: this.maxTransactions });
     const burns: RemoteBurn[] = [];
     for (const tx of txs) {
       if (tx.now > cutoff) continue; // not yet final per the time buffer
