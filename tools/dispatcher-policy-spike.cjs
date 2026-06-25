@@ -23,11 +23,13 @@ const base = {
 };
 const opts = { retryIntervalMs: 10_000, windowMs: 180_000 };
 
-// 1) broadcast success -> CONFIRMED.
-let t = planTransition(base, { broadcast: true, txid: "abc" }, base.createdAt + 5_000, opts);
+// 1) broadcast success -> CONFIRMED, and the withheld fee is pinned onto the row
+//    (so unsweptFeesMilliViz() can later see it — the watcher enqueued fee 0).
+let t = planTransition(base, { broadcast: true, txid: "abc", feeMilliViz: 20_000n }, base.createdAt + 5_000, opts);
 assert.strictEqual(t.status, "CONFIRMED");
 assert.strictEqual(t.patch.txid, "abc");
-console.log("[dispatcher] success -> CONFIRMED OK");
+assert.strictEqual(t.patch.feeMilliViz, 20_000n);
+console.log("[dispatcher] success -> CONFIRMED + fee pinned OK");
 
 // 2) failure within window -> QUEUED, attempts++, backoff in the future.
 const now2 = base.createdAt + 30_000;
@@ -38,12 +40,22 @@ assert.strictEqual(t.patch.nextAttemptAt, now2 + 10_000);
 assert.match(t.patch.lastError, /429/);
 console.log("[dispatcher] failure within window -> QUEUED + backoff OK");
 
-// 3) failure past the 3-min window -> REFUNDING.
+// 3) failure past the 3-min window -> REFUNDING (PEG_IN only).
 const now3 = base.createdAt + 180_000;
 t = planTransition(base, { broadcast: false, error: "still down" }, now3, opts);
 assert.strictEqual(t.status, "REFUNDING");
 assert.match(t.patch.lastError, /window exhausted/);
-console.log("[dispatcher] failure past window -> REFUNDING OK");
+console.log("[dispatcher] PEG_IN failure past window -> REFUNDING OK");
+
+// 3b) a PEG_OUT / FEE_SWEEP / REFUND has nothing to refund — the gateway already
+//     owes the release — so past the window it keeps retrying (QUEUED), never
+//     dead-ends into REFUNDING.
+for (const direction of ["PEG_OUT", "FEE_SWEEP", "REFUND"]) {
+  const r = planTransition({ ...base, direction }, { broadcast: false, error: "still down" }, now3, opts);
+  assert.strictEqual(r.status, "QUEUED", `${direction} past window should keep retrying`);
+  assert.strictEqual(r.patch.nextAttemptAt, now3 + 10_000);
+}
+console.log("[dispatcher] PEG_OUT/FEE_SWEEP/REFUND past window -> keep retrying (QUEUED) OK");
 
 // 4) child spawns: CONFIRMED PEG_IN -> FEE_SWEEP to fees.gate (amount = fee).
 const sender = { ...base, sender: "alice" };

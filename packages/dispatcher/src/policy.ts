@@ -26,25 +26,32 @@ export interface RetryOpts {
 /**
  * Pure transition policy for a delivered action (no I/O, fully testable).
  *
- *  - broadcast success            -> CONFIRMED
+ *  - broadcast success            -> CONFIRMED (and the PEG_IN fee is pinned onto
+ *                                    the row so unsweptFeesMilliViz() can see it)
  *  - failure, still within window -> QUEUED again with backoff (retry)
- *  - failure, window exhausted    -> REFUNDING (the coordinator then returns gross
- *                                    to the sender; itself a T-of-N transfer)
+ *  - failure, window exhausted    -> for a PEG_IN: REFUNDING (the dispatcher spawns
+ *                                    a REFUND child that returns gross to the sender,
+ *                                    itself a T-of-N transfer). For a PEG_OUT /
+ *                                    FEE_SWEEP / REFUND there is nothing to refund —
+ *                                    the gateway already owes that release — so we
+ *                                    keep retrying (QUEUED) until the federation can
+ *                                    sign it, rather than dead-ending the row.
  *
- * The 3-min window matches "try consensus, else refund". Refund is also T-of-N,
- * so a genuinely degraded federation stays in REFUNDING until it recovers; only
- * an unrecoverable refund becomes terminal FAILED (handled by the refund path).
+ * The 3-min window matches "try consensus, else refund" for inbound deposits. A
+ * genuinely degraded federation keeps retrying the release/refund until it recovers.
  */
 export function planTransition(rec: OutboxRecord, result: DeliveryResult, now: number, opts: RetryOpts): Transition {
   if (result.broadcast) {
-    return { status: "CONFIRMED", patch: { txid: result.txid ?? null, lastError: null } };
+    // Pin the withheld fee onto a PEG_IN row (undefined elsewhere -> column unchanged).
+    return { status: "CONFIRMED", patch: { txid: result.txid ?? null, lastError: null, feeMilliViz: result.feeMilliViz } };
   }
   const attempts = rec.attempts + 1;
   const error = result.error ?? "delivery failed";
-  if (now - rec.createdAt >= opts.windowMs) {
-    return { status: "REFUNDING", patch: { attempts, lastError: `window exhausted: ${error}`, nextAttemptAt: now + opts.retryIntervalMs } };
+  const nextAttemptAt = now + opts.retryIntervalMs;
+  if (now - rec.createdAt >= opts.windowMs && rec.direction === "PEG_IN") {
+    return { status: "REFUNDING", patch: { attempts, lastError: `window exhausted: ${error}`, nextAttemptAt } };
   }
-  return { status: "QUEUED", patch: { attempts, lastError: error, nextAttemptAt: now + opts.retryIntervalMs } };
+  return { status: "QUEUED", patch: { attempts, lastError: error, nextAttemptAt } };
 }
 
 /**

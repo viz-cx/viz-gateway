@@ -153,7 +153,11 @@ burn are implemented and build, but their on-chain behaviour needs devnet valida
   burn validated on devnet.
 - Lookup: real VIZ-account existence check; same deposit-address model can extend to
   TON later (TON has a comment field, so it's lower priority).
-- E4/E5 are not atomic across burn→enqueue; a `BURNED` checkpoint per signature would
-  make a mid-crash fully recoverable.
+- E4/E5: the scanner now **claims first** (writes a `SEEN` outbox row keyed on the tx
+  signature) before burning, and releases the claim (`store.delete`) if the burn fails,
+  so a duplicate scan can't double-burn and a crash-after-burn leaves a visible `SEEN`
+  row (alerted via `notifyStaff`) instead of a silently-lost release. Still not fully
+  atomic: completing a stranded `SEEN` peg-out needs an on-chain burn check (the
+  `BURNED`-checkpoint follow-up) before flipping it to `QUEUED`.
 - Fee constants are in shared config; embedding them in the committed federation
   manifest would harden cross-operator determinism.
