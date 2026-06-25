@@ -8,7 +8,9 @@
   "include": ["src"],
   "references": [
     { "path": "../common" },
+    { "path": "../log" },
     { "path": "../viz-watcher" },
-    { "path": "../ton-watcher" }
+    { "path": "../ton-watcher" },
+    { "path": "../solana-watcher" }
   ]
 }
