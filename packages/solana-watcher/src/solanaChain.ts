@@ -189,6 +189,18 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     return sig;
   }
 
+  /**
+   * Whether a signature landed successfully (confirmed/finalized, no error). Used by
+   * the peg-out burn-checkpoint recovery to decide if a stranded SEEN row already
+   * burned (→ hand to the dispatcher) or never did (→ release the claim and retry).
+   * searchTransactionHistory so an older burn is still found after a crash/restart.
+   */
+  async signatureLanded(signature: string): Promise<boolean> {
+    const { value } = await this.conn.getSignatureStatus(signature, { searchTransactionHistory: true });
+    if (!value || value.err) return false;
+    return value.confirmationStatus === "confirmed" || value.confirmationStatus === "finalized";
+  }
+
   /** Poll a signature to 'confirmed'. Throws on on-chain error; returns on timeout. */
   private async confirmSignature(signature: string, attempts = 30, delayMs = 1000): Promise<void> {
     for (let i = 0; i < attempts; i++) {

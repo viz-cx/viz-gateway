@@ -61,6 +61,12 @@ export interface StatusPatch {
   lastError?: string | null;
   txid?: string | null;
   nextAttemptAt?: number;
+  /**
+   * Fee withheld (base + activation) for a PEG_IN, learned from the coordinator at
+   * delivery time. The watcher enqueues a PEG_IN with fee 0 (it doesn't yet know the
+   * net split); persisting it here is what makes `unsweptFeesMilliViz()` non-zero.
+   */
+  feeMilliViz?: bigint;
 }
 
 /**

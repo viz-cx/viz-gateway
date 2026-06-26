@@ -26,8 +26,10 @@ export interface GatewayStore {
   /** Atomically first-claim + persist an action. Returns true iff newly inserted. */
   enqueue(input: EnqueueInput): Promise<boolean>;
   get(id: string): Promise<OutboxRecord | undefined>;
-  /** Advance status (+ optional attempts/error/txid/nextAttemptAt). */
+  /** Advance status (+ optional attempts/error/txid/nextAttemptAt/feeMilliViz). */
   setStatus(id: string, status: ActionStatus, patch?: StatusPatch): Promise<void>;
+  /** Remove a row entirely (used to release an unfulfilled first-claim for retry). */
+  delete(id: string): Promise<void>;
   /** Rows in any of `statuses` whose nextAttemptAt <= now (dispatcher work list). */
   due(now: number, statuses: ActionStatus[]): Promise<OutboxRecord[]>;
   /** Rows stuck in a non-terminal `statuses` longer than ageMs (stale alert). */
@@ -219,6 +221,7 @@ export class SqliteGatewayStore implements GatewayStore {
            attempts = COALESCE(?, attempts),
            last_error = CASE WHEN ?=1 THEN ? ELSE last_error END,
            txid = CASE WHEN ?=1 THEN ? ELSE txid END,
+           fee_milli_viz = COALESCE(?, fee_milli_viz),
            next_attempt_at = COALESCE(?, next_attempt_at),
            updated_at = ?
          WHERE id = ?`,
@@ -230,10 +233,15 @@ export class SqliteGatewayStore implements GatewayStore {
         patch.lastError ?? null,
         patch.txid !== undefined ? 1 : 0,
         patch.txid ?? null,
+        patch.feeMilliViz !== undefined ? patch.feeMilliViz.toString() : null,
         patch.nextAttemptAt ?? null,
         Date.now(),
         id,
       );
+  }
+
+  async delete(id: string): Promise<void> {
+    this.db.prepare("DELETE FROM action_outbox WHERE id = ?").run(id);
   }
 
   async due(now: number, statuses: ActionStatus[]): Promise<OutboxRecord[]> {
@@ -365,8 +373,12 @@ export class InMemoryGatewayStore implements GatewayStore {
     if (patch.attempts !== undefined) r.attempts = patch.attempts;
     if (patch.lastError !== undefined) r.lastError = patch.lastError;
     if (patch.txid !== undefined) r.txid = patch.txid;
+    if (patch.feeMilliViz !== undefined) r.feeMilliViz = patch.feeMilliViz;
     if (patch.nextAttemptAt !== undefined) r.nextAttemptAt = patch.nextAttemptAt;
     r.updatedAt = Date.now();
+  }
+  async delete(id: string): Promise<void> {
+    this.rows.delete(id);
   }
   async due(now: number, statuses: ActionStatus[]): Promise<OutboxRecord[]> {
     const set = new Set(statuses);

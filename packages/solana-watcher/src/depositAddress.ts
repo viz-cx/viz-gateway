@@ -15,9 +15,12 @@ import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/sp
  * bound to the derivation (not the sender), so a third party can only *gift* VIZ to
  * that account, never redirect it.
  *
- * The MASTER_SEED is a single hot key OUTSIDE the multisig (like fees.gate): it can
- * only burn the transient wVIZ that lands on these addresses and close their ATAs;
- * it cannot mint (that's the SPL multisig) or touch the VIZ backing (that's T-of-N).
+ * The MASTER_SEED is a single hot key OUTSIDE the multisig (like fees.gate): it
+ * cannot mint (that's the SPL multisig) or touch the VIZ backing (that's T-of-N),
+ * so the peg's collateral is never at risk from it. But note the real blast radius:
+ * a holder of MASTER_SEED can derive EVERY user's deposit private key and could
+ * sweep in-flight peg-out wVIZ before the scanner burns it — i.e. theft of transient
+ * user funds in transit, not just "burn". Treat it with HSM-grade key handling.
  *
  * Derivation uses HMAC-SHA512(MASTER_SEED, "...:vizAccount") -> 32-byte ed25519 seed
  * (node:crypto only — no extra deps), then Keypair.fromSeed.

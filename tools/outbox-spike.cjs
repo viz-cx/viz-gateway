@@ -70,6 +70,28 @@ const { createStore, SqliteGatewayStore } = require("../packages/common/dist/sto
   assert.strictEqual(unswept, 0n, "after sweep confirms, unswept fees are zero");
   console.log("[outbox] unswept-fee accounting OK");
 
+  // 4b) production flow: the watcher enqueues a PEG_IN with NO fee (it doesn't yet
+  //     know the net split); the dispatcher pins the real fee via the CONFIRMED
+  //     patch. Before this fix the fee stayed 0 forever and unswept was always 0.
+  await store.enqueue({ id: "trx2:0", direction: "PEG_IN", remoteChain: "TON", recipient: "carol", amountMilliViz: 5_000_000n, digest: "d4", status: "QUEUED" });
+  assert.strictEqual((await store.get("trx2:0")).feeMilliViz, 0n, "watcher enqueues fee 0");
+  await store.setStatus("trx2:0", "CONFIRMED", { txid: "t2", feeMilliViz: 15_000n });
+  assert.strictEqual((await store.get("trx2:0")).feeMilliViz, 15_000n, "fee pinned at delivery time");
+  assert.strictEqual(await store.unsweptFeesMilliViz(), 15_000n, "pinned fee now counts as unswept");
+  // delete() releases an unfulfilled claim (used by the peg-out claim-before-burn path).
+  await store.delete("trx2:0");
+  assert.strictEqual(await store.get("trx2:0"), undefined, "delete removes the row");
+  assert.strictEqual(await store.unsweptFeesMilliViz(), 0n);
+  console.log("[outbox] fee pinned at delivery + delete OK");
+
+  // 4c) stale() surfaces orphaned SIGNING rows so the dispatcher can requeue them
+  //     (a crash between marking SIGNING and recording the transition).
+  await store.enqueue({ id: "sig1", direction: "PEG_OUT", recipient: "dave", amountMilliViz: 1n, digest: "d5", status: "QUEUED" });
+  await store.setStatus("sig1", "SIGNING");
+  const orphaned = await store.stale(Date.now() + 10_000, 5_000, ["SIGNING"]);
+  assert.ok(orphaned.some((r) => r.id === "sig1"), "a long-running SIGNING row is surfaced by stale()");
+  console.log("[outbox] stale() surfaces orphaned SIGNING OK");
+
   // 5) cap window survives a reopen.
   const now = Date.now();
   await store.recordCap(500_000n, now);
