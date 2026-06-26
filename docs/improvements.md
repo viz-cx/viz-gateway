@@ -147,6 +147,49 @@ account — the **address is the routing identity**, no memo needed.
 _Status:_ derivation + registry are spike-verified; the lookup service, scanner, and
 burn are implemented and build, but their on-chain behaviour needs devnet validation.
 
+## PR #2 review follow-ups
+
+**#1 — peg-out validate-before-burn (🔴 permanent fund loss) ✅.** The deposit-address
+scanner ([`pegoutScanner.ts`](../packages/solana-watcher/src/pegoutScanner.ts)) burned
+wVIZ before checking the release target existed and applied no caps — so a peg-out to a
+non-existent/typo'd VIZ account burned the wVIZ with no release and (per Phase C, PEG_OUT
+never refunds) no recovery: permanent user loss. Now, after the `SEEN` claim and **before**
+the burn, it runs the rolling `CircuitBreaker` caps **and** a VIZ account-existence check
+(`VizChain.accountExists`, new — `getAccounts` non-empty). On any failure the row parks in
+`HELD` (wVIZ stays un-burned in the deposit ATA, recoverable); `OVER_24H` trips the shared
+pause. The decision is a pure [`guardPegOut`](../packages/solana-watcher/src/pegoutGuard.ts)
+(caps before existence; existence RPC skipped when caps fail). This makes the lookup-time
+existence check (Phase E2 TODO) defense-in-depth rather than the real gate. Spike:
+`tools/pegout-guard-spike.cjs`.
+
+**#2 stopgap — per-direction `signingTimeoutMs` ✅.** `DISPATCHER_SIGNING_TIMEOUT_MS` split
+into `…_PEG_IN_MS` (default 300s) / `…_PEG_OUT_MS` (180s); the dispatcher applies the
+per-direction threshold to each orphaned `SIGNING` row so a slow-but-legit mint confirm
+isn't spuriously requeued. This only narrows the window — the real idempotent-delivery fix
+is planned separately.
+
+**#3 — peg-out burn-checkpoint recovery (🟠) ✅.** The scanner now writes the burn
+signature onto the row (`txid`, still `SEEN`) **before** the `QUEUED` hand-off
+([`pegoutScanner.ts`](../packages/solana-watcher/src/pegoutScanner.ts)), so a crash in
+that gap is self-healing instead of needing a human. Stale-`SEEN` recovery checks the
+checkpoint via `SolanaChain.signatureLanded` (new) and a pure
+[`classifySeenRecovery`](../packages/solana-watcher/src/pegoutGuard.ts): landed ⇒
+`QUEUED`; never landed ⇒ release the claim and retry; no checkpoint (crashed at/before
+burn) ⇒ alert. Residual window (burn-return → checkpoint write) is one DB write.
+
+**#4 — SEEN-stale alert dedup (🟡) ✅.** The "stuck in SEEN" alert is tracked in an
+in-memory set so a single wedged row alerts once, not every ~5s loop; the id is cleared
+when the row recovers (so a recurrence re-alerts), and a restart re-alerts once.
+
+**#5 — stale release/refund alert (🟡) ✅.** The dispatcher now alerts (deduped) when a
+row is wedged past `DISPATCHER_STALE_ALERT_MS` (default 1h): `REFUNDING` parents via
+`stale()` (quiescent → aged by `updated_at`), and long-`QUEUED` releases/refunds via
+`createdAt` off the delivery list (a retrying row bumps `updated_at` every 10s, so it
+can't be aged by update time). Surfaces a degraded federation that can't sign.
+
+**#2 — idempotent delivery (🔴 double-mint/release): planned**, see
+[`plan-idempotent-delivery.md`](./plan-idempotent-delivery.md).
+
 ## Remaining / follow-ups
 
 - Live on-chain mint targets: TON multisig-v2 `new_order`+`approve`; Solana mint +

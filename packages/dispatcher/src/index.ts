@@ -59,26 +59,58 @@ async function submit(url: string, rec: OutboxRecord): Promise<DeliveryResult> {
 async function tick(
   store: GatewayStore,
   url: string,
-  opts: { retryIntervalMs: number; windowMs: number; signingTimeoutMs: number; feesGateAccount: string },
+  opts: {
+    retryIntervalMs: number;
+    windowMs: number;
+    signingTimeoutMs: { pegIn: number; pegOut: number };
+    staleDeliveryAlertMs: number;
+    feesGateAccount: string;
+  },
+  state: { alertedWedged: Set<string> },
 ): Promise<void> {
   const now = Date.now();
+  const alertWedged = (rec: OutboxRecord) => {
+    if (state.alertedWedged.has(rec.id)) return;
+    const hrs = Math.round(opts.staleDeliveryAlertMs / 3_600_000);
+    notifyStaff("delivery", `${rec.id} (${rec.direction}) wedged in ${rec.status} >${hrs}h; federation may be degraded`, {
+      id: rec.id,
+      status: rec.status,
+      attempts: rec.attempts,
+      error: rec.lastError,
+    });
+    state.alertedWedged.add(rec.id);
+  };
   // Recover orphaned SIGNING rows: a crash between marking a row SIGNING and
   // recording its transition would otherwise strand it forever (due() only scans
-  // QUEUED). Any row SIGNING longer than signingTimeoutMs (> the worst-case
-  // coordinator round-trip) is requeued for another attempt.
-  const orphaned = await store.stale(now, opts.signingTimeoutMs, ["SIGNING"]);
+  // QUEUED). Any row SIGNING longer than its per-direction timeout is requeued.
+  // CAVEAT: this is at-least-once — a crash AFTER the on-chain broadcast but before
+  // CONFIRMED requeues a row that already executed (double mint/release). The
+  // per-direction timeout only widens the safety margin; the real fix is an
+  // idempotent broadcast-boundary check (separate work item). Timeouts MUST exceed
+  // worst-case confirm so a slow-but-legit delivery isn't requeued.
+  const minTimeout = Math.min(opts.signingTimeoutMs.pegIn, opts.signingTimeoutMs.pegOut);
+  const orphaned = await store.stale(now, minTimeout, ["SIGNING"]);
   for (const rec of orphaned) {
+    const timeout = rec.direction === "PEG_IN" ? opts.signingTimeoutMs.pegIn : opts.signingTimeoutMs.pegOut;
+    if (now - rec.updatedAt < timeout) continue; // not yet stale for this direction
     await store.setStatus(rec.id, "QUEUED", { nextAttemptAt: now });
-    console.warn(`[dispatcher] recovered orphaned SIGNING row ${rec.id} -> QUEUED`);
+    console.warn(`[dispatcher] recovered orphaned SIGNING row ${rec.id} (${rec.direction}) -> QUEUED`);
   }
+
+  // Stuck-refund / degraded-federation visibility. A REFUNDING parent is quiescent
+  // (its updated_at is stable) so stale() catches it; a QUEUED row bumps updated_at
+  // every retry, so it is aged by createdAt in the delivery loop below.
+  for (const rec of await store.stale(now, opts.staleDeliveryAlertMs, ["REFUNDING"])) alertWedged(rec);
 
   // Deliver every QUEUED row (PEG_IN mints; PEG_OUT/FEE_SWEEP/REFUND are VIZ releases).
   const due = await store.due(now, ["QUEUED"]);
   for (const rec of due) {
+    if (now - rec.createdAt >= opts.staleDeliveryAlertMs) alertWedged(rec);
     await store.setStatus(rec.id, "SIGNING");
     const result = await submit(url, rec);
     const t = planTransition(rec, result, Date.now(), opts);
     await store.setStatus(rec.id, t.status, t.patch);
+    if (t.status !== "QUEUED") state.alertedWedged.delete(rec.id); // recovered/advanced — re-arm
     // Spawn FEE_SWEEP (on confirm) or REFUND (on window-exhaust) for a PEG_IN.
     const children = planChildren(rec, t.status, {
       feesGateAccount: opts.feesGateAccount,
@@ -109,8 +141,11 @@ async function main(): Promise<void> {
     retryIntervalMs: cfg.dispatcher.retryIntervalMs,
     windowMs: cfg.dispatcher.windowMs,
     signingTimeoutMs: cfg.dispatcher.signingTimeoutMs,
+    staleDeliveryAlertMs: cfg.dispatcher.staleDeliveryAlertMs,
     feesGateAccount: cfg.feesGateAccount,
   };
+  // Persists across ticks so a wedged row is alerted once, not every loop.
+  const state = { alertedWedged: new Set<string>() };
 
   let running = true;
   const stop = () => {
@@ -123,7 +158,7 @@ async function main(): Promise<void> {
 
   while (running) {
     try {
-      if (!(await store.isPaused())) await tick(store, url, opts);
+      if (!(await store.isPaused())) await tick(store, url, opts, state);
     } catch (err) {
       console.error("[dispatcher] tick error:", err);
     }

@@ -64,7 +64,15 @@ export interface GatewayConfig {
     lookupListen: string; // host:port for the deposit-address lookup service
   };
   coordinator: { url: string; listen: string; signerEndpoints: string[] };
-  dispatcher: { intervalMs: number; retryIntervalMs: number; windowMs: number; signingTimeoutMs: number };
+  dispatcher: {
+    intervalMs: number;
+    retryIntervalMs: number;
+    windowMs: number;
+    /** SIGNING-orphan recovery timeout, per direction (mint confirms slower than a VIZ release). */
+    signingTimeoutMs: { pegIn: number; pegOut: number };
+    /** Alert when a release/refund row stays undelivered this long (a degraded federation). */
+    staleDeliveryAlertMs: number;
+  };
   /** Service VIZ account that collects swept peg-in fees (single-key, no multisig). */
   feesGateAccount: string;
   caps: CapPolicy;
@@ -230,8 +238,19 @@ export function loadConfig(): GatewayConfig {
       retryIntervalMs: int("DISPATCHER_RETRY_INTERVAL_MS", 10000),
       windowMs: int("DISPATCHER_WINDOW_MS", 180000),
       // A row stuck in SIGNING longer than this (a crashed delivery) is requeued.
-      // Must exceed the worst-case coordinator round-trip (sign + broadcast + confirm).
-      signingTimeoutMs: int("DISPATCHER_SIGNING_TIMEOUT_MS", 120000),
+      // MUST exceed the worst-case coordinator round-trip (sign + broadcast + confirm)
+      // for that direction, or a slow-but-legit confirm gets spuriously requeued —
+      // which, until delivery is idempotent (the broadcast-boundary check, separate
+      // work item), risks a double mint/release. Per-direction because a remote mint
+      // (TON masterchain / Solana finality) confirms slower than a VIZ release.
+      // DISPATCHER_SIGNING_TIMEOUT_MS sets a single fallback for both.
+      signingTimeoutMs: {
+        pegIn: int("DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", 300000)),
+        pegOut: int("DISPATCHER_SIGNING_TIMEOUT_PEG_OUT_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", 180000)),
+      },
+      // A release/refund retries forever (nothing to refund), so a row wedged this long
+      // means the federation can't sign — alert operators rather than fail silently.
+      staleDeliveryAlertMs: int("DISPATCHER_STALE_ALERT_MS", 3600000), // 1h
     },
     feesGateAccount: opt("FEES_GATE_ACCOUNT", "fees.gate"),
     // Conservative bootstrap caps (1 VIZ ~ $0.005): $500 / $1,000 / $10,000.

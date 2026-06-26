@@ -25,6 +25,12 @@ export interface VizChain {
   irreversibleDepositsSince(fromBlock: number, upToBlock: number): Promise<VizDeposit[]>;
   /** Current gateway account VIZ balance, in milli-VIZ (for reconciliation). */
   gatewayBalanceMilliViz(): Promise<bigint>;
+  /**
+   * Whether a VIZ account exists. A peg-out release to a non-existent account
+   * can never land, so the peg-out path checks this BEFORE the irreversible burn
+   * to avoid stranding user funds (no wVIZ, no VIZ).
+   */
+  accountExists(name: string): Promise<boolean>;
   /** Current head block, for building a release proposal's TaPoS + expiration. */
   buildReleaseProposal(action: CanonicalAction, gatewayAccount: string): Promise<VizReleaseProposal>;
   /** Broadcast the proposal with >= T merged signatures (order-independent). Returns trx id. */

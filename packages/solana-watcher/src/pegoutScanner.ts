@@ -1,7 +1,9 @@
-import { canonicalPegOut, createStore, loadConfig } from "@gateway/common";
+import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
+import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "./solanaChain";
 import { deriveDepositKeypair } from "./depositAddress";
+import { classifySeenRecovery, guardPegOut } from "./pegoutGuard";
 
 /**
  * peg-out scanner (Solana, Variant A). Rotates over the registered deposit
@@ -33,6 +35,13 @@ async function main(): Promise<void> {
     { maxSignatures: cfg.solana.scanMaxSignatures, txDelayMs: cfg.solana.scanTxDelayMs },
   );
   const store = createStore(cfg.storeUrl);
+  // Same shared rolling-24h caps the watchers apply, so a large deposit-address
+  // peg-out can't burn + release uncapped.
+  const breaker = new CircuitBreaker(cfg.caps, store);
+  // Read-only VIZ node, used ONLY to confirm the release target exists before the
+  // irreversible burn. A release to a non-existent account would never land and,
+  // with PEG_OUT never refunding, would lose the user's wVIZ permanently.
+  const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
 
   let running = true;
   const stop = () => {
@@ -43,11 +52,15 @@ async function main(): Promise<void> {
 
   console.log(`[pegout-scanner] mint=${cfg.solana.wvizMint} batch=${cfg.solana.scanAddressBatch}`);
 
-  // A PEG_OUT row left in SEEN past this means a burn whose release was never
-  // queued (a crash between burn and setStatus). It can't be auto-recovered without
-  // confirming on-chain whether the burn actually landed (the BURNED-checkpoint
-  // follow-up), so alert for manual reconcile rather than risk a re-burn loop.
+  // A PEG_OUT row left in SEEN past this is a crash between burn and the QUEUED
+  // hand-off. The scanner checkpoints the burn signature onto the row (txid) right
+  // after burning, so recovery is decidable: if the checkpointed signature landed,
+  // hand it to the dispatcher (QUEUED); if it never landed, release the claim and
+  // retry; if there is no checkpoint (crashed at/before burn) it can't be auto-
+  // decided, so alert once for manual reconcile.
   const STALE_SEEN_MS = 5 * 60 * 1000;
+  // Ids already alerted on, so a wedged no-checkpoint row doesn't storm every loop.
+  const alertedSeen = new Set<string>();
 
   while (running) {
     try {
@@ -56,11 +69,31 @@ async function main(): Promise<void> {
         continue;
       }
       for (const s of await store.stale(Date.now(), STALE_SEEN_MS, ["SEEN"])) {
-        if (s.direction === "PEG_OUT") {
+        if (s.direction !== "PEG_OUT") continue;
+        let landed = false;
+        if (s.txid) {
+          try {
+            landed = await chain.signatureLanded(s.txid);
+          } catch (err) {
+            console.warn(`[pegout-scanner] could not check burn ${s.txid} for ${s.id}: ${String(err)}`);
+            continue; // transient RPC; retry next loop
+          }
+        }
+        const recovery = classifySeenRecovery(Boolean(s.txid), landed);
+        if (recovery === "REQUEUE") {
+          await store.setStatus(s.id, "QUEUED");
+          alertedSeen.delete(s.id);
+          console.log(`[pegout-scanner] recovered burned-but-unqueued ${s.id} (burn ${s.txid}) -> QUEUED`);
+        } else if (recovery === "RELEASE") {
+          await store.delete(s.id);
+          alertedSeen.delete(s.id);
+          console.warn(`[pegout-scanner] burn ${s.txid} for ${s.id} never landed; released claim to retry`);
+        } else if (!alertedSeen.has(s.id)) {
           notifyStaff("withdraws", `peg-out ${s.id} stuck in SEEN (burn unconfirmed); needs manual reconcile`, {
             vizAccount: s.recipient,
             amountMilliViz: String(s.amountMilliViz),
           });
+          alertedSeen.add(s.id);
         }
       }
       const slot = await chain.finalizedHeight();
@@ -88,13 +121,34 @@ async function main(): Promise<void> {
             status: "SEEN",
           });
           if (!first) continue; // already claimed (burned, queued, or recovering)
+
+          // Validate BEFORE the irreversible burn (caps + release-target existence).
+          // On failure leave the wVIZ un-burned in the deposit ATA (recoverable) and
+          // park the row in HELD rather than burning blind. accountExists is only
+          // read when the caps pass (skip the RPC otherwise).
+          const cap = await breaker.check(action.amountMilliViz);
+          const guard = guardPegOut(cap, cap.ok ? await viz.accountExists(dep.vizAccount) : false);
+          if (!guard.burn) {
+            await store.setStatus(action.id, "HELD", { lastError: guard.reason });
+            notifyStaff("withdraws", `peg-out ${action.id} held (${guard.reason}); not burned`, {
+              vizAccount: dep.vizAccount,
+              amountMilliViz: String(action.amountMilliViz),
+            });
+            if (guard.pause) await store.pause(guard.pause); // shared, cross-process
+            continue;
+          }
+
           try {
             // Burn first (supply down -> over-backing window, the safe direction).
             const depositKp = deriveDepositKeypair(cfg.solana.depositMasterSeed, dep.vizAccount);
-            await chain.burnFromDeposit(depositKp.secretKey, t.amountBaseUnits);
-            // Burned: hand to the dispatcher for the T-of-N VIZ release.
+            const burnSig = await chain.burnFromDeposit(depositKp.secretKey, t.amountBaseUnits);
+            await breaker.record(action.amountMilliViz); // count only burns that actually happened
+            // Checkpoint the burn signature (still SEEN) BEFORE the QUEUED hand-off, so a
+            // crash in the gap is self-healing: stale-SEEN recovery checks whether it landed.
+            await store.setStatus(action.id, "SEEN", { txid: burnSig });
+            // Burned + checkpointed: hand to the dispatcher for the T-of-N VIZ release.
             await store.setStatus(action.id, "QUEUED");
-            console.log(`[pegout-scanner] ${action.id} burned ${t.amountBaseUnits} -> release to ${dep.vizAccount}`);
+            console.log(`[pegout-scanner] ${action.id} burned ${t.amountBaseUnits} (${burnSig}) -> release to ${dep.vizAccount}`);
           } catch (err) {
             // Burn failed (transient RPC, already-empty ATA, ...). Release the claim
             // so the next scan retries cleanly rather than stranding the row in SEEN.

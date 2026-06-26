@@ -13,7 +13,7 @@
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
     "threshold": "node tools/threshold-calc.mjs",
-    "verify": "node tools/threshold-calc.mjs && node tools/viz-multisig-spike.cjs && node tools/ton-notification-spike.cjs && node tools/writepaths-spike.cjs && node tools/orchestration-spike.cjs && node tools/rotation-spike.cjs && node tools/ton-rotation-spike.cjs && node tools/solana-writepath-spike.cjs && node tools/solana-orchestration-spike.cjs && node tools/solana-innerix-spike.cjs && node tools/outbox-spike.cjs && node tools/dispatcher-policy-spike.cjs && node tools/fee-viz-spike.cjs && node tools/pegout-address-spike.cjs && node contracts/ton/tools/verify-offline.cjs",
+    "verify": "node tools/threshold-calc.mjs && node tools/viz-multisig-spike.cjs && node tools/ton-notification-spike.cjs && node tools/writepaths-spike.cjs && node tools/orchestration-spike.cjs && node tools/rotation-spike.cjs && node tools/ton-rotation-spike.cjs && node tools/solana-writepath-spike.cjs && node tools/solana-orchestration-spike.cjs && node tools/solana-innerix-spike.cjs && node tools/outbox-spike.cjs && node tools/dispatcher-policy-spike.cjs && node tools/fee-viz-spike.cjs && node tools/pegout-address-spike.cjs && node tools/pegout-guard-spike.cjs && node contracts/ton/tools/verify-offline.cjs",
     "start:viz-watcher": "node packages/viz-watcher/dist/index.js",
     "start:ton-watcher": "node packages/ton-watcher/dist/index.js",
     "start:signer": "node packages/signer/dist/index.js",

@@ -114,6 +114,13 @@ export class VizJsChain implements VizChain {
     return vizToMilli(acct.balance);
   }
 
+  /** getAccounts returns only existing accounts, so a present row means it exists. */
+  async accountExists(name: string): Promise<boolean> {
+    if (!name) return false;
+    const accounts = await call<Account[]>((cb) => viz.api.getAccounts([name], cb));
+    return Boolean(accounts?.[0]);
+  }
+
   /**
    * Build the shared release proposal: a deterministic transfer skeleton with
    * fixed TaPoS (from the current head) and expiration. The coordinator builds
