@@ -133,6 +133,8 @@ export interface SolanaMintProposal {
   nonceValue: string; // stored nonce (blockhash-equivalent) at proposal time (base58)
   decimals: number; // 3
   messageB64: string; // base64 of the compiled legacy message bytes (the signed digest)
+  /** Canonical action id embedded as a memo in the mint tx for on-chain idempotency checks. */
+  actionId?: string;
 }
 
 /** An operator's public identity on both chains. */

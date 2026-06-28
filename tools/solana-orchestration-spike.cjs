@@ -96,6 +96,7 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
       assert.ok(Buffer.isBuffer(raw) && raw.length > 0, "merged tx must serialize");
       return `SOLSIG_${signatures.length}`;
     },
+    actionExecuted: async () => ({ executed: false }),
   };
 
   // ---- real signers wrapped by routeApproval (exercises shape routing) -----

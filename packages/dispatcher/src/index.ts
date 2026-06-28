@@ -80,21 +80,19 @@ async function tick(
     });
     state.alertedWedged.add(rec.id);
   };
-  // Recover orphaned SIGNING rows: a crash between marking a row SIGNING and
-  // recording its transition would otherwise strand it forever (due() only scans
-  // QUEUED). Any row SIGNING longer than its per-direction timeout is requeued.
-  // CAVEAT: this is at-least-once — a crash AFTER the on-chain broadcast but before
-  // CONFIRMED requeues a row that already executed (double mint/release). The
-  // per-direction timeout only widens the safety margin; the real fix is an
-  // idempotent broadcast-boundary check (separate work item). Timeouts MUST exceed
-  // worst-case confirm so a slow-but-legit delivery isn't requeued.
+  // Recover orphaned BROADCAST rows: a crash between marking a row BROADCAST and
+  // receiving the coordinator's response would otherwise strand it forever (due()
+  // only scans QUEUED). Any row stuck in BROADCAST longer than its per-direction
+  // timeout is requeued. The coordinator's actionExecuted check (called at the
+  // start of every process()) handles the idempotency: if the action already landed
+  // on-chain it short-circuits to CONFIRMED; if not, it broadcasts fresh.
   const minTimeout = Math.min(opts.signingTimeoutMs.pegIn, opts.signingTimeoutMs.pegOut);
-  const orphaned = await store.stale(now, minTimeout, ["SIGNING"]);
+  const orphaned = await store.stale(now, minTimeout, ["BROADCAST"]);
   for (const rec of orphaned) {
     const timeout = rec.direction === "PEG_IN" ? opts.signingTimeoutMs.pegIn : opts.signingTimeoutMs.pegOut;
     if (now - rec.updatedAt < timeout) continue; // not yet stale for this direction
     await store.setStatus(rec.id, "QUEUED", { nextAttemptAt: now });
-    console.warn(`[dispatcher] recovered orphaned SIGNING row ${rec.id} (${rec.direction}) -> QUEUED`);
+    console.warn(`[dispatcher] recovered orphaned BROADCAST row ${rec.id} (${rec.direction}) -> QUEUED`);
   }
 
   // Stuck-refund / degraded-federation visibility. A REFUNDING parent is quiescent
@@ -106,7 +104,10 @@ async function tick(
   const due = await store.due(now, ["QUEUED"]);
   for (const rec of due) {
     if (now - rec.createdAt >= opts.staleDeliveryAlertMs) alertWedged(rec);
-    await store.setStatus(rec.id, "SIGNING");
+    // Mark BROADCAST *before* the coordinator call so a crash between here and
+    // CONFIRMED is recoverable: orphaned BROADCAST rows are requeued and the
+    // coordinator's actionExecuted check prevents a double-mint/release.
+    await store.setStatus(rec.id, "BROADCAST");
     const result = await submit(url, rec);
     const t = planTransition(rec, result, Date.now(), opts);
     await store.setStatus(rec.id, t.status, t.patch);
@@ -117,10 +118,12 @@ async function tick(
       feeMilliViz: result.feeMilliViz ?? 0n,
     });
     for (const child of children) await store.enqueue(child);
-    // A confirmed REFUND closes out its parent PEG_IN (REFUNDING -> REFUNDED), the
-    // terminal state the status machine documents but nothing set before.
-    if (t.status === "CONFIRMED" && rec.direction === "REFUND" && rec.id.endsWith(":refund")) {
-      await store.setStatus(rec.id.slice(0, -":refund".length), "REFUNDED");
+    // A confirmed REFUND closes out its parent PEG_IN (REFUNDING -> REFUNDED).
+    // Use the stable parentId column; fall back to the legacy id-suffix for rows
+    // that predate the parentId column.
+    if (t.status === "CONFIRMED" && rec.direction === "REFUND") {
+      const parentId = rec.parentId ?? (rec.id.endsWith(":refund") ? rec.id.slice(0, -":refund".length) : null);
+      if (parentId) await store.setStatus(parentId, "REFUNDED");
     }
     if (t.status === "REFUNDING") {
       notifyStaff("refund", `delivery window exhausted for ${rec.id}; refunding`, { id: rec.id, error: result.error });

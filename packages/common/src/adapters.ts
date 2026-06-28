@@ -43,6 +43,12 @@ export interface VizChain {
   buildReleaseProposal(action: CanonicalAction, gatewayAccount: string): Promise<VizReleaseProposal>;
   /** Broadcast the proposal with >= T merged signatures (order-independent). Returns trx id. */
   broadcastRelease(proposal: VizReleaseProposal, signatures: string[]): Promise<string>;
+  /**
+   * Scan recent gateway-account transfer history for an outgoing transfer whose memo
+   * equals `memo` (= CanonicalAction.id). Returns the trx id if found, null otherwise.
+   * Used by the coordinator's idempotency check before broadcasting a VIZ release.
+   */
+  releaseByMemo(memo: string): Promise<{ txid: string } | null>;
 }
 
 /**

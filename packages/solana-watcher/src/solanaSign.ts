@@ -3,6 +3,7 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
+  TransactionInstruction,
 } from "@solana/web3.js";
 import {
   createAssociatedTokenAccountIdempotentInstruction,
@@ -36,12 +37,19 @@ export function recipientAta(p: SolanaMintProposal): PublicKey {
   );
 }
 
+/** SPL Memo program id (v1 address, accepted by all web3.js versions). */
+const MEMO_PROGRAM_ID_STR = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo";
+
 /**
  * Rebuild the EXACT unsigned mint transaction from a proposal.
  *
  * Durable-nonce shape: `recentBlockhash` is set to the stored nonce value and
  * the first instruction is `nonceAdvance` — the runtime treats this as a nonce
  * transaction (the bytes never expire until the nonce is consumed).
+ *
+ * If `proposal.actionId` is set, a SPL Memo instruction carrying the action id
+ * is appended last. This makes the mint idempotent: the coordinator can scan
+ * on-chain memos for the action id to detect a crash-after-broadcast case.
  */
 export function buildMintTx(p: SolanaMintProposal): Transaction {
   const submitter = new PublicKey(p.feePayer);
@@ -72,6 +80,9 @@ export function buildMintTx(p: SolanaMintProposal): Transaction {
       TOKEN_2022_PROGRAM_ID,
     ),
   );
+  if (p.actionId) {
+    tx.add(new TransactionInstruction({ programId: new PublicKey(MEMO_PROGRAM_ID_STR), keys: [], data: Buffer.from(p.actionId, "utf-8") }));
+  }
   return tx;
 }
 

@@ -6,8 +6,8 @@
 export type ActionStatus =
   | "SEEN" // detected, idempotency-claimed
   | "QUEUED" // passed checks, ready to submit to the coordinator
-  | "SIGNING" // coordinator collecting partials
-  | "BROADCAST" // submitted to chain, has txid
+  | "SIGNING" // coordinator collecting partials (legacy; superseded by BROADCAST)
+  | "BROADCAST" // dispatcher set this before the coordinator call; may have hit chain
   | "CONFIRMED" // finality verified
   | "HELD" // failed caps/minimum — awaits refund or manual review
   | "REFUNDING" // delivery window exhausted — returning funds to sender
@@ -39,6 +39,8 @@ export interface OutboxRecord {
   updatedAt: number;
   /** Earliest time the dispatcher may (re)try this row (backoff). */
   nextAttemptAt: number;
+  /** Parent action id for child rows (REFUND / FEE_SWEEP). Stable across id-scheme changes. */
+  parentId: string | null;
 }
 
 /** Fields needed to first-claim + persist an action. */
@@ -53,6 +55,8 @@ export interface EnqueueInput {
   digest: string;
   /** Initial status; default "SEEN". */
   status?: ActionStatus;
+  /** Parent action id for child rows (REFUND / FEE_SWEEP). */
+  parentId?: string;
 }
 
 /** Optional fields to update alongside a status transition. */

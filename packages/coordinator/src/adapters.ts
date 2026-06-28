@@ -44,6 +44,11 @@ export class VizReleaseBroadcaster implements Broadcaster {
     // proposal is a VizReleaseProposal here (PEG_OUT).
     return this.chain.broadcastRelease(proposal as never, signatures);
   }
+
+  async actionExecuted(action: CanonicalAction): Promise<{ executed: boolean; txid?: string }> {
+    const found = await this.chain.releaseByMemo(action.id);
+    return found ? { executed: true, txid: found.txid } : { executed: false };
+  }
 }
 
 /** PEG_IN: build a TON mint proposal (NET + pinned provisioning) and submit the order. */
@@ -75,6 +80,13 @@ export class TonMintBroadcaster implements Broadcaster {
   async broadcast(_action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
     return this.chain.submitMint(proposal as never, signatures);
   }
+
+  async actionExecuted(_action: CanonicalAction): Promise<{ executed: boolean; txid?: string }> {
+    // TON live multisig-v2 order-status query is deferred until the contract is
+    // deployed (orderSeqno is still a stub "0"). Conservative: assume not executed
+    // so a crash recovery goes through the normal signing path.
+    return { executed: false };
+  }
 }
 
 /** PEG_IN (Solana): build a durable-nonce SPL mint proposal (NET + pinned provisioning). */
@@ -90,11 +102,16 @@ export class SolanaMintBroadcaster implements Broadcaster {
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
     const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "SOLANA"));
     if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
-    const proposal = await this.chain.buildMintProposal(action.recipient, q.b.net, destProvisioned, this.signerSet);
+    const proposal = await this.chain.buildMintProposal(action.recipient, q.b.net, destProvisioned, this.signerSet, action.id);
     return { proposal, feeMilliViz: q.b.fee };
   }
 
   async broadcast(_action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
     return this.chain.submitMint(proposal as SolanaMintProposal, signatures);
+  }
+
+  async actionExecuted(action: CanonicalAction): Promise<{ executed: boolean; txid?: string }> {
+    const found = await this.chain.mintByActionId(action.id);
+    return found ? { executed: true, txid: found.txid } : { executed: false };
   }
 }

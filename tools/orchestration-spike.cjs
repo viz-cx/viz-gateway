@@ -24,7 +24,7 @@ function signerClient(operatorId, wif) {
   return { operatorId, approve: (action, proposal) => ks.signVizRelease(action, proposal) };
 }
 
-function fakeBroadcaster(action) {
+function fakeBroadcaster(action, { alreadyExecuted = false } = {}) {
   const proposal = {
     refBlockNum: 1,
     refBlockPrefix: 2,
@@ -42,6 +42,8 @@ function fakeBroadcaster(action) {
       calls.push(signatures);
       return "TXID_" + signatures.length;
     },
+    actionExecuted: async () =>
+      alreadyExecuted ? { executed: true, txid: "EXISTING_TXID" } : { executed: false },
   };
 }
 
@@ -105,8 +107,20 @@ function fakeBroadcaster(action) {
     console.log("[rogue-signer] unknown operator ignored; approvals=1 broadcast=false OK");
   }
 
+  // actionExecuted short-circuit: if the action is already on-chain, skip signing
+  {
+    const b = fakeBroadcaster(action, { alreadyExecuted: true });
+    const r = await new Orchestrator(2, ["op-1", "op-2", "op-3"], [signerClient("op-1", wifA)], b).process(action);
+    assert.strictEqual(r.broadcast, true);
+    assert.strictEqual(r.txid, "EXISTING_TXID");
+    assert.strictEqual(r.approvals, 0); // no signing needed
+    assert.strictEqual(b.calls.length, 0); // broadcast() never called
+    console.log("[idempotent] actionExecuted=true -> short-circuit broadcast=true txid=EXISTING_TXID approvals=0 OK");
+  }
+
   console.log("\nRESULT: orchestration completes a peg at 1-of-1 and 2-of-3 with real");
-  console.log("signatures, stops at threshold, and refuses under-threshold / rogue signers.");
+  console.log("signatures, stops at threshold, refuses under-threshold / rogue signers,");
+  console.log("and short-circuits to CONFIRMED when actionExecuted returns true.");
 })().catch((e) => {
   console.error(e);
   process.exit(1);
