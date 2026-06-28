@@ -25,6 +25,22 @@ declare module "viz-js-lib" {
     block_num?: number;
   }
 
+  /**
+   * An annotated signed transaction as returned by get_transaction
+   * (operation_history API). Operations + block_num are at the TOP level
+   * (verified live against node.viz.cx 2026-06-28).
+   */
+  export interface AnnotatedTransaction {
+    operations: Array<[string, Record<string, unknown>]>;
+    block_num: number;
+    transaction_id: string;
+    transaction_num: number;
+    ref_block_num: number;
+    ref_block_prefix: number;
+    expiration: string;
+    signatures?: string[];
+  }
+
   export interface OpWrapper {
     trx_id: string;
     block: number;
@@ -44,6 +60,7 @@ declare module "viz-js-lib" {
   interface VizApi {
     getDynamicGlobalProperties(cb: Cb<DynamicGlobalProperties>): void;
     getOpsInBlock(blockNum: number, onlyVirtual: boolean, cb: Cb<OpWrapper[]>): void;
+    getTransaction(trxId: string, cb: Cb<AnnotatedTransaction | null>): void;
     getAccounts(names: string[], cb: Cb<Account[]>): void;
     broadcastTransactionSynchronous(trx: VizTransaction, cb: Cb<BroadcastResult>): void;
   }

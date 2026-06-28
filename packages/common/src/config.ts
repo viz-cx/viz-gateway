@@ -60,7 +60,8 @@ export interface GatewayConfig {
     scanTxDelayMs: number; // delay between per-tx parses (429 avoidance)
     scanAddressBatch: number; // deposit addresses scanned per peg-out loop (rotation)
     submitterMinLamports: number; // reserve alert floor for the submitter SOL balance
-    depositMasterSeed: string; // hot seed deriving per-VIZ-account peg-out deposit addresses
+    depositMasterSeed: string; // hot seed deriving per-VIZ-account peg-out deposit addresses (scanner/sweeper only)
+    depositMasterPub: string; // PUBLIC master key (base58) for signer-side deposit-address re-derivation (F2)
     lookupListen: string; // host:port for the deposit-address lookup service
   };
   coordinator: { url: string; listen: string; signerEndpoints: string[] };
@@ -220,6 +221,10 @@ export function loadConfig(): GatewayConfig {
       scanAddressBatch: int("SOLANA_SCAN_ADDRESS_BATCH", 50),
       submitterMinLamports: int("SOLANA_SUBMITTER_MIN_LAMPORTS", 50_000_000), // ~0.05 SOL
       depositMasterSeed: opt("SOLANA_DEPOSIT_MASTER_SEED", ""),
+      // Public master key the signer uses to independently re-derive deposit addresses
+      // (F2 peg-out source validation). Safe to publish; derive from the seed via
+      // masterPubFromSeed(). Required on a signer that handles Solana peg-out.
+      depositMasterPub: opt("DEPOSIT_MASTER_PUB", ""),
       lookupListen: opt("LOOKUP_LISTEN", "127.0.0.1:8095"),
     },
     coordinator: {

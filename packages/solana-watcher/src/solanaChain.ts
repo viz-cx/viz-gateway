@@ -2,6 +2,7 @@ import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { createBurnInstruction, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import type { RemoteBurn, RemoteChain, SolanaMintProposal } from "@gateway/common";
 import { buildSignedMintTx, mintMessageB64 } from "./solanaSign";
+import type { DepositSigner } from "./depositAddress";
 
 /**
  * Solana remote-chain adapter (read paths live; mint write-path deferred).
@@ -92,11 +93,15 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
    * Burn wVIZ received on a peg-out deposit ATA (Variant A, E5). MUST run BEFORE
    * the VIZ release so circulating supply drops first (over-backing window, safe);
    * releasing before burning would briefly under-back and trip recon. The deposit
-   * keypair is the token-account owner (burn authority); the submitter pays fees.
+   * address is the token-account owner (burn authority); the submitter pays fees.
+   *
+   * The deposit key is an ADDITIVELY-derived ed25519 scalar (F2), not a seed-based
+   * Keypair, so it signs via `deposit.signMessage` over the compiled message rather
+   * than `tx.sign(depositKeypair)`. The submitter (a normal Keypair) partial-signs
+   * the fee payer slot; the deposit signature is attached with addSignature.
    */
-  async burnFromDeposit(depositSecret: Uint8Array, amountBaseUnits: bigint): Promise<string> {
+  async burnFromDeposit(deposit: DepositSigner, amountBaseUnits: bigint): Promise<string> {
     if (!this.writer) throw new Error("SolanaChain has no writer config; cannot burn");
-    const deposit = Keypair.fromSecretKey(depositSecret);
     const submitter = Keypair.fromSecretKey(this.writer.submitterSecret);
     const ata = getAssociatedTokenAddressSync(this.mint, deposit.publicKey, false, TOKEN_2022_PROGRAM_ID);
     const ix = createBurnInstruction(ata, this.mint, deposit.publicKey, amountBaseUnits, [], TOKEN_2022_PROGRAM_ID);
@@ -105,10 +110,13 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     tx.feePayer = submitter.publicKey;
     tx.recentBlockhash = blockhash;
     tx.add(ix);
-    tx.sign(submitter, deposit);
-    const sig = await this.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-    await this.confirmSignature(sig);
-    return sig;
+    // Fee payer signs normally; the deposit owner signs its scalar over the message.
+    tx.partialSign(submitter);
+    const sig = deposit.signMessage(new Uint8Array(tx.serializeMessage()));
+    tx.addSignature(deposit.publicKey, Buffer.from(sig));
+    const txSig = await this.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
+    await this.confirmSignature(txSig);
+    return txSig;
   }
 
   async finalizedBurnsSince(_fromSlot: number, toSlot: number): Promise<RemoteBurn[]> {
@@ -139,6 +147,36 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
       });
     }
     return burns;
+  }
+
+  /**
+   * F2 peg-out source re-validation: fetch ONE finalized burn by its tx signature
+   * and reconstruct the partial RemoteBurn (everything except homeDestination, which
+   * the signer fills from the deposit registry after the address-binding check).
+   *
+   * Fail-closed: returns null if the tx is unknown OR not yet final per the buffer
+   * (the signer then refuses to sign). `from` is the burn AUTHORITY = the deposit
+   * owner address the signer re-derives from DEPOSIT_MASTER_PUB.
+   */
+  async getBurn(sourceId: string): Promise<RemoteBurn | null> {
+    const tx = await this.conn.getParsedTransaction(sourceId, {
+      commitment: "finalized",
+      maxSupportedTransactionVersion: 0,
+    });
+    if (!tx || tx.meta?.err) return null;
+    if (this.finalitySlots > 0) {
+      const safeSlot = (await this.finalizedHeight()) - this.finalitySlots;
+      if (tx.slot > safeSlot) return null; // not yet final per the buffer
+    }
+    const burn = parseBurn(tx, this.mint.toBase58());
+    if (!burn) return null;
+    return {
+      sourceId,
+      height: tx.slot,
+      from: burn.authority,
+      amountMilliViz: burn.amountBaseUnits,
+      homeDestination: "", // filled by the caller after the deposit-binding check
+    };
   }
 
   /**
@@ -256,6 +294,44 @@ interface GatewayDeposit {
   from: string;
   amountBaseUnits: bigint;
   memo: string;
+}
+
+interface ParsedBurn {
+  /** Burn authority = the deposit owner address (the F2 address-binding target). */
+  authority: string;
+  amountBaseUnits: bigint;
+}
+
+/**
+ * Extract a wVIZ burn (`burn`/`burnChecked` on `mint`) from a parsed transaction.
+ * Scans top-level AND inner instructions (a burn routed via CPI lives in inner ix).
+ * Returns the burn authority (deposit owner) + amount, or null if no matching burn.
+ */
+export function parseBurn(
+  tx: {
+    transaction: { message: { instructions: unknown[] } };
+    meta?: { innerInstructions?: Array<{ instructions: unknown[] }> | null } | null;
+  },
+  mint: string,
+): ParsedBurn | null {
+  const ixs = [...(tx.transaction.message.instructions as Array<Record<string, unknown>>)];
+  for (const group of tx.meta?.innerInstructions ?? []) {
+    ixs.push(...(group.instructions as Array<Record<string, unknown>>));
+  }
+  for (const ix of ixs) {
+    const program = ix["program"] as string | undefined;
+    if (program !== "spl-token" && program !== "spl-token-2022") continue;
+    const parsed = ix["parsed"] as { type?: string; info?: Record<string, unknown> } | undefined;
+    if (!parsed?.info) continue;
+    if (parsed.type !== "burn" && parsed.type !== "burnChecked") continue;
+    const info = parsed.info;
+    if (info["mint"] !== mint) continue;
+    const amt =
+      (info["tokenAmount"] as { amount?: string } | undefined)?.amount ?? (info["amount"] as string | undefined);
+    if (!amt) continue;
+    return { authority: String(info["authority"] ?? ""), amountBaseUnits: BigInt(amt) };
+  }
+  return null;
 }
 
 /**

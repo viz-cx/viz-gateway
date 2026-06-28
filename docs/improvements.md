@@ -126,10 +126,11 @@ deterministic Solana deposit address; funds arriving there are released to that 
 account — the **address is the routing identity**, no memo needed.
 
 - **E1 — deterministic derivation.** [`depositAddress.ts`](../packages/solana-watcher/src/depositAddress.ts):
-  `X = HMAC-SHA512(MASTER_SEED, vizAccount)[:32] → Keypair.fromSeed` (node:crypto only,
-  no extra deps). The `MASTER_SEED` is a single hot key **outside the multisig** (like
-  `fees.gate`): it can only burn the transient wVIZ on these addresses, never mint or
-  touch the VIZ backing. Spike: `tools/pegout-address-spike.cjs`.
+  originally `X = HMAC-SHA512(MASTER_SEED, vizAccount)[:32] → Keypair.fromSeed`. The
+  `MASTER_SEED` is a single hot key **outside the multisig** (like `fees.gate`): it can
+  only burn the transient wVIZ on these addresses, never mint or touch the VIZ backing.
+  Spike: `tools/pegout-address-spike.cjs`. **(Superseded by F2 below: now additive ed25519
+  so signers re-derive from a PUBLIC master key; the address changes — clear the table.)**
 - **E2 — lookup service.** [`lookup.ts`](../packages/solana-watcher/src/lookup.ts):
   `GET /address?viz_account=alice → { address, ata, mint, warning }`. Stateless
   derivation; open/unauthenticated (release is bound to derivation → a third party can
@@ -189,6 +190,25 @@ can't be aged by update time). Surfaces a degraded federation that can't sign.
 
 **#2 — idempotent delivery (🔴 double-mint/release): planned**, see
 [`plan-idempotent-delivery.md`](./plan-idempotent-delivery.md).
+
+**F2 — signer independent source-event validation (🔴 theft vector) ✅.** The signer no
+longer trusts the coordinator-supplied `CanonicalAction`: before signing it re-reads the
+source event from its OWN node, reconstructs the canonical action, and asserts a
+byte-identical digest ([`sourceValidator.ts`](../packages/signer/src/sourceValidator.ts),
+gated first in every `KeyedSigner` sign method). Point-lookup primitives added:
+`VizChain.getDeposit(trxId, opIndex)` (peg-in; `get_transaction` verified live on
+node.viz.cx) and `SolanaChain.getBurn(sig)` (peg-out). For Solana peg-out — which has no
+memo — the release target is re-bound by re-deriving the per-account deposit address, so a
+poisoned registry row can't redirect funds. To keep the highest-blast-radius secret
+single-holder, derivation moved to **additive ed25519**: signers verify with a PUBLIC
+`DEPOSIT_MASTER_PUB` (`childPub = masterPub + tweak·G`) while only the sweeper holds the
+seed/scalar (`childScalar = masterScalar + tweak`); the sweeper's burn signs with the
+explicit scalar (RFC 8032), since the child key is a scalar, not a stock `Keypair` seed.
+Offline-verified in [`signer-f2-spike.cjs`](../tools/signer-f2-spike.cjs) (forged peg-in
+recipient/amount + peg-out recipient/binding rejected; additive pub/scalar addresses match
+and the scalar signature verifies). **TON peg-out source re-validation is deferred** (TON
+peg-out not yet active; `sourceId` is a message hash with no clean toncenter-v2 fetch) — the
+validator warns and proceeds for that one path only.
 
 ## Remaining / follow-ups
 
