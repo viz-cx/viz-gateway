@@ -147,9 +147,8 @@ async function coSignSolana(): Promise<void> {
   validateHandoffProposal(proposal, master, onchain);
 
   const member = Keypair.fromSecretKey(cfg.signerSecret).publicKey.toBase58();
-  const sig = signHandoff(proposal, cfg.signerSecret);
   if (!proposal.signatures.some((s) => s.startsWith(`${member}:`))) {
-    proposal.signatures.push(sig);
+    proposal.signatures.push(signHandoff(proposal, cfg.signerSecret));
   }
   writeFileSync(file, JSON.stringify(proposal, null, 2));
   console.log(`[co-sign-solana] appended partial; ${proposal.signatures.length} collected (need ${master.newThreshold}).`);
@@ -193,6 +192,7 @@ async function broadcastSolana(): Promise<void> {
   }
 
   const raw = buildSignedHandoffTx(proposal, proposal.signatures, cfg.submitterSecret);
+  // Capture slot before send so the nonce-aware confirmation strategy has a lower bound.
   const minContextSlot = await conn.getSlot("confirmed");
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: false });
   await conn.confirmTransaction(
