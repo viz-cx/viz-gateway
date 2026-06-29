@@ -50,3 +50,36 @@ export function loadSolanaDeployConfig(): SolanaDeployConfig {
     apply: opt("DEPLOY_SEND", "0") === "1",
   };
 }
+
+function loadSecret(name: string): Uint8Array | null {
+  const v = opt(name, "");
+  if (!v) return null;
+  if (!v.trim().startsWith("[")) {
+    throw new Error(`${name} must be a JSON byte array (solana-keygen format).`);
+  }
+  return Uint8Array.from(JSON.parse(v) as number[]);
+}
+
+export interface SolanaRotationConfig {
+  rpcUrl: string;
+  oldMultisig: string; // SOLANA_MULTISIG (current mint+freeze authority)
+  mint: string; // SOLANA_WVIZ_MINT
+  nonceAccount: string; // SOLANA_ROTATION_NONCE_ACCOUNT
+  submitterSecret: Uint8Array | null; // fee payer + nonce authority + Phase-A payer
+  signerSecret: Uint8Array | null; // this operator's member key (co-sign)
+  chainId: string; // ROTATION_CHAIN_ID
+  apply: boolean; // APPLY=1
+}
+
+export function loadSolanaRotationConfig(): SolanaRotationConfig {
+  return {
+    rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
+    oldMultisig: opt("SOLANA_MULTISIG", ""),
+    mint: opt("SOLANA_WVIZ_MINT", ""),
+    nonceAccount: opt("SOLANA_ROTATION_NONCE_ACCOUNT", ""),
+    submitterSecret: loadSecret("SOLANA_SUBMITTER_SECRET"),
+    signerSecret: loadSecret("SOLANA_SIGNER_SECRET"),
+    chainId: opt("ROTATION_CHAIN_ID", "viz-gateway"),
+    apply: opt("APPLY", "0") === "1",
+  };
+}
