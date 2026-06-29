@@ -83,7 +83,7 @@ export function signHandoff(p: SolanaRotationProposal, secretKey: Uint8Array): s
 /**
  * Assemble the broadcast-ready raw transaction: attach the member signatures
  * from `partials`, sign as the submitter (fee payer + nonce authority), and
- * verify ALL signatures. Throws if a member sig is foreign to the signer set or
+ * verify all present signatures (M-of-N; the on-chain SPL multisig program enforces the threshold). Throws if a member sig is foreign to the signer set or
  * if verification fails. Pure (no network).
  */
 export function buildSignedHandoffTx(

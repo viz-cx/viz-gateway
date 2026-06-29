@@ -7,7 +7,6 @@
 const assert = require("node:assert");
 const { Keypair } = require("@solana/web3.js");
 const {
-  buildHandoffTx,
   handoffMessageB64,
   signHandoff,
   buildSignedHandoffTx,
