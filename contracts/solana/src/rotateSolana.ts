@@ -55,7 +55,11 @@ async function readMultisigMembers(
   addr: PublicKey,
 ): Promise<{ members: string[]; threshold: number }> {
   const ms = await getMultisig(conn, addr, "confirmed", TOKEN_2022_PROGRAM_ID);
-  const all = [ms.signer1, ms.signer2, ms.signer3, ms.signer4, ms.signer5, ms.signer6, ms.signer7, ms.signer8, ms.signer9, ms.signer10, ms.signer11];
+  const all = [
+    ms.signer1, ms.signer2, ms.signer3, ms.signer4,
+    ms.signer5, ms.signer6, ms.signer7, ms.signer8,
+    ms.signer9, ms.signer10, ms.signer11,
+  ];
   const members = all.slice(0, ms.n).map((p) => p.toBase58());
   return { members, threshold: ms.m };
 }
@@ -189,8 +193,17 @@ async function broadcastSolana(): Promise<void> {
   }
 
   const raw = buildSignedHandoffTx(proposal, proposal.signatures, cfg.submitterSecret);
+  const minContextSlot = await conn.getSlot("confirmed");
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: false });
-  await conn.confirmTransaction(sig, "confirmed");
+  await conn.confirmTransaction(
+    {
+      signature: sig,
+      nonceAccountPubkey: new PublicKey(proposal.nonceAccount),
+      nonceValue: proposal.nonceValue,
+      minContextSlot,
+    },
+    "confirmed",
+  );
   console.log(`[broadcast-solana] handoff broadcast: ${sig}`);
 
   const state = mergeState(readState(stateFile), {
@@ -222,6 +235,19 @@ async function status(): Promise<void> {
   if (solanaDone && !st.solanaDone) {
     writeFileSync(stateFile, JSON.stringify(mergeState(st, { solanaDone: true }), null, 2));
     console.log("[status] recorded solanaDone=true.");
+  }
+
+  if (expectedNew) {
+    try {
+      const live = await readMultisigMembers(conn, new PublicKey(expectedNew));
+      const expected = master.newOperators.map((o) => o.solanaPubkey).sort();
+      const actual = [...live.members].sort();
+      const memberMatch = expected.length === actual.length && expected.every((v, i) => v === actual[i]);
+      console.log(`[status] new multisig members match master set: ${memberMatch}`);
+      console.log(`[status] new multisig threshold: ${live.threshold} (expected ${master.newThreshold})`);
+    } catch (e) {
+      console.log(`[status] could not read new multisig (not yet created?): ${e instanceof Error ? e.message : e}`);
+    }
   }
 }
 
