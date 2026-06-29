@@ -9,7 +9,7 @@ export interface VizAuthority {
 }
 
 /**
- * Parse the CLI operator spec "op-1=<vizPub>:<tonPub>,op-2=...". Order is
+ * Parse the CLI operator spec "op-1=<vizPub>:<tonPub>:<solPub>,op-2=...". Order is
  * preserved for display; authorities sort independently.
  */
 export function parseOperators(spec: string): OperatorRef[] {
@@ -22,18 +22,21 @@ export function parseOperators(spec: string): OperatorRef[] {
       if (eq < 0) throw new Error(`operator entry missing '=': ${entry}`);
       const id = entry.slice(0, eq).trim();
       const rest = entry.slice(eq + 1).trim();
-      const colon = rest.indexOf(":");
-      if (colon < 0) throw new Error(`operator entry missing ':' (need vizPub:tonPub): ${entry}`);
-      const vizPubkey = rest.slice(0, colon).trim();
-      const tonPubkey = rest.slice(colon + 1).trim();
-      if (!id || !vizPubkey || !tonPubkey) throw new Error(`operator entry incomplete: ${entry}`);
-      return { id, vizPubkey, tonPubkey };
+      const parts = rest.split(":").map((p) => p.trim());
+      if (parts.length !== 3) {
+        throw new Error(`operator entry needs vizPub:tonPub:solanaPub (3 fields): ${entry}`);
+      }
+      const [vizPubkey, tonPubkey, solanaPubkey] = parts;
+      if (!id || !vizPubkey || !tonPubkey || !solanaPubkey) {
+        throw new Error(`operator entry incomplete: ${entry}`);
+      }
+      return { id, vizPubkey, tonPubkey, solanaPubkey };
     });
 }
 
 /** Inverse of parseOperators. */
 export function serializeOperators(ops: OperatorRef[]): string {
-  return ops.map((o) => `${o.id}=${o.vizPubkey}:${o.tonPubkey}`).join(",");
+  return ops.map((o) => `${o.id}=${o.vizPubkey}:${o.tonPubkey}:${o.solanaPubkey}`).join(",");
 }
 
 /**
@@ -194,6 +197,8 @@ export interface RotationState {
   vizDone: boolean;
   tonOrderAddress: string;
   tonDone: boolean;
+  solanaNewMultisig: string; // address authority was handed to (empty until broadcast-solana)
+  solanaDone: boolean;
 }
 
 /** Pure merge: overlay `patch` onto `state`, preserving untouched fields. */

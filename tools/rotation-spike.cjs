@@ -25,10 +25,10 @@ const {
 const MEMO = viz.auth.wifToPublic(viz.auth.toWif("gateway", "pw-memo", "memo"));
 
 // --- parse/serialize round-trip ---
-const ops = parseOperators("op-1=VIZ1aaa:11aa,op-2=VIZ1bbb:22bb,op-3=VIZ1ccc:33cc");
+const ops = parseOperators("op-1=VIZ1aaa:11aa:So1aaa,op-2=VIZ1bbb:22bb:So1bbb,op-3=VIZ1ccc:33cc:So1ccc");
 assert.strictEqual(ops.length, 3);
-assert.deepStrictEqual(ops[0], { id: "op-1", vizPubkey: "VIZ1aaa", tonPubkey: "11aa" });
-assert.strictEqual(serializeOperators(ops), "op-1=VIZ1aaa:11aa,op-2=VIZ1bbb:22bb,op-3=VIZ1ccc:33cc");
+assert.deepStrictEqual(ops[0], { id: "op-1", vizPubkey: "VIZ1aaa", tonPubkey: "11aa", solanaPubkey: "So1aaa" });
+assert.strictEqual(serializeOperators(ops), "op-1=VIZ1aaa:11aa:So1aaa,op-2=VIZ1bbb:22bb:So1bbb,op-3=VIZ1ccc:33cc:So1ccc");
 console.log("[parse] operators round-trip OK");
 
 // --- authority is keys-only, sorted, master-free ---
@@ -37,7 +37,7 @@ assert.strictEqual(auth.weight_threshold, 2);
 assert.deepStrictEqual(auth.account_auths, []);
 assert.deepStrictEqual(auth.key_auths, [["VIZ1aaa", 1], ["VIZ1bbb", 1], ["VIZ1ccc", 1]]);
 // sorted regardless of input order:
-const auth2 = buildActiveAuthority(parseOperators("op-9=VIZ1zzz:00,op-1=VIZ1aaa:11"), 1);
+const auth2 = buildActiveAuthority(parseOperators("op-9=VIZ1zzz:00:So9,op-1=VIZ1aaa:11:So1"), 1);
 assert.deepStrictEqual(auth2.key_auths, [["VIZ1aaa", 1], ["VIZ1zzz", 1]]);
 console.log("[authority] keys-only + sorted OK");
 
@@ -54,14 +54,14 @@ console.log("[op] account_update deterministic, master omitted OK");
 
 // --- authorityHash is stable & order-independent ---
 const h1 = authorityHash(buildActiveAuthority(ops, 2));
-const h2 = authorityHash(buildActiveAuthority(parseOperators("op-3=VIZ1ccc:33cc,op-1=VIZ1aaa:11aa,op-2=VIZ1bbb:22bb"), 2));
+const h2 = authorityHash(buildActiveAuthority(parseOperators("op-3=VIZ1ccc:33cc:So3,op-1=VIZ1aaa:11aa:So1,op-2=VIZ1bbb:22bb:So2"), 2));
 assert.strictEqual(h1, h2, "authorityHash must be order-independent");
 console.log("[hash] authorityHash stable OK");
 
 // --- parseManifest validation ---
 const m = parseManifest({ n: 2, threshold: 2, operators: [
-  { id: "op-1", vizPubkey: "VIZ1aaa", tonPubkey: "11" },
-  { id: "op-2", vizPubkey: "VIZ1bbb", tonPubkey: "22" },
+  { id: "op-1", vizPubkey: "VIZ1aaa", tonPubkey: "11", solanaPubkey: "SoM1" },
+  { id: "op-2", vizPubkey: "VIZ1bbb", tonPubkey: "22", solanaPubkey: "SoM2" },
 ] });
 assert.strictEqual(m.n, 2);
 assert.strictEqual(m.fees, undefined, "fees absent when not present in manifest");
@@ -87,9 +87,9 @@ function kp(seed) {
 }
 const A = kp("a"), B = kp("b"), C = kp("c");
 const newOps = [
-  { id: "op-1", vizPubkey: A.pub, tonPubkey: "aa" },
-  { id: "op-2", vizPubkey: B.pub, tonPubkey: "bb" },
-  { id: "op-3", vizPubkey: C.pub, tonPubkey: "cc" },
+  { id: "op-1", vizPubkey: A.pub, tonPubkey: "aa", solanaPubkey: "SoA" },
+  { id: "op-2", vizPubkey: B.pub, tonPubkey: "bb", solanaPubkey: "SoB" },
+  { id: "op-3", vizPubkey: C.pub, tonPubkey: "cc", solanaPubkey: "SoC" },
 ];
 const taPoS = { refBlockNum: 1234, refBlockPrefix: 5678901, expiration: "2099-01-01T00:00:00" };
 const currentActiveHash = "deadbeef";
@@ -169,7 +169,7 @@ console.log("[proposal] independent-partial merge + dedup OK");
 
 // --- rotation state merge (shared by VIZ broadcast + TON tool) ---
 {
-  const s0 = { proposalFile: "rotation-proposal.json", vizDone: false, tonOrderAddress: "", tonDone: false };
+  const s0 = { proposalFile: "rotation-proposal.json", vizDone: false, tonOrderAddress: "", tonDone: false, solanaNewMultisig: "", solanaDone: false };
   const s1 = mergeState(s0, { vizDone: true });
   assert.strictEqual(s1.vizDone, true);
   assert.strictEqual(s1.tonDone, false);
@@ -178,7 +178,21 @@ console.log("[proposal] independent-partial merge + dedup OK");
   assert.strictEqual(s2.vizDone, true); // unchanged fields preserved
   const s3 = mergeState(s2, { tonDone: true });
   assert.strictEqual(s3.tonDone, true);
+  const s4 = mergeState(s3, { solanaNewMultisig: "SoLms1", solanaDone: true });
+  assert.strictEqual(s4.solanaNewMultisig, "SoLms1");
+  assert.strictEqual(s4.solanaDone, true);
+  assert.strictEqual(s4.tonDone, true); // unchanged fields preserved
   console.log("[state] mergeState preserves prior fields OK");
 }
+
+// --- 3-field operator spec carries solanaPubkey ---
+const ops3 = parseOperators("op-1=VIZ1aaa:11aa:SoLpub1,op-2=VIZ1bbb:22bb:SoLpub2");
+assert.strictEqual(ops3[0].solanaPubkey, "SoLpub1");
+assert.strictEqual(ops3[1].solanaPubkey, "SoLpub2");
+assert.strictEqual(serializeOperators(ops3), "op-1=VIZ1aaa:11aa:SoLpub1,op-2=VIZ1bbb:22bb:SoLpub2");
+
+// --- a 2-field entry (missing solanaPubkey) is rejected ---
+assert.throws(() => parseOperators("op-1=VIZ1aaa:11aa"), /solanaPub|missing|incomplete/i);
+console.log("[solana] 3-field operator spec + rejection of 2-field OK");
 
 console.log("\nrotation-spike assertions passed.");
