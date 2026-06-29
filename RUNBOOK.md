@@ -312,6 +312,37 @@ expected order from the proposal and aborts unless the on-chain order is byte-id
 > - [ ] order address + executed=true
 > - [ ] `status` shows the multisig signer set == the new operator set
 
+### Solana operator rotation
+
+Prereq (one-time): a dedicated rotation nonce account, authority = the submitter:
+
+```bash
+solana create-nonce-account rotation-nonce.json 0.0015 --nonce-authority <submitter>
+# set SOLANA_ROTATION_NONCE_ACCOUNT=<that account's pubkey>
+```
+
+SPL multisigs are immutable, so rotation creates a NEW multisig and hands the
+mint+freeze authority to it (two-phase). Run after `rotate broadcast viz` so the
+shared `rotation-proposal.json` already carries the new set (incl. each operator's
+Solana pubkey).
+
+1. **Proposer** (also creates the new multisig on-chain):
+   ```bash
+   APPLY=1 npm run rotate:solana -- propose-solana   # writes rotation-solana.json
+   ```
+2. **Each current operator** co-signs (validates the new multisig on-chain first):
+   ```bash
+   npm run rotate:solana -- co-sign-solana rotation-solana.json
+   ```
+3. **Submitter** broadcasts once `newThreshold` partials are collected:
+   ```bash
+   APPLY=1 npm run rotate:solana -- broadcast-solana rotation-solana.json
+   ```
+4. **All operators**: set `SOLANA_MULTISIG=<new address printed above>` and restart
+   the gateway. Confirm: `npm run rotate:solana -- status`.
+
+The operator spec is now three-field: `op-1=<vizPub>:<tonPub>:<solanaPub>`.
+
 ## Known gaps to close during bring-up
 
 - **`submitMintOrder`** — wire the on-chain `new_order`/approve via the Multisig
