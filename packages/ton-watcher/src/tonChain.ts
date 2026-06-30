@@ -1,25 +1,31 @@
-import { Address, JettonMaster, TonClient } from "@ton/ton";
+import { Address, JettonMaster, TonClient, internal, SendMode, WalletContractV4, toNano } from "@ton/ton";
+import { beginCell } from "@ton/core";
 import type { Slice } from "@ton/core";
 import type { RemoteBurn, RemoteChain, TonMintProposal } from "@gateway/common";
+import { Multisig } from "@gateway/contracts-ton";
+import { keyPairFromMnemonic } from "./tonSign";
 
 /**
- * Live TON read path via toncenter (HTTP API v2). Read-only methods need no
- * keys; submitMintOrder (the write path) is implemented in a later phase.
+ * Live TON chain adapter. Read path: finalized burns, jetton balances.
+ * Write path: submit the multisig-v2 new_order that mints wVIZ (peg-in).
  *
- * Peg-out model (symmetric with the VIZ side): a user sends wVIZ to the
- * gateway's Jetton wallet WITH a text comment = their VIZ account. The gateway
- * wallet receives a TEP-74 `transfer_notification` (op 0x7362d09c) carrying
- * amount, sender, and the forward payload (the comment). We later burn those
- * wVIZ and release VIZ. This carries the destination cleanly, exactly like the
- * VIZ deposit memo.
+ * Peg-out model: user sends wVIZ to the gateway's Jetton wallet with a text
+ * comment = their VIZ account. The gateway receives a TEP-74
+ * transfer_notification (0x7362d09c) carrying amount, sender, and the
+ * forward payload (comment). The watcher enqueues a VIZ release.
  *
  * Verified against toncenter: getMasterchainInfo().latestSeqno and
  * JettonMaster.getJettonData().totalSupply both read live. The
  * transfer_notification parser is verified by a constructed round-trip
- * (tools/ton-notification-spike.cjs) since no wVIZ jetton exists yet.
+ * (tools/ton-notification-spike.cjs).
  */
 
 const OP_TRANSFER_NOTIFICATION = 0x7362d09c;
+// Standard governed-minter op codes (ton-blockchain/token-contract).
+const OP_MINT = 21;
+const OP_INTERNAL_TRANSFER = 0x178d4519;
+// TTL for a new multisig order (1 hour should cover any signing latency).
+const ORDER_TTL_SEC = 3600;
 
 /** Read a TEP-74 transfer_notification body: returns amount, sender, comment. */
 export function parseTransferNotification(
@@ -36,7 +42,7 @@ export function parseTransferNotification(
   let comment = "";
   if (fp.remainingBits >= 32) {
     const tag = fp.loadUint(32);
-    if (tag === 0) comment = fp.loadStringTail(); // text comment (first cell; snake refs TODO)
+    if (tag === 0) comment = fp.loadStringTail(); // text comment
   }
   return { amountBaseUnits, sender, comment };
 }
@@ -45,7 +51,8 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
   private readonly client: TonClient;
   private readonly minter: Address;
   private readonly gatewayWallet: Address | null;
-  /** wVIZ uses 3 decimals to match VIZ, so 1 base unit == 1 milli-VIZ. */
+  private readonly multisigAddress: string;
+  private readonly signerMnemonic: string;
   private readonly finalityBufferSec: number;
   private readonly maxTransactions: number;
 
@@ -54,12 +61,16 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     apiKey: string,
     minterAddress: string,
     gatewayJettonWallet: string,
+    multisigAddress: string,
+    signerMnemonic: string,
     finalityConfirmations: number,
     maxTransactions = 20,
   ) {
     this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
     this.minter = Address.parse(minterAddress);
     this.gatewayWallet = gatewayJettonWallet ? Address.parse(gatewayJettonWallet) : null;
+    this.multisigAddress = multisigAddress;
+    this.signerMnemonic = signerMnemonic;
     // ~5s per masterchain block; convert the confirmation count to a time buffer.
     this.finalityBufferSec = Math.max(6, finalityConfirmations * 5 + 5);
     this.maxTransactions = Math.max(1, maxTransactions);
@@ -105,21 +116,88 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     return burns;
   }
 
+  /**
+   * Submit a multisig-v2 new_order that mints `proposal.amountMilliViz` wVIZ
+   * (= base units, 3 decimals) to `proposal.toAddress` via the standard governed
+   * jetton minter. For a 1-of-1 setup, `approve_on_init=true` executes the mint
+   * in the same transaction. For M-of-N, remaining signers must send on-chain
+   * `approve` messages to the returned order address.
+   *
+   * Off-chain ed25519 signatures in `_mintAuth` are NOT used here (TON uses
+   * on-chain approvals, not off-chain sigs). They are collected by the signer
+   * service for audit purposes and future M-of-N on-chain approval routing.
+   *
+   * Returns the multisig order address (hex string) for status tracking.
+   */
   async submitMint(proposal: TonMintProposal, _mintAuth: string[]): Promise<string> {
-    // IMPORTANT — multisig-v2 approvals are ON-CHAIN, not off-chain signatures.
-    // To mint, the proposer sends a `new_order` to the multisig carrying the
-    // mint action (mint wVIZ to proposal.toAddress for proposal.amountMilliViz);
-    // each signer then approves by sending an `approve` message FROM the address
-    // at signers[index] (or the proposer approves on init). At threshold the
-    // order executes the mint. For a 1-of-1 bootstrap this is a single
-    // new_order with approve_on_init=true from your signer wallet.
-    //
-    // So `signatures` (the off-chain ed25519 model) does NOT apply here; the real
-    // integration creates/approves the order via the official Multisig wrapper.
-    // See RUNBOOK.md ("How peg-in mint works on TON").
-    throw new Error(
-      `submitMintOrder: multisig-v2 mint is an on-chain new_order + approve flow via the ` +
-        `Multisig wrapper (order ${proposal.orderSeqno}, to ${proposal.toAddress}). See RUNBOOK.md.`,
-    );
+    if (!this.multisigAddress) throw new Error("TON_MULTISIG_ADDRESS is required for submitMint");
+    if (!this.signerMnemonic) throw new Error("TON_SIGNER_MNEMONIC is required for submitMint");
+
+    const c = this.client;
+    const multisigAddr = Address.parse(this.multisigAddress);
+    const toAddr = Address.parse(proposal.toAddress);
+    const amountBaseUnits = BigInt(proposal.amountMilliViz);
+
+    // Build the standard governed-minter mint body (OP=21).
+    // master_msg: the jetton wallet internal_transfer (TEP-74 op 0x178d4519).
+    const masterMsg = beginCell()
+      .storeUint(OP_INTERNAL_TRANSFER, 32)
+      .storeUint(0n, 64) // query_id
+      .storeCoins(amountBaseUnits) // jetton amount (base units = milli-VIZ)
+      .storeAddress(this.minter) // from = minter
+      .storeAddress(toAddr) // response_destination
+      .storeCoins(0n) // forward_ton_amount
+      .storeBit(false) // no forward payload
+      .endCell();
+
+    const mintBody = beginCell()
+      .storeUint(OP_MINT, 32)
+      .storeUint(0n, 64) // query_id
+      .storeAddress(toAddr) // to_address
+      .storeCoins(toNano("0.05")) // ton_amount forwarded with the mint for wallet creation/fees
+      .storeRef(masterMsg)
+      .endCell();
+
+    // Build the multisig TransferRequest: send the mint message from the multisig to the minter.
+    const mintTransfer = {
+      type: "transfer" as const,
+      sendMode: SendMode.PAY_GAS_SEPARATELY,
+      message: internal({ to: this.minter, value: toNano("0.1"), body: mintBody }),
+    };
+
+    // Fetch the current multisig state for sendNewOrder validation.
+    const dataMultisig = c.open(Multisig.createFromAddress(multisigAddr));
+    const data = await dataMultisig.getMultisigData();
+
+    const { secretKey, publicKey } = await keyPairFromMnemonic(this.signerMnemonic);
+    const signerWallet = WalletContractV4.create({ workchain: 0, publicKey: Buffer.from(publicKey) });
+
+    const myIdx = data.signers.findIndex((s) => s.equals(signerWallet.address));
+    if (myIdx < 0) {
+      throw new Error(
+        `TON signer wallet ${signerWallet.address.toString()} not found in multisig signers`,
+      );
+    }
+
+    const orderAddr = await dataMultisig.getOrderAddress(data.nextOrderSeqno);
+
+    // Re-open with synthesised config so sendNewOrder's signer-index validation passes.
+    const multisigWithConfig = new Multisig(multisigAddr, undefined, {
+      threshold: Number(data.threshold),
+      signers: data.signers,
+      proposers: data.proposers,
+      allowArbitrarySeqno: false,
+    });
+    const openedMultisig = c.open(multisigWithConfig);
+    const openedWallet = c.open(signerWallet);
+    const sender = openedWallet.sender(Buffer.from(secretKey));
+
+    const expiration = Math.floor(Date.now() / 1000) + ORDER_TTL_SEC;
+    // approve_on_init=true: in a 1-of-1 setup the proposer self-approves and the
+    // order executes immediately. For M-of-N the remaining signers must call
+    // order.sendApprove() on-chain; that routing is deferred.
+    await openedMultisig.sendNewOrder(sender, [mintTransfer], expiration, toNano("1"), myIdx, true);
+
+    return orderAddr.toString();
   }
 }

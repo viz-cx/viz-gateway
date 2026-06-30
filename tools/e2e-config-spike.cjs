@@ -21,6 +21,8 @@ const env = {
   E2E_TON_GATEWAY_JETTON_WALLET: "EQgw",
   E2E_TON_GATEWAY_OWNER: "EQowner",
   E2E_TON_JETTON_MINTER_ADDRESS: "EQmint",
+  E2E_TON_MULTISIG_ADDRESS: "EQmultisig",
+  E2E_TON_SIGNER_MNEMONIC: "word1 word2 word3",
   E2E_TON_BURN_MNEMONIC: "word1 word2",
   E2E_TON_BURN_OWNER: "EQburn",
   E2E_TON_MIN_GAS_NANO: "100000000",
@@ -38,6 +40,8 @@ assert.equal(runEnv.TON_ENDPOINT, env.E2E_TON_ENDPOINT);
 assert.equal(runEnv.FEDERATION_N, "1");
 assert.equal(runEnv.FEDERATION_THRESHOLD, "1");
 assert.match(runEnv.STORE_URL, new RegExp(`sqlite:\\./data/e2e-.*\\.sqlite$`));
+assert.equal(runEnv.TON_MULTISIG_ADDRESS, "EQmultisig");
+assert.equal(runEnv.TON_SIGNER_MNEMONIC, "word1 word2 word3");
 
 console.log("e2e-config-spike OK");
 

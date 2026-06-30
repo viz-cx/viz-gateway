@@ -95,6 +95,8 @@ Set these as encrypted Actions secrets in the repo settings, or in a local `.env
 | `E2E_TON_GATEWAY_JETTON_WALLET` | Gateway's wVIZ jetton wallet address |
 | `E2E_TON_GATEWAY_OWNER` | Gateway's owner address (jetton transfer destination) |
 | `E2E_TON_JETTON_MINTER_ADDRESS` | wVIZ jetton minter address |
+| `E2E_TON_MULTISIG_ADDRESS` | Deployed multisig-v2 contract address (the admin of the wVIZ minter) |
+| `E2E_TON_SIGNER_MNEMONIC` | 24-word mnemonic of the TON multisig signer wallet (submits mint orders) |
 | `E2E_TON_BURN_MNEMONIC` | Burn wallet 24-word mnemonic **(most sensitive TON secret)** |
 | `E2E_TON_BURN_OWNER` | Burn wallet address (public, used as peg-in recipient on TON) |
 | `E2E_TON_MIN_GAS_NANO` | Minimum gas reserve in nanoTON (e.g. `100000000` = 0.1 TON) |

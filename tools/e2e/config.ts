@@ -15,6 +15,8 @@ export interface E2eConfig {
     gatewayJettonWallet: string;
     gatewayOwner: string;
     jettonMinterAddress: string;
+    multisigAddress: string;
+    signerMnemonic: string;
     burnMnemonic: string;
     burnOwner: string;
     minGasNano: bigint;
@@ -48,6 +50,8 @@ export function loadE2eConfig(env: NodeJS.ProcessEnv, chain: "ton" | "solana"): 
     gatewayJettonWallet: req(env, "E2E_TON_GATEWAY_JETTON_WALLET"),
     gatewayOwner: req(env, "E2E_TON_GATEWAY_OWNER"),
     jettonMinterAddress: req(env, "E2E_TON_JETTON_MINTER_ADDRESS"),
+    multisigAddress: req(env, "E2E_TON_MULTISIG_ADDRESS"),
+    signerMnemonic: req(env, "E2E_TON_SIGNER_MNEMONIC"),
     burnMnemonic: req(env, "E2E_TON_BURN_MNEMONIC"),
     burnOwner: req(env, "E2E_TON_BURN_OWNER"),
     minGasNano: BigInt(req(env, "E2E_TON_MIN_GAS_NANO")),
@@ -67,6 +71,8 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     TON_API_KEY: cfg.ton.apiKey,
     TON_JETTON_MINTER_ADDRESS: cfg.ton.jettonMinterAddress,
     TON_GATEWAY_JETTON_WALLET: cfg.ton.gatewayJettonWallet,
+    TON_MULTISIG_ADDRESS: cfg.ton.multisigAddress,
+    TON_SIGNER_MNEMONIC: cfg.ton.signerMnemonic,
     // Federation: solo 1-of-1
     FEDERATION_N: "1",
     FEDERATION_THRESHOLD: "1",

@@ -28,6 +28,8 @@ async function main(): Promise<void> {
       cfg.ton.apiKey,
       cfg.ton.jettonMinterAddress,
       cfg.ton.gatewayJettonWallet,
+      cfg.ton.multisigAddress,
+      cfg.ton.signerMnemonic,
       cfg.ton.finalityConfirmations,
     );
     remotes.push({ name: "TON", supply: () => ton.circulatingSupplyMilliViz() });
