@@ -46,18 +46,25 @@ the build fails with `TS5101`/`TS5107`. **Always `npm install` first** so the lo
 
 ## Dependency security
 
-`npm audit` flags advisories in transitive deps of `@solana/web3.js` and `viz-js-lib`, none in our own code.
-Triaged 2026-06-21 — **accepted** (don't re-triage; revisit only on dependency upgrades):
+`npm audit` flags advisories in transitive deps of `@solana/web3.js`, none in our own code.
+Last triaged 2026-07-01 — current state is **8 findings (3 high, 5 moderate), all one Solana chain**;
+**accepted** (don't re-triage; revisit only on dependency upgrades):
 
 | Advisory | Sev | Via | Why accepted |
 |----------|-----|-----|--------------|
-| `babel-traverse@6.26.0` (ACE on compile) | critical | `viz-js-lib`→`babel-preset-env@1.7.0` | Build-time transpiler only; viz-js-lib ships precompiled `lib/`, gateway never runs babel. No fix (babel 6 EOL; no `babel-traverse@7`). |
-| `bigint-buffer@1.1.5` (buffer overflow) | high | `@solana/spl-token`→`buffer-layout-utils` | No upstream patch (1.1.5 is latest). Solana write-path deferred; read path parses trusted-RPC data. Clears when spl-token drops the dep. |
+| `bigint-buffer@1.1.5` (buffer overflow) | high | `@solana/spl-token`→`buffer-layout-utils` | No upstream patch (1.1.5 is latest; advisory covers all versions). Write-path partials are operator-signed; read path parses trusted-RPC data. We're on the latest `@solana/spl-token@0.4.14`; clears only when it drops the dep or on a web3.js v2 migration. The `@solana/web3.js`/`spl-token*` rows in `npm audit` are the same root cause re-counted. |
 | `uuid@8.3.2` (bounds check) | moderate | `@solana/web3.js`→`jayson` | Not exploitable — jayson uses `v4()`, never the vulnerable `buf` arg. |
 
-The one advisory that **was** fixed: `ws` (high DoS) — patched via the `overrides: { "ws": "^8.18.0" }` in the
-root `package.json` (viz-js-lib pins `ws@^1.x`, no in-range fix). If you add a dep that needs ws@1 behavior,
-revisit that override.
+Advisories that **were** fixed (no longer in the tree — keep these notes so they aren't reintroduced):
+- `ws` (high DoS) — patched via `overrides: { "ws": "^8.18.0" }` in the root `package.json` (viz-js-lib pins
+  `ws@^1.x`, no in-range fix; resolves to `ws@8.21.0`). If you add a dep that needs ws@1 behavior, revisit it.
+- `form-data` (high CRLF injection) — resolved by `form-data@4.0.6` arriving transitively via `@ton/ton`→`axios`.
+- `babel-traverse@6` (critical ACE on compile) — gone since `viz-js-lib@^0.12.7` (registry move) dropped the
+  babel-6 build chain. No override needed.
+
+Note: GitHub Dependabot may still show stale **open** alerts for `ws`/`form-data` until its next scan — the
+patched versions are already in the committed lockfile (verified via `npm audit`), so those alerts are
+informational lag, not live exposure.
 
 ## Conventions
 
