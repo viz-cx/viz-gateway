@@ -106,11 +106,21 @@ Set these as encrypted Actions secrets in the repo settings, or in a local `.env
 ## 3. Local run
 
 ```bash
-# Copy and fill in the provisioned secrets
-cp .env.example .env
-# Add all E2E_* vars from the secret list above
+# Copy and fill in the provisioned secrets (only the 16 E2E_* vars are read)
+cp .env.e2e.example .env.e2e
+# edit .env.e2e — keep the 24-word mnemonics double-quoted
 
-npm run e2e:ton
+# Validates all 16 vars are present, then runs the round trip:
+tools/e2e/run-local.sh
+```
+
+`.env.e2e` is gitignored. `run-local.sh` is a thin wrapper over `npm run e2e:ton`
+that sources `.env.e2e` (the harness reads `process.env`, not a `.env` file) and
+fails fast listing any missing vars. To push the same values to GitHub Actions:
+
+```bash
+tools/e2e/set-secrets.sh --dry-run   # preview (values masked)
+tools/e2e/set-secrets.sh             # gh secret set × 16 on origin
 ```
 
 On success: `[e2e] ROUND TRIP OK: released <net> mVIZ to <recipient>` and exits 0.
