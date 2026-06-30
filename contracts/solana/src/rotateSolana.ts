@@ -150,11 +150,16 @@ async function coSignSolana(): Promise<void> {
   validateHandoffProposal(proposal, master, onchain);
 
   const member = Keypair.fromSecretKey(cfg.signerSecret).publicKey.toBase58();
-  if (!proposal.signatures.some((s) => s.startsWith(`${member}:`))) {
+  const alreadySigned = proposal.signatures.some((s) => s.startsWith(`${member}:`));
+  if (!alreadySigned) {
     proposal.signatures.push(signHandoff(proposal, cfg.signerSecret));
   }
   writeFileSync(file, JSON.stringify(proposal, null, 2));
-  console.log(`[co-sign-solana] appended partial; ${proposal.signatures.length} collected (need ${master.newThreshold}).`);
+  if (alreadySigned) {
+    console.log(`[co-sign-solana] already signed; ${proposal.signatures.length} collected (need ${master.newThreshold}).`);
+  } else {
+    console.log(`[co-sign-solana] appended partial; ${proposal.signatures.length} collected (need ${master.newThreshold}).`);
+  }
   if (proposal.signatures.length >= master.newThreshold) {
     console.log("[co-sign-solana] threshold reached — ready for `rotate:solana broadcast-solana`.");
   }
