@@ -31,7 +31,8 @@
     "setup:viz-account": "node setup-viz/dist/setupAccount.js",
     "rotate": "node setup-viz/dist/rotate.js",
     "rotate:ton": "node contracts/ton/dist/rotateTon.js",
-    "rotate:solana": "node contracts/solana/dist/rotateSolana.js"
+    "rotate:solana": "node contracts/solana/dist/rotateSolana.js",
+    "e2e:ton": "npm run build && node tools/e2e/dist/roundtrip.js ton"
   },
   "engines": {
     "node": ">=20"
