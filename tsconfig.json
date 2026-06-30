@@ -12,6 +12,7 @@
     { "path": "packages/log" },
     { "path": "contracts/ton" },
     { "path": "contracts/solana" },
-    { "path": "setup-viz" }
+    { "path": "setup-viz" },
+    { "path": "tools/e2e" }
   ]
 }

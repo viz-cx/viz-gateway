@@ -7,7 +7,8 @@
     "packages/*",
     "contracts/ton",
     "contracts/solana",
-    "setup-viz"
+    "setup-viz",
+    "tools/e2e"
   ],
   "scripts": {
     "build": "tsc -b",

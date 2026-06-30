@@ -8,3 +8,5 @@ dist/
 data/
 *.sqlite
 .DS_Store
+tools/e2e/dist/
+tools/e2e/logs/
