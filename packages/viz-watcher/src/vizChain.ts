@@ -131,6 +131,14 @@ export class VizJsChain implements VizChain {
     }
     if (!tx || !Array.isArray(tx.operations)) return null;
 
+    // Defense-in-depth: a correct node echoes the id we asked for. A mismatch means a
+    // misbehaving/lying node returned a different transaction — refuse to derive from it.
+    if (tx.transaction_id && tx.transaction_id !== trxId) {
+      throw new Error(
+        `getDeposit(${trxId}): node returned transaction_id ${tx.transaction_id} != requested ${trxId}`,
+      );
+    }
+
     // Confirm the transfer is irreversible before trusting it (re-org safety).
     const lib = await this.lastIrreversibleBlock();
     if (tx.block_num > lib) return null;

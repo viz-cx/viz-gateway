@@ -151,6 +151,15 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(action, depsPegOut(null, aliceRec)), "6b PEG_OUT burn not finalized");
   }
 
+  // 6c) Non-Solana-shaped PEG_OUT id (e.g. a TON message hash): TON source validation is
+  //     not implemented, so the dispatcher must FAIL CLOSED and refuse — never sign
+  //     without an independent source check (regression guard for the silent-bypass hole).
+  {
+    const tonHash = "a".repeat(64); // 64-hex message hash — not a base58 Solana signature
+    const action = canonicalPegOut({ ...trueBurn, sourceId: tonHash, homeDestination: VIZ_ACCT });
+    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: tonHash }, aliceRec)), "6c non-Solana PEG_OUT refused (fail-closed)");
+  }
+
   // ===================== additive ed25519 key roundtrip =========================
   // The whole peg-out arm rests on: a deposit address derived from the PUBLIC master
   // key alone == the address derived from the secret scalar, AND the scalar can still

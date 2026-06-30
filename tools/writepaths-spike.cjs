@@ -20,7 +20,7 @@ const FEES = {
 const { milliToViz } = require("../packages/viz-watcher/dist/vizChain.js");
 const { buildReleaseTx } = require("../packages/viz-watcher/dist/vizSign.js");
 const { signMintApproval, verifyMintApproval, keyPairFromMnemonic } = require("../packages/ton-watcher/dist/tonSign.js");
-const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
+const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
 const { mnemonicNew } = require("@ton/crypto");
 
 (async () => {
@@ -45,8 +45,8 @@ const { mnemonicNew } = require("@ton/crypto");
     memo: action.id,
   };
 
-  const opA = new KeyedSigner("op-1", wifA, "", FEES);
-  const opB = new KeyedSigner("op-2", wifB, "", FEES);
+  const opA = new KeyedSigner("op-1", wifA, "", FEES, null, DISABLED_SOURCE_VALIDATION);
+  const opB = new KeyedSigner("op-2", wifB, "", FEES, null, DISABLED_SOURCE_VALIDATION);
   const apprA = await opA.signVizRelease(action, proposal);
   const apprB = await opB.signVizRelease(action, proposal);
   const merged = [apprA.signature, apprB.signature];
@@ -90,7 +90,7 @@ const { mnemonicNew } = require("@ton/crypto");
     orderHashHex,
   };
 
-  const opTon = new KeyedSigner("op-1", "", mnemonic, FEES);
+  const opTon = new KeyedSigner("op-1", "", mnemonic, FEES, null, DISABLED_SOURCE_VALIDATION);
   const tonAppr = await opTon.approveTonMint(pegIn, mintProposal);
   assert.ok(verifyMintApproval(mintProposal, tonAppr.signature, publicKey), "ed25519 approval failed to verify");
   console.log("[ton] ed25519 mint approval verifies against the operator pubkey OK");

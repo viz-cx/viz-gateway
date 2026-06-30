@@ -22,7 +22,7 @@ const {
   mintMessageB64,
   buildSignedMintTx,
 } = require("../packages/solana-watcher/dist/solanaSign.js");
-const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
+const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
 const { routeApproval } = require("../packages/signer/dist/routeApproval.js");
 const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js");
 
@@ -99,8 +99,8 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   };
 
   // ---- real signers wrapped by routeApproval (exercises shape routing) -----
-  const ksA = new KeyedSigner("op-1", "", "", FEES, opA.secretKey);
-  const ksB = new KeyedSigner("op-2", "", "", FEES, opB.secretKey);
+  const ksA = new KeyedSigner("op-1", "", "", FEES, opA.secretKey, DISABLED_SOURCE_VALIDATION);
+  const ksB = new KeyedSigner("op-2", "", "", FEES, opB.secretKey, DISABLED_SOURCE_VALIDATION);
   const signerClient = (id, ks) => ({ operatorId: id, approve: (a, p) => routeApproval(ks, a, p) });
 
   const result = await new Orchestrator(

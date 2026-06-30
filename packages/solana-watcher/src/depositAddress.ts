@@ -76,7 +76,16 @@ function clamp(h: Uint8Array): Uint8Array {
   return c;
 }
 
-/** Master signing scalar from the seed, reduced mod L for additive arithmetic. */
+/**
+ * Master signing scalar from the seed, reduced mod L for additive arithmetic.
+ *
+ * NOTE: stock ed25519 (and @solana/web3.js Keypair) does NOT reduce the clamped scalar
+ * mod L — it multiplies the full clamped value by G. We reduce here so the scalar adds
+ * homomorphically with the tweak (childScalar = masterScalar + tweak). A consequence:
+ * `masterPubFromSeed(seed)` is intentionally NOT the stock Keypair pubkey for that seed,
+ * and the derived child scalar is a raw scalar — never load it as a stock Keypair (it has
+ * no seed preimage). The master key is only ever a derivation base, never a funds account.
+ */
 function masterScalar(masterSeed: string): bigint {
   if (!masterSeed) throw new Error("DEPOSIT_MASTER_SEED not set; cannot derive deposit keys");
   return leToBigInt(clamp(sha512(utf8(masterSeed)))) % L;

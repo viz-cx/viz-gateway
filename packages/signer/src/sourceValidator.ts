@@ -60,22 +60,45 @@ function looksLikeSolanaSignature(id: string): boolean {
 /**
  * Re-derive the action from the source chain and assert it matches `action`.
  * Throws SourceMismatchError on any deviation; returns void on success.
+ *
+ * Boundary normalization: the chain readers and memo parsers (getDeposit/getBurn,
+ * parseRemoteTarget) throw generic `Error`s on malformed source data. We normalize
+ * every failure to SourceMismatchError here so callers (and the spike) can rely on a
+ * single fail-closed error type — a generic throw can never be mistaken for "validated".
  */
 export async function validateAction(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+  try {
+    await validateActionInner(action, deps);
+  } catch (err) {
+    if (err instanceof SourceMismatchError) throw err;
+    throw new SourceMismatchError(
+      `source validation failed for ${action.id}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+async function validateActionInner(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
   if (action.direction === "PEG_IN") {
     await validatePegIn(action, deps);
     return;
   }
-  // PEG_OUT: dispatch by source-id shape. Solana = base58 signature; otherwise TON.
+  // PEG_OUT: dispatch by source-id SHAPE, not by action.remoteChain. The action is
+  // coordinator-supplied (actionFromWire), so a remoteChain field on it is attacker-
+  // controlled and dispatching on it would let a compromised coordinator route a real
+  // burn to an unchecked branch. The id IS the source-event key, so its shape is the
+  // honest discriminator: a Solana signature (base58, 64-byte) is unambiguous.
   if (looksLikeSolanaSignature(action.id)) {
     await validateSolanaPegOut(action, deps);
     return;
   }
-  // TON peg-out source re-read is deferred (sourceId is a message hash; toncenter v2
-  // has no clean fetch-by-hash and TON peg-out is not yet active). Explicitly accepted
-  // gap — warn loudly rather than silently trust, and revisit when TON peg-out ships.
-  console.warn(
-    `[source-validator] PEG_OUT ${action.id} not a Solana signature; TON peg-out source re-validation is deferred — proceeding WITHOUT independent source check (accepted gap).`,
+  // Anything else is a non-Solana (presumptively TON) peg-out. TON source re-read is not
+  // implemented yet (sourceId is a message hash; toncenter v2 has no clean fetch-by-hash)
+  // and TON peg-out is not active. FAIL CLOSED: refuse rather than sign without a source
+  // check. A misclassified Solana signature of unusual length lands here too — a liveness
+  // stall (safe), never a forged signature. Implement TON source validation before
+  // enabling TON peg-out; do not relax this to warn-and-proceed.
+  throw new SourceMismatchError(
+    `PEG_OUT ${action.id} is not a Solana signature and TON peg-out source validation is not implemented — refusing to sign without an independent source check`,
   );
 }
 

@@ -133,6 +133,17 @@ signing, so `VIZ_NODE_URL` and `SOLANA_RPC_URL` on the signer **must point at th
 operator's own RPC, never a coordinator-fed endpoint** — that independence is the whole
 security guarantee.
 
+> 🔑 **Operational invariant (not code-enforceable).** Nothing in the gateway can prove a
+> signer's node URLs are truly independent of the coordinator — if an operator points
+> `VIZ_NODE_URL`/`SOLANA_RPC_URL` at the coordinator's RPC, F2 silently degrades to
+> trusting the coordinator. Each operator MUST verify this themselves at deploy time, and
+> monitoring should **alert if any signer's node URL resolves to the same host/IP as the
+> coordinator** (or a shared upstream). Treat a matching endpoint as a sev-1 misconfig.
+>
+> Note also: a non-Solana PEG_OUT (TON source validation is not yet implemented) is now
+> **refused fail-closed** by the signer, not warned-and-signed. Implement TON source
+> re-validation before enabling TON peg-out, or every TON release will (correctly) stall.
+
 For Solana **peg-out**, the signer re-derives the per-account deposit address to confirm
 the release target, using a **public** master key (no spend authority):
 

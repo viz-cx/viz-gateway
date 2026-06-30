@@ -14,7 +14,7 @@ const {
   mintMessageB64,
   buildSignedMintTx,
 } = require("../packages/solana-watcher/dist/solanaSign.js");
-const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
+const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
 
 // Shared fee config (must match across operators). The action carries GROSS; the
 // proposal carries NET = gross - base - activation; the signer re-derives base.
@@ -74,8 +74,8 @@ const FEES = {
 
   const proposal = makeProposal(NET, true);
 
-  const sA = new KeyedSigner("op-1", "", "", FEES, opA.secretKey);
-  const sB = new KeyedSigner("op-2", "", "", FEES, opB.secretKey);
+  const sA = new KeyedSigner("op-1", "", "", FEES, opA.secretKey, DISABLED_SOURCE_VALIDATION);
+  const sB = new KeyedSigner("op-2", "", "", FEES, opB.secretKey, DISABLED_SOURCE_VALIDATION);
   const apprA = await sA.approveSolanaMint(pegIn, proposal);
   const apprB = await sB.approveSolanaMint(pegIn, proposal);
   const mintAuth = [apprA.signature, apprB.signature];

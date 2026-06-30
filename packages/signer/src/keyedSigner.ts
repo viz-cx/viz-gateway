@@ -33,26 +33,41 @@ import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
  *
  * F2: `validateSource` re-derives the action from the operator's OWN chain view and
  * throws on any mismatch. It runs BEFORE the proposal-vs-action checks (which remain
- * as defense-in-depth). It is optional ONLY so offline spikes can exercise the signing
- * logic in isolation; the production signer (index.ts) always injects it.
+ * as defense-in-depth). The production signer (index.ts) always injects it. Disabling
+ * it is allowed ONLY for offline spikes and MUST be an explicit, greppable opt-in via
+ * `DISABLED_SOURCE_VALIDATION` — a forgotten argument throws rather than silently
+ * signing unvalidated.
  */
 export type SourceValidator = (action: CanonicalAction) => Promise<void>;
 
+/** Explicit test-only sentinel: pass this to KeyedSigner to disable F2 source validation. */
+export const DISABLED_SOURCE_VALIDATION = Symbol("DISABLED_SOURCE_VALIDATION");
+
 export class KeyedSigner implements Signer {
+  private readonly validateSource: SourceValidator | null;
+
   constructor(
     public readonly operatorId: string,
     private readonly vizWif: string,
     private readonly tonMnemonic: string,
     private readonly fees: GatewayFeeConfig,
     private readonly solanaSecret: Uint8Array | null = null,
-    private readonly validateSource: SourceValidator | null = null,
-  ) {}
+    validateSource?: SourceValidator | typeof DISABLED_SOURCE_VALIDATION,
+  ) {
+    if (validateSource === undefined) {
+      // A forgotten validator must never degrade to "sign without a source check".
+      throw new Error(
+        "KeyedSigner: a source validator is required; pass DISABLED_SOURCE_VALIDATION explicitly for offline/test use only.",
+      );
+    }
+    this.validateSource = validateSource === DISABLED_SOURCE_VALIDATION ? null : validateSource;
+  }
 
   /** F2 gate: independently re-validate the source event before signing. */
   private async assertSource(action: CanonicalAction): Promise<void> {
     if (!this.validateSource) {
       console.warn(
-        `[signer] SOURCE VALIDATION DISABLED for ${action.id}: no validator injected — offline/test only, NEVER production.`,
+        `[signer] SOURCE VALIDATION DISABLED for ${action.id}: explicit test-only sentinel — NEVER production.`,
       );
       return;
     }
