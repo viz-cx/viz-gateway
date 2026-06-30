@@ -147,6 +147,19 @@ export interface OperatorRef {
   tonPubkey: string;
 }
 
+/**
+ * Peg-in fee constants committed to the manifest so every operator uses identical
+ * values — divergence would cause computed `net` to differ and signatures to fail to merge.
+ * All *MilliViz values are integer milli-VIZ (1 VIZ = 1000 milli-VIZ).
+ */
+export interface ManifestFees {
+  floorMilliViz: bigint;
+  /** Basis points (20 = 0.20%). */
+  bps: number;
+  activationSurchargeMilliViz: { SOLANA: bigint; TON: bigint };
+  mintGasFloorMilliViz: { SOLANA: bigint; TON: bigint };
+}
+
 export interface FederationManifest {
   /** Total signers N. */
   n: number;
@@ -154,4 +167,6 @@ export interface FederationManifest {
   threshold: number;
   /** Public operator set. */
   operators: OperatorRef[];
+  /** Fee constants. When present, takes precedence over env vars. */
+  fees?: ManifestFees;
 }

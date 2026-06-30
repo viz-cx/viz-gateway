@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import type { CapPolicy } from "./caps";
 import type { PegInFeePolicy } from "./fees";
-import type { FederationManifest, OperatorRef, RemoteChainId } from "./types";
+import type { FederationManifest, ManifestFees, OperatorRef, RemoteChainId } from "./types";
 
 /**
  * Shared fee constants. For the multisig to merge signatures, every operator must
@@ -143,7 +143,19 @@ export function parseManifest(raw: unknown): FederationManifest {
   if (threshold <= 0 || threshold > n) {
     throw new Error(`federation manifest: threshold ${threshold} must be in 1..${n}`);
   }
-  return { n, threshold, operators };
+  let fees: ManifestFees | undefined;
+  if (o["fees"] !== undefined) {
+    const f = o["fees"] as Record<string, unknown>;
+    const act = f["activationSurchargeMilliViz"] as Record<string, unknown>;
+    const gas = f["mintGasFloorMilliViz"] as Record<string, unknown>;
+    fees = {
+      floorMilliViz: BigInt(f["floorMilliViz"] as number),
+      bps: Number(f["bps"]),
+      activationSurchargeMilliViz: { SOLANA: BigInt(act["SOLANA"] as number), TON: BigInt(act["TON"] as number) },
+      mintGasFloorMilliViz: { SOLANA: BigInt(gas["SOLANA"] as number), TON: BigInt(gas["TON"] as number) },
+    };
+  }
+  return { n, threshold, operators, fees };
 }
 
 /** Load and validate config from environment. Throws on invalid federation. */
@@ -268,17 +280,18 @@ export function loadConfig(): GatewayConfig {
     // Peg-in fee held in VIZ: base = max(10 VIZ, 0.20%); + per-chain activation
     // surcharge when the destination isn't provisioned (Solana ATA / TON jetton-wallet
     // rent). net = gross − fee must cover the per-chain mint-gas floor, else refund.
-    // These MUST match across operators (determinism) — keep them in shared config.
+    // Manifest values take precedence over env vars — use the manifest for production
+    // so all operators always agree; env vars remain useful for local testing.
     fees: {
-      floorMilliViz: big("FEE_FLOOR_MILLI_VIZ", "10000"), // 10 VIZ
-      bps: int("FEE_BPS", 20), // 0.20%
+      floorMilliViz: federation.fees?.floorMilliViz ?? big("FEE_FLOOR_MILLI_VIZ", "10000"),
+      bps: federation.fees?.bps ?? int("FEE_BPS", 20),
       activationSurchargeMilliViz: {
-        SOLANA: big("FEE_ACTIVATION_SOLANA_MILLI_VIZ", "10000"), // ~ATA rent
-        TON: big("FEE_ACTIVATION_TON_MILLI_VIZ", "10000"), // ~jetton-wallet rent
+        SOLANA: federation.fees?.activationSurchargeMilliViz.SOLANA ?? big("FEE_ACTIVATION_SOLANA_MILLI_VIZ", "10000"),
+        TON: federation.fees?.activationSurchargeMilliViz.TON ?? big("FEE_ACTIVATION_TON_MILLI_VIZ", "10000"),
       },
       mintGasFloorMilliViz: {
-        SOLANA: big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"), // net must clear this
-        TON: big("MINT_GAS_FLOOR_TON_MILLI_VIZ", "1000"),
+        SOLANA: federation.fees?.mintGasFloorMilliViz.SOLANA ?? big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"),
+        TON: federation.fees?.mintGasFloorMilliViz.TON ?? big("MINT_GAS_FLOOR_TON_MILLI_VIZ", "1000"),
       },
     },
     storeUrl: opt("STORE_URL", "sqlite:./data/gateway.sqlite"),

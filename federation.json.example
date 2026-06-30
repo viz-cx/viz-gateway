@@ -6,5 +6,11 @@
     { "id": "op-1", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" },
     { "id": "op-2", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" },
     { "id": "op-3", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" }
-  ]
+  ],
+  "fees": {
+    "floorMilliViz": 10000,
+    "bps": 20,
+    "activationSurchargeMilliViz": { "SOLANA": 10000, "TON": 10000 },
+    "mintGasFloorMilliViz": { "SOLANA": 1000, "TON": 1000 }
+  }
 }
