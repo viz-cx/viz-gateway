@@ -103,12 +103,16 @@ async function main(): Promise<void> {
       name: metadata.name,
       symbol: metadata.symbol,
       uri: metadata.uri,
+      // mintAuthority = multisig (the actual on-chain authority after InitializeMint).
+      // We include the multisig keypair as a transaction signer below — valid during
+      // the one-time deploy before the keypair is discarded.
       mintAuthority: multisigAddr,
       updateAuthority: cfg.payer.publicKey,
     }),
   );
 
-  const sig = await sendAndConfirmTransaction(conn, tx, [cfg.payer, mint]);
+  // multisig keypair must sign: InitializeTokenMetadata validates the current mintAuthority.
+  const sig = await sendAndConfirmTransaction(conn, tx, [cfg.payer, mint, multisig]);
   console.log(`[deploy:solana] mint created: ${mint.publicKey.toBase58()} (tx ${sig})`);
   console.log(`[deploy:solana] multisig: ${multisigAddr.toBase58()}`);
 }

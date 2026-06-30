@@ -312,6 +312,55 @@ expected order from the proposal and aborts unless the on-chain order is byte-id
 > - [ ] order address + executed=true
 > - [ ] `status` shows the multisig signer set == the new operator set
 
+### Solana operator rotation
+
+Prereq (one-time): a dedicated rotation nonce account, authority = the submitter:
+
+```bash
+solana create-nonce-account rotation-nonce.json 0.0015 --nonce-authority <submitter>
+# set SOLANA_ROTATION_NONCE_ACCOUNT=<that account's pubkey>
+```
+
+SPL multisigs are immutable, so rotation creates a NEW multisig and hands the
+mint+freeze authority to it (two-phase). Run after `rotate broadcast viz` so the
+shared `rotation-proposal.json` already carries the new set (incl. each operator's
+Solana pubkey).
+
+1. **Proposer** (also creates the new multisig on-chain):
+   ```bash
+   APPLY=1 npm run rotate:solana -- propose-solana   # writes rotation-solana.json
+   ```
+2. **Each current operator** co-signs (validates the new multisig on-chain first):
+   ```bash
+   npm run rotate:solana -- co-sign-solana rotation-solana.json
+   ```
+3. **Submitter** broadcasts once `newThreshold` partials are collected:
+   ```bash
+   APPLY=1 npm run rotate:solana -- broadcast-solana rotation-solana.json
+   ```
+4. **All operators**: set `SOLANA_MULTISIG=<new address printed above>` and restart
+   the gateway. Confirm: `npm run rotate:solana -- status` (read-only). To record
+   `solanaDone=true` in `rotation-state.json`, run `status --commit` — plain `status`
+   never writes.
+
+The operator spec is `op-1=<vizPub>:<tonPub>[:<solanaPub>]`. The Solana field is
+**optional** (a VIZ/TON-only rotation may omit it); `propose-solana` requires every
+operator to carry a Solana pubkey and fails if one is missing.
+
+> ⚠️ **Abandon a rotation = advance the nonce.** The handoff is a durable-nonce tx, so a
+> set of `M` collected partials stays replayable until `SOLANA_ROTATION_NONCE_ACCOUNT`
+> advances (`validateProposal` runs with `skipExpiry`, so there is no time bound). If a
+> rotation is abandoned with partials already shared, **rotate/advance the nonce** to
+> invalidate those stale partials before starting over:
+> ```bash
+> solana new-nonce SOLANA_ROTATION_NONCE_ACCOUNT --nonce-authority <submitter>
+> ```
+
+> 🧪 **Devnet dry-run first.** The handoff moves real mint authority and the offline
+> spike cannot exercise `createMultisig`, the durable-nonce `setAuthority`, partial-merge
+> onto a live tx, or the nonce-aware confirmation. Do a full devnet rotation (propose →
+> co-sign → broadcast → status) end-to-end before relying on this on mainnet.
+
 ## Known gaps to close during bring-up
 
 - **`submitMintOrder`** — wire the on-chain `new_order`/approve via the Multisig

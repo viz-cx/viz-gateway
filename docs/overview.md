@@ -103,7 +103,8 @@ target network can't be swapped after the fact.
 - **Rotation** ([`rotation.ts`](../packages/common/src/rotation.ts)): T-of-N
   self-governing operator-set change via a single VIZ `account_update` (master
   omitted), with a re-derive-and-compare validator so a co-signer never signs an
-  authority other than the one claimed.
+  authority other than the one claimed. Solana operator rotation is implemented as a
+  two-phase SPL multisig handoff (`rotate:solana` CLI; see RUNBOOK.md).
 
 ## 5. What's actually wired vs. pending
 

@@ -43,7 +43,7 @@ function readProposal(file: string): RotationProposal {
 
 function readState(file: string): RotationState {
   if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8")) as RotationState;
-  return { proposalFile: "", vizDone: false, tonOrderAddress: "", tonDone: false };
+  return { proposalFile: "", vizDone: false, tonOrderAddress: "", tonDone: false, solanaNewMultisig: "", solanaDone: false };
 }
 
 async function signerWallet(): Promise<{ wallet: WalletContractV4; secretKey: Buffer }> {

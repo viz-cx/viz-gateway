@@ -158,7 +158,7 @@ async function broadcastViz(): Promise<void> {
   );
   console.log(`[broadcast viz] account_update broadcast: ${res.id ?? "(no id)"}`);
 
-  const initialState: RotationState = { proposalFile: file, vizDone: true, tonOrderAddress: "", tonDone: false };
+  const initialState: RotationState = { proposalFile: file, vizDone: true, tonOrderAddress: "", tonDone: false, solanaNewMultisig: "", solanaDone: false };
   writeFileSync(stateFile, JSON.stringify(initialState, null, 2));
   writeFileSync(
     manifestOut,

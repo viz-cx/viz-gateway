@@ -137,14 +137,35 @@ export interface SolanaMintProposal {
   actionId?: string;
 }
 
-/** An operator's public identity on both chains. */
+/**
+ * The Solana rotation handoff artifact (rotation-solana.json). Carries the
+ * Phase-B setAuthority mechanics; the WHO (new operator set) is read from the
+ * master RotationProposal, never duplicated here.
+ */
+export interface SolanaRotationProposal {
+  version: 1;
+  chainId: string;
+  oldMultisig: string; // current SPL multisig = current mint+freeze authority (base58)
+  newMultisig: string; // freshly created SPL multisig that will receive authority (base58)
+  mint: string; // wVIZ Token-2022 mint (base58)
+  nonceAccount: string; // dedicated rotation durable-nonce account (base58)
+  nonceValue: string; // stored nonce (blockhash-equivalent) at propose time (base58)
+  feePayer: string; // submitter: fee payer + nonce authority (base58)
+  signers: string[]; // CURRENT multisig members (base58), sorted — the multiSigners
+  messageB64: string; // base64 of the compiled legacy message bytes (the signed digest)
+  signatures: string[]; // "<memberPubkeyB58>:<sigHex>" partials
+}
+
+/** An operator's public identity across all chains. */
 export interface OperatorRef {
   /** Public operator id, e.g. "op-1". */
   id: string;
   /** VIZ secp256k1 public key (the "VIZ..."-prefixed string), used in the active key_auths. */
   vizPubkey: string;
-  /** TON ed25519 public key (hex), used by the TON rotation path (follow-up plan). */
+  /** TON ed25519 public key (hex), used by the TON rotation path. */
   tonPubkey: string;
+  /** Solana ed25519 public key (base58), used as an SPL multisig member in the Solana rotation path. */
+  solanaPubkey: string;
 }
 
 /**

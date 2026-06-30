@@ -131,8 +131,9 @@ export function parseManifest(raw: unknown): FederationManifest {
     const id = String(e["id"] ?? "");
     const vizPubkey = String(e["vizPubkey"] ?? "");
     const tonPubkey = String(e["tonPubkey"] ?? "");
+    const solanaPubkey = String(e["solanaPubkey"] ?? "");
     if (!id) throw new Error(`federation manifest: operators[${i}] missing id`);
-    return { id, vizPubkey, tonPubkey };
+    return { id, vizPubkey, tonPubkey, solanaPubkey };
   });
   if (!Number.isInteger(n) || !Number.isInteger(threshold)) {
     throw new Error("federation manifest: n and threshold must be integers");
@@ -190,6 +191,7 @@ export function loadConfig(): GatewayConfig {
       id: `op-${i + 1}`,
       vizPubkey: "",
       tonPubkey: "",
+      solanaPubkey: "",
     }));
     federation = { n, threshold, operators };
   }
