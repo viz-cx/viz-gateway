@@ -1,0 +1,57 @@
+name: E2E (live)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: "Which round trip to run"
+        type: choice
+        options: [ton, solana, both]
+        default: ton
+
+concurrency:
+  group: e2e-live
+  cancel-in-progress: false
+
+jobs:
+  roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: ${{ inputs.chain == 'both' && fromJSON('["ton","solana"]') || fromJSON(format('["{0}"]', inputs.chain)) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Run ${{ matrix.chain }} round trip
+        if: ${{ matrix.chain != 'solana' }}
+        env:
+          CHAIN: ${{ matrix.chain }}
+          E2E_VIZ_NODE_URL: ${{ secrets.E2E_VIZ_NODE_URL }}
+          E2E_VIZ_TEST_WIF: ${{ secrets.E2E_VIZ_TEST_WIF }}
+          E2E_VIZ_TEST_ACCOUNT: ${{ secrets.E2E_VIZ_TEST_ACCOUNT }}
+          E2E_VIZ_GATEWAY_ACCOUNT: ${{ secrets.E2E_VIZ_GATEWAY_ACCOUNT }}
+          E2E_VIZ_RECIPIENT: ${{ secrets.E2E_VIZ_RECIPIENT }}
+          E2E_VIZ_MIN_BALANCE_MILLI_VIZ: ${{ secrets.E2E_VIZ_MIN_BALANCE_MILLI_VIZ }}
+          E2E_TON_ENDPOINT: ${{ secrets.E2E_TON_ENDPOINT }}
+          E2E_TON_API_KEY: ${{ secrets.E2E_TON_API_KEY }}
+          E2E_TON_GATEWAY_JETTON_WALLET: ${{ secrets.E2E_TON_GATEWAY_JETTON_WALLET }}
+          E2E_TON_GATEWAY_OWNER: ${{ secrets.E2E_TON_GATEWAY_OWNER }}
+          E2E_TON_JETTON_MINTER_ADDRESS: ${{ secrets.E2E_TON_JETTON_MINTER_ADDRESS }}
+          E2E_TON_BURN_MNEMONIC: ${{ secrets.E2E_TON_BURN_MNEMONIC }}
+          E2E_TON_BURN_OWNER: ${{ secrets.E2E_TON_BURN_OWNER }}
+          E2E_TON_MIN_GAS_NANO: ${{ secrets.E2E_TON_MIN_GAS_NANO }}
+        run: node tools/e2e/dist/roundtrip.js "$CHAIN"
+      - name: Upload service logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ matrix.chain }}
+          path: tools/e2e/logs/
+          if-no-files-found: warn
