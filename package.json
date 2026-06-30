@@ -40,6 +40,6 @@
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^22.0.0",
-    "viz-js-lib": "^0.12.7"
+    "viz-js-lib": "github:VIZ-Blockchain/viz-js-lib#879e0699083ee6c191225a4aefb04e82bb719252"
   }
 }
