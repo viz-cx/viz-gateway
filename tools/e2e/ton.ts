@@ -1,0 +1,59 @@
+// tools/e2e/ton.ts — minimal TON client for the e2e harness (burn submit + wVIZ balance).
+import { TonClient, WalletContractV4, internal, Address, beginCell, toNano } from "@ton/ton";
+import { mnemonicToPrivateKey } from "@ton/crypto";
+import type { E2eConfig } from "./config";
+
+function client(cfg: E2eConfig): TonClient {
+  return new TonClient({ endpoint: cfg.ton.endpoint, apiKey: cfg.ton.apiKey });
+}
+
+/** Jetton wallet address of `owner` under the configured minter. */
+async function walletAddressOf(c: TonClient, minter: string, owner: string): Promise<Address> {
+  const res = await c.runMethod(Address.parse(minter), "get_wallet_address", [
+    { type: "slice", cell: beginCell().storeAddress(Address.parse(owner)).endCell() },
+  ]);
+  return res.stack.readAddress();
+}
+
+export async function tonWvizBalance(cfg: E2eConfig, ownerAddress: string): Promise<bigint> {
+  const c = client(cfg);
+  const jw = await walletAddressOf(c, cfg.ton.jettonMinterAddress, ownerAddress);
+  if (!(await c.isContractDeployed(jw))) return 0n;
+  const res = await c.runMethod(jw, "get_wallet_data", []);
+  return res.stack.readBigNumber(); // balance is the first field
+}
+
+export async function submitBurn(
+  cfg: E2eConfig,
+  amountBaseUnits: bigint,
+  vizRecipient: string,
+): Promise<void> {
+  const c = client(cfg);
+  const key = await mnemonicToPrivateKey(cfg.ton.burnMnemonic.split(/\s+/));
+  const wallet = WalletContractV4.create({ workchain: 0, publicKey: key.publicKey });
+  const opened = c.open(wallet);
+  const myJetton = await walletAddressOf(c, cfg.ton.jettonMinterAddress, wallet.address.toString());
+
+  // E2E_TON_GATEWAY_OWNER is the gateway's owner address; the jetton transfer
+  // destination field is the owner (not the jetton wallet address itself).
+  const gatewayOwner = Address.parse(cfg.ton.gatewayOwner);
+  const comment = beginCell().storeUint(0, 32).storeStringTail(vizRecipient).endCell();
+  const transferBody = beginCell()
+    .storeUint(0x0f8a7ea5, 32) // TEP-74 transfer
+    .storeUint(0n, 64) // query_id
+    .storeCoins(amountBaseUnits)
+    .storeAddress(gatewayOwner) // destination owner
+    .storeAddress(wallet.address) // response destination
+    .storeBit(false) // no custom payload
+    .storeCoins(toNano("0.05")) // forward_ton_amount (fires transfer_notification)
+    .storeBit(true) // forward_payload in ref
+    .storeRef(comment)
+    .endCell();
+
+  const seqno = await opened.getSeqno();
+  await opened.sendTransfer({
+    seqno,
+    secretKey: key.secretKey,
+    messages: [internal({ to: myJetton, value: toNano("0.1"), body: transferBody })],
+  });
+}
