@@ -28,7 +28,7 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
 const { planTransition, planChildren } = require("../packages/dispatcher/dist/policy.js");
 const { mintMessageB64 } = require("../packages/solana-watcher/dist/solanaSign.js");
 const { InMemoryGatewayStore, SqliteGatewayStore } = require("../packages/common/dist/store.js");
-const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
+const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
 const { VizReleaseBroadcaster } = require("../packages/coordinator/dist/adapters.js");
 const { releaseTxId } = require("../packages/viz-watcher/dist/vizSign.js");
 const { mkdtempSync } = require("node:fs");
@@ -81,7 +81,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     const action = makePegOutAction();
     const b = fakeBroadcaster(action, { alreadyExecuted: false });
     const kp = viz.auth.toWif("gw", "pA", "active");
-    const ks = new KeyedSigner("op-1", kp, "", FEES);
+    const ks = new KeyedSigner("op-1", kp, "", FEES, null, DISABLED_SOURCE_VALIDATION);
     const signerClient = { operatorId: "op-1", approve: (a, p) => ks.signVizRelease(a, p) };
     const r = await new Orchestrator(1, ["op-1"], [signerClient], b).process(action);
     assert.strictEqual(r.broadcast, true);
