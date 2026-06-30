@@ -57,3 +57,18 @@ assert.doesNotThrow(() => assertDelta("viz", 100n, 130n, 30n));
 assert.throws(() => assertDelta("viz", 100n, 125n, 30n), /viz/);
 
 console.log("e2e-amounts-spike OK");
+
+// --- poll --------------------------------------------------------------------
+(async () => {
+  const { pollUntil } = require("../tools/e2e/dist/poll.js");
+  let n = 0;
+  const got = await pollUntil(async () => (++n >= 3 ? "ready" : null), {
+    timeoutMs: 1000, intervalMs: 10, label: "test",
+  });
+  assert.equal(got, "ready");
+  await assert.rejects(
+    pollUntil(async () => null, { timeoutMs: 50, intervalMs: 10, label: "never" }),
+    /\[never\] timed out/,
+  );
+  console.log("e2e-poll-spike OK");
+})();
