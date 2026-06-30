@@ -13,7 +13,7 @@ import {
   type VizDeposit,
   type VizReleaseProposal,
 } from "@gateway/common";
-import { buildReleaseTx } from "./vizSign";
+import { buildReleaseTx, releaseTxId } from "./vizSign";
 
 /**
  * Live VizChain read path, backed by viz-js-lib against an HTTP(S) or WS node
@@ -212,28 +212,28 @@ export class VizJsChain implements VizChain {
   }
 
   /**
-   * Scan recent gateway-account transfer history for an outgoing transfer whose memo
-   * equals `memo` (= CanonicalAction.id). Used by the coordinator's idempotency check
-   * to detect a VIZ release that landed on-chain after a crash.
-   * Scans the last 1000 ops; if the release is older it will be missed and the action
-   * re-broadcast (durable-nonce expiry applies — worst case an on-chain duplicate-trx
-   * rejection, which is safe). Returns null if not found.
+   * The deterministic transaction id for a release proposal (computed locally, no RPC).
+   * The coordinator persists this BEFORE broadcasting so recovery can confirm by exact id.
    */
-  async releaseByMemo(memo: string): Promise<{ txid: string } | null> {
-    type HistoryItem = { trx_id: string; op: [string, Record<string, unknown>] };
-    // viz-js-lib types omit getAccountHistory; cast to any to invoke it.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const apiAny = viz.api as unknown as Record<string, (...args: unknown[]) => void>;
-    const history = await call<Array<[number, HistoryItem]>>(
-      (cb) => apiAny["getAccountHistory"]!(this.gatewayAccount, -1, 1000, cb),
-    );
-    for (const [, item] of history ?? []) {
-      const [name, payload] = item.op;
-      if (name !== "transfer") continue;
-      if (payload["from"] !== this.gatewayAccount) continue;
-      if (payload["memo"] === memo) return { txid: item.trx_id };
+  transactionId(proposal: VizReleaseProposal): string {
+    return releaseTxId(proposal);
+  }
+
+  /**
+   * Confirm a specific release landed on-chain by its EXACT transaction id — an O(1)
+   * lookup with no scan window (replaces the old last-1000-ops memo scan, which could
+   * miss an older release on a busy gateway and re-broadcast a second real transfer).
+   * Returns `{ txid }` if the node knows the tx, else null (unknown id => never landed).
+   */
+  async confirmReleaseByTxId(txid: string): Promise<{ txid: string } | null> {
+    if (!txid) return null;
+    try {
+      const tx = await call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(txid, cb));
+      return tx ? { txid } : null;
+    } catch {
+      // operation_history errors for an unknown id; treat as not-found (never broadcast).
+      return null;
     }
-    return null;
   }
 
   /** Attach the >= T merged signatures (order-independent) and broadcast. */

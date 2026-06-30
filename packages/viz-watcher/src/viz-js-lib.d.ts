@@ -85,3 +85,24 @@ declare module "viz-js-lib" {
   const viz: Viz;
   export default viz;
 }
+
+// Internal serializer + hash, used only to compute a transaction id deterministically
+// (graphene: first 20 bytes of sha256 of the serialized UNSIGNED tx). viz-js-lib exposes
+// no public txid helper; the dependency is git-pinned, so these paths are stable for this
+// version. tools/idempotent-delivery-spike.cjs pins the computed id to guard against drift.
+declare module "viz-js-lib/lib/auth/serializer/src/operations" {
+  interface TxSerializer {
+    toBuffer(tx: {
+      ref_block_num: number;
+      ref_block_prefix: number;
+      expiration: string;
+      operations: Array<[string, Record<string, unknown>]>;
+      extensions: unknown[];
+    }): Buffer;
+  }
+  export const transaction: TxSerializer;
+}
+
+declare module "viz-js-lib/lib/auth/ecc/src/hash" {
+  export function sha256(data: Buffer): Buffer;
+}

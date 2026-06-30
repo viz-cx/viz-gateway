@@ -29,6 +29,8 @@ const { planTransition, planChildren } = require("../packages/dispatcher/dist/po
 const { mintMessageB64 } = require("../packages/solana-watcher/dist/solanaSign.js");
 const { InMemoryGatewayStore, SqliteGatewayStore } = require("../packages/common/dist/store.js");
 const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
+const { VizReleaseBroadcaster } = require("../packages/coordinator/dist/adapters.js");
+const { releaseTxId } = require("../packages/viz-watcher/dist/vizSign.js");
 const { mkdtempSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -440,7 +442,98 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     console.log("[16] BROADCAST row surfaced by stale() for recovery -> not before timeout, yes after OK");
   }
 
+  // ── 17-19. REAL VizReleaseBroadcaster: persist-txid-before-send + confirm-by-id ─
+  // A mock VIZ chain implementing only the four methods the broadcaster uses. The txid
+  // is deterministic from the proposal (as in production); confirmReleaseByTxId answers
+  // from a simulated on-chain set and counts its calls so we can prove the happy path
+  // does NO on-chain lookup.
+  function mockVizChain() {
+    const onchain = new Set();
+    let confirmCalls = 0;
+    return {
+      onchain,
+      confirmCalls: () => confirmCalls,
+      buildReleaseProposal: async (action, gw) => ({
+        refBlockNum: 1, refBlockPrefix: 2, expiration: "2026-06-28T12:00:00",
+        from: gw, to: action.recipient, amount: milliToViz(action.amountMilliViz), memo: action.id,
+      }),
+      transactionId: (p) => `VTX_${p.memo}`, // deterministic stand-in for the graphene id
+      broadcastRelease: async (p) => { const id = `VTX_${p.memo}`; onchain.add(id); return id; },
+      confirmReleaseByTxId: async (txid) => { confirmCalls++; return onchain.has(txid) ? { txid } : null; },
+    };
+  }
+
+  // 17. Happy path: a fresh row has no txid -> actionExecuted returns false with ZERO
+  //     on-chain lookups (the #4.1 cost fix); broadcast persists the txid BEFORE sending.
+  {
+    const store = new InMemoryGatewayStore();
+    const action = makePegOutAction();
+    await store.enqueue({ id: action.id, direction: "PEG_OUT", recipient: "alice",
+      amountMilliViz: 5000n, digest: action.digest, status: "QUEUED" });
+    const chain = mockVizChain();
+    const b = new VizReleaseBroadcaster(chain, "viz-gateway", store);
+
+    const pre = await b.actionExecuted(action);
+    assert.strictEqual(pre.executed, false, "fresh row (no txid) -> not executed");
+    assert.strictEqual(chain.confirmCalls(), 0, "happy path does NO on-chain lookup");
+
+    const { proposal } = await b.buildProposal(action);
+    const txid = await b.broadcast(action, proposal, ["sigA"]);
+    const row = await store.get(action.id);
+    assert.strictEqual(row.txid, `VTX_${action.id}`, "txid persisted to the row at broadcast");
+    assert.strictEqual(txid, row.txid, "returned txid == persisted == computed");
+    console.log("[17] VIZ broadcast persists deterministic txid before send; happy path no RPC OK");
+  }
+
+  // 18. Recovery after a confirmed send: the row now has a txid, and the release is on
+  //     chain -> actionExecuted confirms by EXACT id (no memo scan) -> executed:true.
+  {
+    const store = new InMemoryGatewayStore();
+    const action = makePegOutAction();
+    await store.enqueue({ id: action.id, direction: "PEG_OUT", recipient: "alice",
+      amountMilliViz: 5000n, digest: action.digest, status: "QUEUED" });
+    const chain = mockVizChain();
+    const b = new VizReleaseBroadcaster(chain, "viz-gateway", store);
+    const { proposal } = await b.buildProposal(action);
+    await b.broadcast(action, proposal, ["sigA"]); // lands on-chain + persists txid
+    const rec = await b.actionExecuted(action);
+    assert.strictEqual(rec.executed, true, "persisted txid + on-chain -> executed");
+    assert.strictEqual(rec.txid, `VTX_${action.id}`, "confirmed by exact id");
+    console.log("[18] recovery confirms a landed release by exact txid (no scan window) OK");
+  }
+
+  // 19. Crash AFTER persisting txid but BEFORE the tx lands (send failed): the row has a
+  //     txid, but it is not on chain -> actionExecuted returns false so the dispatcher
+  //     re-broadcasts the identical (deterministic) tx. No double-release, no stranding.
+  {
+    const store = new InMemoryGatewayStore();
+    const action = makePegOutAction();
+    await store.enqueue({ id: action.id, direction: "PEG_OUT", recipient: "alice",
+      amountMilliViz: 5000n, digest: action.digest, status: "QUEUED" });
+    const chain = mockVizChain();
+    const b = new VizReleaseBroadcaster(chain, "viz-gateway", store);
+    // Simulate persist-before-send where the send never reached the chain.
+    await store.setStatus(action.id, "BROADCAST", { txid: `VTX_${action.id}` });
+    const rec = await b.actionExecuted(action);
+    assert.strictEqual(rec.executed, false, "txid persisted but not on chain -> safe to re-broadcast");
+    console.log("[19] crash-before-send (txid persisted, tx absent) -> re-broadcastable, no double-release OK");
+  }
+
+  // 20. Drift guard: the deterministic VIZ txid is computed via viz-js-lib's INTERNAL
+  //     serializer (no public helper). Pin a known-good id for a fixed proposal so a lib
+  //     upgrade that changes the wire serialization is caught here, not in production.
+  {
+    const p = { refBlockNum: 1234, refBlockPrefix: 56789, expiration: "2026-06-30T12:00:00",
+      from: "viz-gateway", to: "alice", amount: "5.000 VIZ", memo: "aa:0" };
+    const id = releaseTxId(p);
+    assert.strictEqual(id.length, 40, "graphene trx id is 20 bytes (40 hex)");
+    assert.strictEqual(id, "50a31d499a0846e96dd197d2d85df09b4ff25f36", "txid serialization drifted");
+    assert.strictEqual(releaseTxId(p), id, "deterministic");
+    console.log("[20] VIZ txid drift guard: pinned id stable for a fixed proposal OK");
+  }
+
   console.log("\nRESULT: idempotent delivery: actionExecuted short-circuit prevents double-mint/release;");
+  console.log("VIZ persists a deterministic txid before send and confirms by exact id (no scan window);");
   console.log("BROADCAST set pre-coordinator; parentId closes parent row without id-suffix fragility.");
 })().catch((e) => {
   console.error(e);

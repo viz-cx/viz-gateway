@@ -66,7 +66,17 @@ export class Orchestrator {
     // double-release. buildProposal is still called for the fee amount (PEG_IN).
     const check = await this.broadcaster.actionExecuted(action);
     if (check.executed) {
-      const { feeMilliViz } = await this.broadcaster.buildProposal(action);
+      // Recover the fee (PEG_IN) for the FEE_SWEEP, but never let a rebuild failure strand
+      // an action that ALREADY landed on-chain: buildProposal hits the network (e.g. Solana
+      // getNonce, or the below-minimum guard can throw), and re-deriving it here is best-
+      // effort only. On failure, report fee 0 and proceed to CONFIRMED — the dispatcher
+      // already persisted the real fee at first delivery, so sweep accounting is unaffected.
+      let feeMilliViz = 0n;
+      try {
+        ({ feeMilliViz } = await this.broadcaster.buildProposal(action));
+      } catch (err) {
+        console.warn(`[orchestrator] ${action.id} executed but fee rebuild failed (using 0): ${String(err)}`);
+      }
       console.log(`[orchestrator] ${action.id} already executed on-chain (${check.txid ?? ""}); skipping broadcast`);
       return {
         actionId: action.id,
