@@ -40,3 +40,20 @@ assert.equal(runEnv.FEDERATION_THRESHOLD, "1");
 assert.match(runEnv.STORE_URL, new RegExp(`sqlite:\\./data/e2e-.*\\.sqlite$`));
 
 console.log("e2e-config-spike OK");
+
+// --- amounts + deltas --------------------------------------------------------
+const { uniqueGrossMilliViz, expectedNetMilliViz } = require("../tools/e2e/dist/amounts.js");
+const { assertDelta } = require("../tools/e2e/dist/deltas.js");
+
+// unique amount: same base, different runId → different gross, within base+[0,999]
+const a = uniqueGrossMilliViz(20000n, "e2e-1-aaaaaa");
+const b = uniqueGrossMilliViz(20000n, "e2e-1-bbbbbb");
+assert.ok(a >= 20000n && a < 21000n, "gross within jitter band");
+assert.notEqual(a, b, "different runIds give different gross");
+assert.equal(uniqueGrossMilliViz(20000n, "e2e-1-aaaaaa"), a, "deterministic per runId");
+
+// delta assertion
+assert.doesNotThrow(() => assertDelta("viz", 100n, 130n, 30n));
+assert.throws(() => assertDelta("viz", 100n, 125n, 30n), /viz/);
+
+console.log("e2e-amounts-spike OK");
