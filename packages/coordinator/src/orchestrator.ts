@@ -25,6 +25,13 @@ export interface BuildResult {
 export interface Broadcaster {
   buildProposal(action: CanonicalAction): Promise<BuildResult>;
   broadcast(action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string>;
+  /**
+   * Check whether this action was already executed on the destination chain. Called
+   * before every coordinator round to short-circuit crash-recovery re-submissions.
+   * Returns `{ executed: true, txid }` if the action is found on-chain, or
+   * `{ executed: false }` if it must still be broadcast.
+   */
+  actionExecuted(action: CanonicalAction): Promise<{ executed: boolean; txid?: string }>;
 }
 
 export interface OrchestrationResult {
@@ -54,6 +61,33 @@ export class Orchestrator {
   ) {}
 
   async process(action: CanonicalAction): Promise<OrchestrationResult> {
+    // Idempotency: if the action already landed on-chain (e.g. the process crashed
+    // after broadcast but before CONFIRMED), short-circuit to avoid a double-mint or
+    // double-release. buildProposal is still called for the fee amount (PEG_IN).
+    const check = await this.broadcaster.actionExecuted(action);
+    if (check.executed) {
+      // Recover the fee (PEG_IN) for the FEE_SWEEP, but never let a rebuild failure strand
+      // an action that ALREADY landed on-chain: buildProposal hits the network (e.g. Solana
+      // getNonce, or the below-minimum guard can throw), and re-deriving it here is best-
+      // effort only. On failure, report fee 0 and proceed to CONFIRMED — the dispatcher
+      // already persisted the real fee at first delivery, so sweep accounting is unaffected.
+      let feeMilliViz = 0n;
+      try {
+        ({ feeMilliViz } = await this.broadcaster.buildProposal(action));
+      } catch (err) {
+        console.warn(`[orchestrator] ${action.id} executed but fee rebuild failed (using 0): ${String(err)}`);
+      }
+      console.log(`[orchestrator] ${action.id} already executed on-chain (${check.txid ?? ""}); skipping broadcast`);
+      return {
+        actionId: action.id,
+        approvals: 0,
+        threshold: this.threshold,
+        broadcast: true,
+        txid: check.txid,
+        feeMilliViz: feeMilliViz.toString(),
+      };
+    }
+
     const { proposal, feeMilliViz } = await this.broadcaster.buildProposal(action);
     const fee = feeMilliViz.toString();
     const set = new ApprovalSet(this.threshold, this.operators);

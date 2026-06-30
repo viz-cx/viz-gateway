@@ -86,6 +86,7 @@ function rowToRecord(r: Row): OutboxRecord {
     createdAt: Number(r["created_at"]),
     updatedAt: Number(r["updated_at"]),
     nextAttemptAt: Number(r["next_attempt_at"]),
+    parentId: (r["parent_id"] as string | null) ?? null,
   };
 }
 
@@ -113,7 +114,8 @@ export class SqliteGatewayStore implements GatewayStore {
          txid             TEXT,
          created_at       INTEGER NOT NULL,
          updated_at       INTEGER NOT NULL,
-         next_attempt_at  INTEGER NOT NULL DEFAULT 0
+         next_attempt_at  INTEGER NOT NULL DEFAULT 0,
+         parent_id        TEXT
        );
        CREATE INDEX IF NOT EXISTS idx_outbox_status ON action_outbox(status, next_attempt_at);
        CREATE TABLE IF NOT EXISTS cap_window(
@@ -138,6 +140,11 @@ export class SqliteGatewayStore implements GatewayStore {
          updated_at INTEGER NOT NULL
        );`,
     );
+    // Migration: add parent_id if the table predates this column.
+    const cols = this.db.prepare("PRAGMA table_info(action_outbox)").all() as Row[];
+    if (!cols.some((c) => c["name"] === "parent_id")) {
+      this.db.exec("ALTER TABLE action_outbox ADD COLUMN parent_id TEXT");
+    }
   }
 
   async registerDepositAddress(rec: { vizAccount: string; solAddress: string; wvizAta: string }): Promise<void> {
@@ -188,8 +195,8 @@ export class SqliteGatewayStore implements GatewayStore {
       .prepare(
         `INSERT OR IGNORE INTO action_outbox(
            id, direction, remote_chain, recipient, sender, amount_milli_viz, fee_milli_viz,
-           digest, status, attempts, last_error, txid, created_at, updated_at, next_attempt_at
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, 0)`,
+           digest, status, attempts, last_error, txid, created_at, updated_at, next_attempt_at, parent_id
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, 0, ?)`,
       )
       .run(
         input.id,
@@ -203,6 +210,7 @@ export class SqliteGatewayStore implements GatewayStore {
         input.status ?? "SEEN",
         now,
         now,
+        input.parentId ?? null,
       );
     return Number(res.changes) === 1;
   }
@@ -359,6 +367,7 @@ export class InMemoryGatewayStore implements GatewayStore {
       createdAt: now,
       updatedAt: now,
       nextAttemptAt: 0,
+      parentId: input.parentId ?? null,
     });
     return true;
   }

@@ -262,12 +262,16 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
    * to mint and `destProvisioned` is the pinned ATA-existence flag (both computed
    * by the coordinator from gross + fee policy). `signerSet` is the chosen signing
    * subset (size = threshold M); all of them must sign.
+   *
+   * `actionId` is embedded as a SPL Memo instruction in the tx so that the
+   * coordinator can detect crash-after-broadcast cases via `mintByActionId`.
    */
   async buildMintProposal(
     recipient: string,
     netMilliViz: bigint,
     destProvisioned: boolean,
     signerSet: string[],
+    actionId?: string,
   ): Promise<SolanaMintProposal> {
     if (!this.writer) throw new Error("SolanaChain has no writer config; cannot build a mint proposal");
     const nonce = await this.conn.getNonce(new PublicKey(this.writer.nonceAccount));
@@ -284,10 +288,59 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
       nonceValue: nonce.nonce,
       decimals: 3,
       messageB64: "",
+      actionId,
     };
     proposal.messageB64 = mintMessageB64(proposal);
     return proposal;
   }
+
+  /**
+   * Scan recent mint transactions for one whose SPL Memo instruction carries
+   * `actionId`. Used by the coordinator's idempotency check to detect a mint that
+   * landed on-chain after a process crash. Scans the last 100 signatures on the
+   * mint address; returns null if not found within that window.
+   */
+  async mintByActionId(actionId: string): Promise<{ txid: string } | null> {
+    const sigs = await this.conn.getSignaturesForAddress(this.mint, { limit: 100 });
+    for (const s of sigs) {
+      if (s.err) continue;
+      const tx = await this.conn.getParsedTransaction(s.signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: "finalized",
+      });
+      if (!tx) continue;
+      const memo = parseMemoFromTx(tx);
+      if (memo === actionId) return { txid: s.signature };
+    }
+    return null;
+  }
+}
+
+/**
+ * Extract the text from a SPL Memo instruction in a parsed transaction.
+ * Checks both top-level and inner instructions.
+ */
+function parseMemoFromTx(tx: {
+  transaction: { message: { instructions: unknown[] } };
+  meta?: { innerInstructions?: Array<{ instructions: unknown[] }> | null } | null;
+}): string | null {
+  const ixs = [...(tx.transaction.message.instructions as Array<Record<string, unknown>>)];
+  for (const group of tx.meta?.innerInstructions ?? []) {
+    ixs.push(...(group.instructions as Array<Record<string, unknown>>));
+  }
+  for (const ix of ixs) {
+    const program = ix["program"] as string | undefined;
+    const programId = (ix["programId"] as { toString?: () => string } | undefined)?.toString?.();
+    const isMemo =
+      program === "spl-memo" ||
+      programId === MEMO_PROGRAM_ID || // v2 (may be invalid base58 — string compare only)
+      programId === "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"; // v1
+    if (isMemo) {
+      const parsed = (ix as { parsed?: unknown }).parsed;
+      return parsed != null ? String(parsed) : null;
+    }
+  }
+  return null;
 }
 
 interface GatewayDeposit {

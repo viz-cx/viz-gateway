@@ -75,6 +75,7 @@ export function planChildren(
         amountMilliViz: ctx.feeMilliViz,
         digest: `${rec.digest}:fee`,
         status: "QUEUED",
+        parentId: rec.id,
       },
     ];
   }
@@ -87,6 +88,7 @@ export function planChildren(
         amountMilliViz: rec.amountMilliViz, // gross (no fee on a refund)
         digest: `${rec.digest}:refund`,
         status: "QUEUED",
+        parentId: rec.id,
       },
     ];
   }

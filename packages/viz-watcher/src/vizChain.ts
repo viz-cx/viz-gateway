@@ -13,7 +13,7 @@ import {
   type VizDeposit,
   type VizReleaseProposal,
 } from "@gateway/common";
-import { buildReleaseTx } from "./vizSign";
+import { buildReleaseTx, releaseTxId } from "./vizSign";
 
 /**
  * Live VizChain read path, backed by viz-js-lib against an HTTP(S) or WS node
@@ -209,6 +209,31 @@ export class VizJsChain implements VizChain {
       amount: milliToViz(action.amountMilliViz),
       memo: action.id,
     };
+  }
+
+  /**
+   * The deterministic transaction id for a release proposal (computed locally, no RPC).
+   * The coordinator persists this BEFORE broadcasting so recovery can confirm by exact id.
+   */
+  transactionId(proposal: VizReleaseProposal): string {
+    return releaseTxId(proposal);
+  }
+
+  /**
+   * Confirm a specific release landed on-chain by its EXACT transaction id — an O(1)
+   * lookup with no scan window (replaces the old last-1000-ops memo scan, which could
+   * miss an older release on a busy gateway and re-broadcast a second real transfer).
+   * Returns `{ txid }` if the node knows the tx, else null (unknown id => never landed).
+   */
+  async confirmReleaseByTxId(txid: string): Promise<{ txid: string } | null> {
+    if (!txid) return null;
+    try {
+      const tx = await call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(txid, cb));
+      return tx ? { txid } : null;
+    } catch {
+      // operation_history errors for an unknown id; treat as not-found (never broadcast).
+      return null;
+    }
   }
 
   /** Attach the >= T merged signatures (order-independent) and broadcast. */

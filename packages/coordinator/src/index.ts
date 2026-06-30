@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   );
 
   const vizChain = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
-  const vizBroadcaster = new VizReleaseBroadcaster(vizChain, cfg.viz.gatewayAccount);
+  const vizBroadcaster = new VizReleaseBroadcaster(vizChain, cfg.viz.gatewayAccount, store);
   const tonBroadcaster = cfg.ton.jettonMinterAddress
     ? new TonMintBroadcaster(
         new TonHttpChain(
@@ -52,6 +52,7 @@ async function main(): Promise<void> {
           ),
           cfg.solana.signers,
           cfg.fees,
+          store,
         )
       : null;
 

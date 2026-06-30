@@ -43,6 +43,19 @@ export interface VizChain {
   buildReleaseProposal(action: CanonicalAction, gatewayAccount: string): Promise<VizReleaseProposal>;
   /** Broadcast the proposal with >= T merged signatures (order-independent). Returns trx id. */
   broadcastRelease(proposal: VizReleaseProposal, signatures: string[]): Promise<string>;
+  /**
+   * Deterministic transaction id for a release proposal (computed locally, no RPC) —
+   * the standard graphene trx id, independent of signatures. The coordinator persists
+   * this BEFORE broadcasting so a crash-recovery can confirm by exact id.
+   */
+  transactionId(proposal: VizReleaseProposal): string;
+  /**
+   * Confirm a release landed by its EXACT transaction id (O(1), no scan window). Returns
+   * `{ txid }` if the node knows the tx, else null. Used by the coordinator's idempotency
+   * check: a row with a persisted txid is confirmed here; a row without one was never
+   * broadcast (persist-before-send invariant), so no on-chain lookup is needed at all.
+   */
+  confirmReleaseByTxId(txid: string): Promise<{ txid: string } | null>;
 }
 
 /**

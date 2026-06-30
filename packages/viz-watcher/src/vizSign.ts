@@ -1,4 +1,6 @@
 import viz, { type VizTransaction } from "viz-js-lib";
+import { transaction as txSerializer } from "viz-js-lib/lib/auth/serializer/src/operations";
+import { sha256 } from "viz-js-lib/lib/auth/ecc/src/hash";
 import type { VizReleaseProposal } from "@gateway/common";
 
 /**
@@ -20,6 +22,18 @@ export function buildReleaseTx(p: VizReleaseProposal): VizTransaction {
     operations: [["transfer", { from: p.from, to: p.to, amount: p.amount, memo: p.memo }]],
     extensions: [],
   };
+}
+
+/**
+ * The deterministic VIZ transaction id for a release proposal: the standard graphene
+ * trx id = first 20 bytes of sha256 of the serialized UNSIGNED transaction. It depends
+ * only on TaPoS + operations (NOT the signatures), so the coordinator can compute and
+ * persist it BEFORE broadcasting. Recovery then confirms a release by its exact id via
+ * getTransaction(txid) instead of a bounded memo history scan — closing the residual
+ * double-release window on the VIZ side (VIZ transfers are not nonce-deduped on-chain).
+ */
+export function releaseTxId(p: VizReleaseProposal): string {
+  return sha256(txSerializer.toBuffer(buildReleaseTx(p))).slice(0, 20).toString("hex");
 }
 
 /** Produce this operator's partial signature (hex) over the proposal's tx. */
