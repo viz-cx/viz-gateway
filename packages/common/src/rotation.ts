@@ -9,8 +9,13 @@ export interface VizAuthority {
 }
 
 /**
- * Parse the CLI operator spec "op-1=<vizPub>:<tonPub>:<solPub>,op-2=...". Order is
+ * Parse the CLI operator spec "op-1=<vizPub>:<tonPub>[:<solPub>],op-2=...". Order is
  * preserved for display; authorities sort independently.
+ *
+ * solanaPubkey is OPTIONAL (2 or 3 fields), defaulting to "" — consistent with
+ * parseManifest. A VIZ/TON-only rotation must not be forced to supply a Solana key the
+ * operator may not have; the Solana rotation path (validateHandoffProposal) separately
+ * requires every operator's solanaPubkey to be present, so an empty value fails there.
  */
 export function parseOperators(spec: string): OperatorRef[] {
   return spec
@@ -23,20 +28,25 @@ export function parseOperators(spec: string): OperatorRef[] {
       const id = entry.slice(0, eq).trim();
       const rest = entry.slice(eq + 1).trim();
       const parts = rest.split(":").map((p) => p.trim());
-      if (parts.length !== 3) {
-        throw new Error(`operator entry needs vizPub:tonPub:solanaPub (3 fields): ${entry}`);
+      if (parts.length !== 2 && parts.length !== 3) {
+        throw new Error(`operator entry needs vizPub:tonPub[:solanaPub] (2 or 3 fields): ${entry}`);
       }
-      const [vizPubkey, tonPubkey, solanaPubkey] = parts;
-      if (!id || !vizPubkey || !tonPubkey || !solanaPubkey) {
-        throw new Error(`operator entry incomplete: ${entry}`);
+      const [vizPubkey, tonPubkey, solanaPubkey = ""] = parts;
+      if (!id || !vizPubkey || !tonPubkey) {
+        throw new Error(`operator entry incomplete (id, vizPub, tonPub required): ${entry}`);
       }
       return { id, vizPubkey, tonPubkey, solanaPubkey };
     });
 }
 
-/** Inverse of parseOperators. */
+/**
+ * Inverse of parseOperators. Omits the Solana field when absent so a 2-field spec
+ * round-trips (op=viz:ton), and emits all three when a Solana key is present.
+ */
 export function serializeOperators(ops: OperatorRef[]): string {
-  return ops.map((o) => `${o.id}=${o.vizPubkey}:${o.tonPubkey}:${o.solanaPubkey}`).join(",");
+  return ops
+    .map((o) => `${o.id}=${o.vizPubkey}:${o.tonPubkey}${o.solanaPubkey ? `:${o.solanaPubkey}` : ""}`)
+    .join(",");
 }
 
 /**

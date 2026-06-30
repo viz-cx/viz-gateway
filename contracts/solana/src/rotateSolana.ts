@@ -93,6 +93,9 @@ async function proposeSolana(): Promise<void> {
     submitter,
     newSolKeys.map((k) => new PublicKey(k)),
     master.newThreshold,
+    // The multisig ACCOUNT keypair is intentionally throwaway: createMultisig only uses it
+    // to fund + pin the new account's address, and an SPL multisig has no admin key after
+    // creation (its authority is purely the M-of-N member set). We keep only the address.
     Keypair.generate(),
     undefined,
     TOKEN_2022_PROGRAM_ID,
@@ -232,9 +235,15 @@ async function status(): Promise<void> {
   console.log(`[status] expected new multisig: ${expectedNew || "(unknown — broadcast-solana not run)"}`);
   console.log(`[status] solana matches new set: ${solanaDone}`);
 
+  // status is a READ command by default; only persist when explicitly asked (--commit),
+  // so an operator polling status never has a surprising side effect on rotation-state.json.
   if (solanaDone && !st.solanaDone) {
-    writeFileSync(stateFile, JSON.stringify(mergeState(st, { solanaDone: true }), null, 2));
-    console.log("[status] recorded solanaDone=true.");
+    if (arg("commit") !== undefined || process.argv.includes("--commit")) {
+      writeFileSync(stateFile, JSON.stringify(mergeState(st, { solanaDone: true }), null, 2));
+      console.log("[status] recorded solanaDone=true (--commit).");
+    } else {
+      console.log("[status] solana rotation complete — run `status --commit` to record solanaDone=true.");
+    }
   }
 
   if (expectedNew) {

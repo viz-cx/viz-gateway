@@ -339,9 +339,27 @@ Solana pubkey).
    APPLY=1 npm run rotate:solana -- broadcast-solana rotation-solana.json
    ```
 4. **All operators**: set `SOLANA_MULTISIG=<new address printed above>` and restart
-   the gateway. Confirm: `npm run rotate:solana -- status`.
+   the gateway. Confirm: `npm run rotate:solana -- status` (read-only). To record
+   `solanaDone=true` in `rotation-state.json`, run `status --commit` — plain `status`
+   never writes.
 
-The operator spec is now three-field: `op-1=<vizPub>:<tonPub>:<solanaPub>`.
+The operator spec is `op-1=<vizPub>:<tonPub>[:<solanaPub>]`. The Solana field is
+**optional** (a VIZ/TON-only rotation may omit it); `propose-solana` requires every
+operator to carry a Solana pubkey and fails if one is missing.
+
+> ⚠️ **Abandon a rotation = advance the nonce.** The handoff is a durable-nonce tx, so a
+> set of `M` collected partials stays replayable until `SOLANA_ROTATION_NONCE_ACCOUNT`
+> advances (`validateProposal` runs with `skipExpiry`, so there is no time bound). If a
+> rotation is abandoned with partials already shared, **rotate/advance the nonce** to
+> invalidate those stale partials before starting over:
+> ```bash
+> solana new-nonce SOLANA_ROTATION_NONCE_ACCOUNT --nonce-authority <submitter>
+> ```
+
+> 🧪 **Devnet dry-run first.** The handoff moves real mint authority and the offline
+> spike cannot exercise `createMultisig`, the durable-nonce `setAuthority`, partial-merge
+> onto a live tx, or the nonce-aware confirmation. Do a full devnet rotation (propose →
+> co-sign → broadcast → status) end-to-end before relying on this on mainnet.
 
 ## Known gaps to close during bring-up
 

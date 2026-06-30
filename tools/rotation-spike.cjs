@@ -191,8 +191,13 @@ assert.strictEqual(ops3[0].solanaPubkey, "SoLpub1");
 assert.strictEqual(ops3[1].solanaPubkey, "SoLpub2");
 assert.strictEqual(serializeOperators(ops3), "op-1=VIZ1aaa:11aa:SoLpub1,op-2=VIZ1bbb:22bb:SoLpub2");
 
-// --- a 2-field entry (missing solanaPubkey) is rejected ---
-assert.throws(() => parseOperators("op-1=VIZ1aaa:11aa"), /solanaPub|missing|incomplete/i);
-console.log("[solana] 3-field operator spec + rejection of 2-field OK");
+// --- a 2-field entry (no solanaPubkey) parses, defaulting solanaPubkey to "" ---
+// (VIZ/TON-only rotations must not require a Solana key; matches parseManifest.)
+const ops2 = parseOperators("op-1=VIZ1aaa:11aa,op-2=VIZ1bbb:22bb");
+assert.strictEqual(ops2[0].solanaPubkey, "", "2-field entry defaults solanaPubkey to ''");
+assert.strictEqual(serializeOperators(ops2), "op-1=VIZ1aaa:11aa,op-2=VIZ1bbb:22bb", "2-field round-trips");
+// --- a 1-field rest (missing tonPubkey) is still rejected ---
+assert.throws(() => parseOperators("op-1=VIZ1aaa"), /2 or 3 fields|incomplete/i);
+console.log("[solana] 3-field spec carries solanaPubkey; 2-field optional + round-trips OK");
 
 console.log("\nrotation-spike assertions passed.");
