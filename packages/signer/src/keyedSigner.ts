@@ -30,15 +30,49 @@ import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
  *
  * Keys are passed in here for the scaffold; in production this class wraps an
  * HSM/KMS and the raw secret never leaves the device.
+ *
+ * F2: `validateSource` re-derives the action from the operator's OWN chain view and
+ * throws on any mismatch. It runs BEFORE the proposal-vs-action checks (which remain
+ * as defense-in-depth). The production signer (index.ts) always injects it. Disabling
+ * it is allowed ONLY for offline spikes and MUST be an explicit, greppable opt-in via
+ * `DISABLED_SOURCE_VALIDATION` — a forgotten argument throws rather than silently
+ * signing unvalidated.
  */
+export type SourceValidator = (action: CanonicalAction) => Promise<void>;
+
+/** Explicit test-only sentinel: pass this to KeyedSigner to disable F2 source validation. */
+export const DISABLED_SOURCE_VALIDATION = Symbol("DISABLED_SOURCE_VALIDATION");
+
 export class KeyedSigner implements Signer {
+  private readonly validateSource: SourceValidator | null;
+
   constructor(
     public readonly operatorId: string,
     private readonly vizWif: string,
     private readonly tonMnemonic: string,
     private readonly fees: GatewayFeeConfig,
     private readonly solanaSecret: Uint8Array | null = null,
-  ) {}
+    validateSource?: SourceValidator | typeof DISABLED_SOURCE_VALIDATION,
+  ) {
+    if (validateSource === undefined) {
+      // A forgotten validator must never degrade to "sign without a source check".
+      throw new Error(
+        "KeyedSigner: a source validator is required; pass DISABLED_SOURCE_VALIDATION explicitly for offline/test use only.",
+      );
+    }
+    this.validateSource = validateSource === DISABLED_SOURCE_VALIDATION ? null : validateSource;
+  }
+
+  /** F2 gate: independently re-validate the source event before signing. */
+  private async assertSource(action: CanonicalAction): Promise<void> {
+    if (!this.validateSource) {
+      console.warn(
+        `[signer] SOURCE VALIDATION DISABLED for ${action.id}: explicit test-only sentinel — NEVER production.`,
+      );
+      return;
+    }
+    await this.validateSource(action);
+  }
 
   /** Re-derive the expected NET for a PEG_IN and assert the proposal matches. */
   private assertNet(
@@ -60,6 +94,7 @@ export class KeyedSigner implements Signer {
 
   async signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval> {
     if (action.direction !== "PEG_OUT") throw new Error("signVizRelease expects a PEG_OUT action");
+    await this.assertSource(action);
     if (proposal.to !== action.recipient) {
       throw new Error(`proposal.to (${proposal.to}) != action.recipient (${action.recipient})`);
     }
@@ -75,6 +110,7 @@ export class KeyedSigner implements Signer {
 
   async approveTonMint(action: CanonicalAction, proposal: TonMintProposal): Promise<Approval> {
     if (action.direction !== "PEG_IN") throw new Error("approveTonMint expects a PEG_IN action");
+    await this.assertSource(action);
     if (proposal.toAddress !== action.recipient) {
       throw new Error(`proposal.toAddress (${proposal.toAddress}) != action.recipient (${action.recipient})`);
     }
@@ -89,6 +125,7 @@ export class KeyedSigner implements Signer {
 
   async approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval> {
     if (action.direction !== "PEG_IN") throw new Error("approveSolanaMint expects a PEG_IN action");
+    await this.assertSource(action);
     if (proposal.recipient !== action.recipient) {
       throw new Error(`proposal.recipient (${proposal.recipient}) != action.recipient (${action.recipient})`);
     }

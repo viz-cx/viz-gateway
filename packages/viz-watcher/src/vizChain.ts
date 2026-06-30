@@ -1,5 +1,6 @@
 import viz, {
   type Account,
+  type AnnotatedTransaction,
   type BroadcastResult,
   type DynamicGlobalProperties,
   type OpWrapper,
@@ -105,6 +106,68 @@ export class VizJsChain implements VizChain {
       }
     }
     return deposits;
+  }
+
+  /**
+   * F2 source re-validation: fetch ONE confirmed transfer op by (trxId, opIndex)
+   * and reconstruct the VizDeposit, exactly as irreversibleDepositsSince would.
+   * This is the signer's independent read of the peg-in source event — it must
+   * use the operator's OWN node, never a coordinator-fed value.
+   *
+   * Fail-closed: returns null if the trx is unknown OR not yet irreversible (the
+   * caller then refuses to sign — worst case a liveness stall). Throws only on a
+   * structural violation (no such op, or the op is not a transfer to the gateway),
+   * which signals a coordinator referencing a source event that doesn't match.
+   */
+  async getDeposit(trxId: string, opIndex: number): Promise<VizDeposit | null> {
+    let tx: AnnotatedTransaction | null;
+    try {
+      tx = await call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(trxId, cb));
+    } catch (err) {
+      // operation_history returns an error for an unknown trx id; treat as not-found
+      // (fail-closed). A transport failure also lands here and correctly refuses.
+      console.warn(`[viz-chain] getDeposit(${trxId}): lookup failed: ${String(err)}`);
+      return null;
+    }
+    if (!tx || !Array.isArray(tx.operations)) return null;
+
+    // Defense-in-depth: a correct node echoes the id we asked for. A mismatch means a
+    // misbehaving/lying node returned a different transaction — refuse to derive from it.
+    if (tx.transaction_id && tx.transaction_id !== trxId) {
+      throw new Error(
+        `getDeposit(${trxId}): node returned transaction_id ${tx.transaction_id} != requested ${trxId}`,
+      );
+    }
+
+    // Confirm the transfer is irreversible before trusting it (re-org safety).
+    const lib = await this.lastIrreversibleBlock();
+    if (tx.block_num > lib) return null;
+
+    const op = tx.operations[opIndex];
+    if (!op) {
+      throw new Error(`getDeposit(${trxId}:${opIndex}): no op at index ${opIndex}`);
+    }
+    const [name, payload] = op;
+    if (name !== "transfer") {
+      throw new Error(`getDeposit(${trxId}:${opIndex}): op is "${name}", not a transfer`);
+    }
+    if (payload["to"] !== this.gatewayAccount) {
+      throw new Error(
+        `getDeposit(${trxId}:${opIndex}): transfer "to" (${String(payload["to"])}) != gateway ${this.gatewayAccount}`,
+      );
+    }
+    // Memo "<chain>:<address>"; throws on a missing/unknown prefix (no silent default).
+    const target = parseRemoteTarget(String(payload["memo"] ?? ""));
+    return {
+      trxId,
+      opIndex,
+      blockNum: tx.block_num,
+      from: String(payload["from"] ?? ""),
+      to: String(payload["to"] ?? ""),
+      amountMilliViz: vizToMilli(String(payload["amount"] ?? "0.000 VIZ")),
+      remoteChain: target.chain,
+      remoteDestination: target.destination,
+    };
   }
 
   async gatewayBalanceMilliViz(): Promise<bigint> {

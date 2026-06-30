@@ -126,6 +126,39 @@ set. Note: `change_recovery_account` takes effect after VIZ's owner-recovery del
 `FEDERATION_THRESHOLD=1`, `SIGNER_ENDPOINTS=http://signer:8090`. Keep the fee/cap
 defaults (100 VIZ floor, 0.30%, 2,000 VIZ min; $500/$1k/$10k caps).
 
+### F2 — signer independent source validation (env per operator)
+
+Each signer independently re-reads the source event from **its own** nodes before
+signing, so `VIZ_NODE_URL` and `SOLANA_RPC_URL` on the signer **must point at the
+operator's own RPC, never a coordinator-fed endpoint** — that independence is the whole
+security guarantee.
+
+> 🔑 **Operational invariant (not code-enforceable).** Nothing in the gateway can prove a
+> signer's node URLs are truly independent of the coordinator — if an operator points
+> `VIZ_NODE_URL`/`SOLANA_RPC_URL` at the coordinator's RPC, F2 silently degrades to
+> trusting the coordinator. Each operator MUST verify this themselves at deploy time, and
+> monitoring should **alert if any signer's node URL resolves to the same host/IP as the
+> coordinator** (or a shared upstream). Treat a matching endpoint as a sev-1 misconfig.
+>
+> Note also: a non-Solana PEG_OUT (TON source validation is not yet implemented) is now
+> **refused fail-closed** by the signer, not warned-and-signed. Implement TON source
+> re-validation before enabling TON peg-out, or every TON release will (correctly) stall.
+
+For Solana **peg-out**, the signer re-derives the per-account deposit address to confirm
+the release target, using a **public** master key (no spend authority):
+
+- The single sweep service still holds the secret `SOLANA_DEPOSIT_MASTER_SEED`.
+- Every signer sets `DEPOSIT_MASTER_PUB` — derive it from the seed once and publish it:
+
+  ```bash
+  node -e 'console.log(require("./packages/solana-watcher/dist/depositAddress.js").masterPubFromSeed(process.env.SOLANA_DEPOSIT_MASTER_SEED))'
+  ```
+
+> ⚠️ **Breaking change (pre-launch):** deposit-address derivation switched from the old
+> HMAC scheme to **additive ed25519** (domain `viz-gateway:peg-out:v2`), so every deposit
+> address changes. On deploy of this change, **clear the `deposit_addresses` table**
+> (re-registered on next lookup) — no migration, this is pre-funds.
+
 ## 6. Fund the TON gas
 
 Keep the **multisig** funded with test TON so it can pay for mint execution and

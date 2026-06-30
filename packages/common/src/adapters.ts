@@ -23,6 +23,14 @@ export interface VizChain {
   lastIrreversibleBlock(): Promise<number>;
   /** Deposits to the gateway account that are irreversible as of `upToBlock`. */
   irreversibleDepositsSince(fromBlock: number, upToBlock: number): Promise<VizDeposit[]>;
+  /**
+   * Fetch a single confirmed VIZ transfer op by transaction id + op index, for
+   * the signer's independent source-event re-validation (F2). Returns null if the
+   * transaction does not exist or is not yet irreversible (fail-closed: the signer
+   * refuses rather than trusts the coordinator's wire action). Throws if the op at
+   * `opIndex` is structurally not a transfer to the gateway account.
+   */
+  getDeposit(trxId: string, opIndex: number): Promise<VizDeposit | null>;
   /** Current gateway account VIZ balance, in milli-VIZ (for reconciliation). */
   gatewayBalanceMilliViz(): Promise<bigint>;
   /**
@@ -49,6 +57,15 @@ export interface RemoteChain<MintProposal = unknown> {
   finalizedHeight(): Promise<number>;
   /** wrapped-VIZ returns/burns observed final within (fromHeight, toHeight]. */
   finalizedBurnsSince(fromHeight: number, toHeight: number): Promise<RemoteBurn[]>;
+  /**
+   * Fetch a single finalized burn/return by its source-chain id, for the signer's
+   * independent peg-out source re-validation (F2). Returns null if not found or not
+   * yet final (fail-closed). `homeDestination` is NOT resolved here — the chain
+   * adapter holds no deposit registry; the caller (signer's source validator) fills
+   * it after the address-binding check. For Solana: sourceId = tx signature. TON
+   * defers (sourceId is a message hash with no clean fetch-by-hash) — optional.
+   */
+  getBurn?(sourceId: string): Promise<RemoteBurn | null>;
   /** Circulating wrapped-VIZ supply, in milli-VIZ (for reconciliation). */
   circulatingSupplyMilliViz(): Promise<bigint>;
   /**

@@ -2,7 +2,7 @@ import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gatew
 import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "./solanaChain";
-import { deriveDepositKeypair } from "./depositAddress";
+import { deriveDepositSigner } from "./depositAddress";
 import { classifySeenRecovery, guardPegOut } from "./pegoutGuard";
 
 /**
@@ -140,8 +140,8 @@ async function main(): Promise<void> {
 
           try {
             // Burn first (supply down -> over-backing window, the safe direction).
-            const depositKp = deriveDepositKeypair(cfg.solana.depositMasterSeed, dep.vizAccount);
-            const burnSig = await chain.burnFromDeposit(depositKp.secretKey, t.amountBaseUnits);
+            const depositSigner = deriveDepositSigner(cfg.solana.depositMasterSeed, dep.vizAccount);
+            const burnSig = await chain.burnFromDeposit(depositSigner, t.amountBaseUnits);
             await breaker.record(action.amountMilliViz); // count only burns that actually happened
             // Checkpoint the burn signature (still SEEN) BEFORE the QUEUED hand-off, so a
             // crash in the gap is self-healing: stale-SEEN recovery checks whether it landed.

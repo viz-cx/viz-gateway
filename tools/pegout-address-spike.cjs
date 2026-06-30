@@ -6,7 +6,7 @@
 // Run: node tools/pegout-address-spike.cjs   (after npm run build)
 const assert = require("node:assert");
 const { PublicKey } = require("@solana/web3.js");
-const { deriveDepositKeypair, depositAddress, depositAta } = require("../packages/solana-watcher/dist/depositAddress");
+const { deriveDepositSigner, depositAddress, depositAta } = require("../packages/solana-watcher/dist/depositAddress");
 const { createStore } = require("../packages/common/dist/store");
 
 const SEED = "test master seed do not use in prod";
@@ -28,8 +28,8 @@ const ata = depositAta(SEED, "alice", MINT);
 new PublicKey(owner); // throws if invalid
 new PublicKey(ata);
 assert.notStrictEqual(owner, ata);
-assert.strictEqual(deriveDepositKeypair(SEED, "alice").publicKey.toBase58(), owner);
-console.log("[pegout] owner + ATA valid base58, keypair matches OK");
+assert.strictEqual(deriveDepositSigner(SEED, "alice").publicKey.toBase58(), owner);
+console.log("[pegout] owner + ATA valid base58, signer matches OK");
 
 // 4) registry maps both owner and ATA back to the VIZ account.
 (async () => {

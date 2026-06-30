@@ -10,7 +10,7 @@ const viz = require("viz-js-lib");
 const { canonicalPegOut } = require("@gateway/common");
 const { milliToViz } = require("../packages/viz-watcher/dist/vizChain.js");
 const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js");
-const { KeyedSigner } = require("../packages/signer/dist/keyedSigner.js");
+const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
 
 const FEES = {
   floorMilliViz: 10000n,
@@ -20,7 +20,7 @@ const FEES = {
 };
 
 function signerClient(operatorId, wif) {
-  const ks = new KeyedSigner(operatorId, wif, "", FEES);
+  const ks = new KeyedSigner(operatorId, wif, "", FEES, null, DISABLED_SOURCE_VALIDATION);
   return { operatorId, approve: (action, proposal) => ks.signVizRelease(action, proposal) };
 }
 
