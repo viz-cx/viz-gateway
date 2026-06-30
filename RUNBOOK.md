@@ -22,6 +22,8 @@ Consequence: `TonHttpChain.submitMintOrder` is the integration point that must
 create/approve that on-chain order via the official Multisig wrapper — it is the
 one piece still to wire (see step 9). Everything else runs today.
 
+> For the automated end-to-end round-trip harness, see [docs/e2e.md](docs/e2e.md).
+
 ## 0. Networks & funds
 
 - **TON testnet** for the multisig + wVIZ jetton. Get test TON from the testnet
