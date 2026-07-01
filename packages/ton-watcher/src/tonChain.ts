@@ -1,6 +1,6 @@
 import { Address, JettonMaster, TonClient, internal, SendMode, WalletContractV4, toNano } from "@ton/ton";
 import { beginCell } from "@ton/core";
-import type { Slice } from "@ton/core";
+import type { Slice, Transaction } from "@ton/core";
 import type { RemoteBurn, RemoteChain, TonMintProposal } from "@gateway/common";
 import { Multisig } from "@gateway/contracts-ton";
 import { keyPairFromMnemonic } from "./tonSign";
@@ -94,26 +94,62 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     return state.state === "active";
   }
 
+  /**
+   * Parse one gateway-wallet tx into a RemoteBurn, or null if it is not a final
+   * transfer_notification. Shared by the watcher's forward scan (finalizedBurnsSince)
+   * and the signer's independent re-read (getBurn) so both apply the SAME finality
+   * cutoff and parse — the signer never validates a burn the watcher wouldn't treat as
+   * final.
+   */
+  private burnFromTx(tx: Transaction, cutoff: number, height: number): RemoteBurn | null {
+    if (tx.now > cutoff) return null; // not yet final per the time buffer
+    const inMsg = tx.inMessage;
+    if (!inMsg || inMsg.body.bits.length === 0) return null;
+    const parsed = parseTransferNotification(inMsg.body.beginParse());
+    if (!parsed) return null;
+    return {
+      sourceId: tx.hash().toString("hex"),
+      height,
+      from: parsed.sender,
+      amountMilliViz: parsed.amountBaseUnits,
+      homeDestination: parsed.comment.trim(),
+    };
+  }
+
   async finalizedBurnsSince(_fromHeight: number, toHeight: number): Promise<RemoteBurn[]> {
     if (!this.gatewayWallet) return [];
     const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
     const txs = await this.client.getTransactions(this.gatewayWallet, { limit: this.maxTransactions });
     const burns: RemoteBurn[] = [];
     for (const tx of txs) {
-      if (tx.now > cutoff) continue; // not yet final per the time buffer
-      const inMsg = tx.inMessage;
-      if (!inMsg || inMsg.body.bits.length === 0) continue;
-      const parsed = parseTransferNotification(inMsg.body.beginParse());
-      if (!parsed) continue;
-      burns.push({
-        sourceId: tx.hash().toString("hex"),
-        height: toHeight,
-        from: parsed.sender,
-        amountMilliViz: parsed.amountBaseUnits,
-        homeDestination: parsed.comment.trim(),
-      });
+      const burn = this.burnFromTx(tx, cutoff, toHeight);
+      if (burn) burns.push(burn);
     }
     return burns;
+  }
+
+  /**
+   * F2 independent re-read: given a burn tx hash (the peg-out action.id), re-derive the
+   * RemoteBurn from the operator's OWN node. The sourceId alone lacks lt/address for a
+   * direct fetch, so we bounded-scan the gateway wallet's own recent transactions — the
+   * same view finalizedBurnsSince uses — and match by tx hash. A compromised coordinator
+   * cannot forge this: the burn, comment (VIZ recipient), and amount all come from chain.
+   *
+   * Returns null (→ fail-closed stall at the signer) when the tx is not in the scan
+   * window, is not a transfer_notification, or is not yet final. Bound: only the last
+   * `maxTransactions` gateway txs are visible — a release delayed past that window cannot
+   * be validated until the limit is raised or the scan paginated.
+   */
+  async getBurn(sourceId: string): Promise<RemoteBurn | null> {
+    if (!this.gatewayWallet) return null;
+    const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
+    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: this.maxTransactions });
+    for (const tx of txs) {
+      if (tx.hash().toString("hex") !== sourceId) continue;
+      const height = (await this.client.getMasterchainInfo()).latestSeqno;
+      return this.burnFromTx(tx, cutoff, height);
+    }
+    return null;
   }
 
   /**

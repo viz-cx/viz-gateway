@@ -1,6 +1,9 @@
 # Plan — TON peg-out source validation (signer F2 for TON)
 
-**Status:** planned — implement in a dedicated session.
+**Status:** ✅ IMPLEMENTED 2026-07-01 (tasks 1–4). `TonHttpChain.getBurn` + the TON branch
+in `sourceValidator.ts` are landed and offline-proven by `tools/ton-pegout-f2-spike.cjs`
+(in the `verify` chain). **Remaining:** task 5 — the live testnet round-trip. Task 6
+(FEE_SWEEP/REFUND policy validation, §"Related gap") is deferred to a follow-up.
 **Severity:** 🟠 — liveness blocker: TON peg-out cannot complete until this lands (the
 signer correctly fail-closes). Not a theft vector (fail-closed is safe), but the single
 thing between here and a green TON round-trip.

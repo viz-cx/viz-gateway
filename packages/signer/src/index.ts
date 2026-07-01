@@ -9,6 +9,7 @@ import {
 } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
+import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
 import { KeyedSigner } from "./keyedSigner";
 import { routeApproval } from "./routeApproval";
 import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
@@ -51,9 +52,32 @@ async function main(): Promise<void> {
         "derive it once via masterPubFromSeed(SOLANA_DEPOSIT_MASTER_SEED).",
     );
   }
+  // Read-only TON reader: getBurn bounded-scans the gateway jetton wallet on the operator's
+  // OWN TON node — no mnemonic/multisig needed, so pass "" for the write-path fields. If the
+  // gateway jetton wallet is not configured, a TON peg-out can never be validated, so fail
+  // closed if one ever arrives (mirrors the Solana stub above).
+  const tonReader: BurnReader = cfg.ton.gatewayJettonWallet
+    ? new TonHttpChain(
+        cfg.ton.endpoint,
+        cfg.ton.apiKey,
+        cfg.ton.jettonMinterAddress,
+        cfg.ton.gatewayJettonWallet,
+        "",
+        "",
+        cfg.ton.finalityConfirmations,
+        cfg.ton.scanMaxTransactions,
+      )
+    : {
+        async getBurn() {
+          throw new Error(
+            "TON not configured on this signer (TON_GATEWAY_JETTON_WALLET unset); refusing TON peg-out",
+          );
+        },
+      };
   const validatorDeps: SourceValidatorDeps = {
     vizChain,
     solanaChain: solanaReader,
+    tonChain: tonReader,
     store,
     depositMasterPub: cfg.solana.depositMasterPub,
   };

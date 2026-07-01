@@ -170,9 +170,11 @@ security guarantee.
 > monitoring should **alert if any signer's node URL resolves to the same host/IP as the
 > coordinator** (or a shared upstream). Treat a matching endpoint as a sev-1 misconfig.
 >
-> Note also: a non-Solana PEG_OUT (TON source validation is not yet implemented) is now
-> **refused fail-closed** by the signer, not warned-and-signed. Implement TON source
-> re-validation before enabling TON peg-out, or every TON release will (correctly) stall.
+> Note also: PEG_OUT is dispatched by source-id **shape**, not the coordinator-supplied
+> `remoteChain` — a Solana signature (base58) → Solana re-read, a 64-hex burn tx hash → TON
+> re-read, anything else → refused fail-closed. TON peg-out re-read is now implemented
+> (`TonHttpChain.getBurn` bounded-scans the gateway jetton wallet on the operator's own
+> node); the signer needs `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` pointed at that node.
 
 For Solana **peg-out**, the signer re-derives the per-account deposit address to confirm
 the release target, using a **public** master key (no spend authority):
@@ -206,12 +208,11 @@ This starts watchers + signer + recon + coordinator in one stack (solo). Check
 
 ## 8. Test peg-out
 
-> ⚠️ **Peg-out VIZ release is currently BLOCKED at the signer** (2026-07-01). The
-> TON side works — the wVIZ transfer to `TON_GATEWAY_JETTON_WALLET` lands and
-> `ton-watcher` enqueues the release — but the signer **fail-closes on TON peg-out**
-> because TON source re-validation is not implemented (`sourceValidator.ts`). The
-> release stalls (safe, never a wrong signature) until that lands. See
-> `docs/plan-ton-pegout-source-validation.md`.
+> TON peg-out source validation is implemented (2026-07-01): the signer re-reads the burn
+> from its own node (`TonHttpChain.getBurn`) and asserts the re-derived action matches the
+> coordinator's before signing. Offline-proven in `tools/ton-pegout-f2-spike.cjs`. The
+> signer's `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` **must** point at the operator's own
+> node (the F2 independence invariant). A live testnet round-trip is the remaining step.
 
 You need some wVIZ to send. As multisig admin, mint a little wVIZ to a test
 user wallet (one multisig order). Then from that wallet, **send the wVIZ to
@@ -403,12 +404,14 @@ operator to carry a Solana pubkey and fails if one is missing.
 
 - **`submitMintOrder`** — ✅ DONE + proven live on TON testnet 2026-07-01 (peg-in
   round-trips through the full stack).
-- **TON peg-out source validation** — 🟠 the signer fail-closes on TON peg-out, so
-  the VIZ release stalls (step 8). The one blocker for a green TON round-trip. Plan:
+- **TON peg-out source validation** — ✅ implemented 2026-07-01 (`TonHttpChain.getBurn` +
+  the TON branch in `sourceValidator.ts`, offline-proven in `tools/ton-pegout-f2-spike.cjs`).
+  Live testnet round-trip is the remaining verification. Plan:
   `docs/plan-ton-pegout-source-validation.md`.
-- **FEE_SWEEP / REFUND signer validation** — these gateway-internal VIZ releases also
-  hit the signer's fail-closed peg-out branch (no remote source to re-read), so fees
-  never sweep. Needs its own validation path (noted in the peg-out plan).
+- **FEE_SWEEP / REFUND signer validation** — 🟠 these gateway-internal VIZ releases match
+  neither source-id shape, so they hit the signer's fail-closed branch (no remote source to
+  re-read) and fees never sweep. Needs its own policy-based validation path (noted in the
+  peg-out plan §"Related gap").
 - **Fee split at mint** — mint `gross` with `net` to the user and `fee` to the
   treasury jetton wallet (keeps 1:1); the quote is already computed by the watcher.
 - **Gas-wallet watermark** — auto-pause peg-in when the multisig TON balance is
