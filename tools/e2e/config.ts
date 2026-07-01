@@ -1,6 +1,7 @@
 export interface E2eConfig {
   chain: "ton" | "solana";
   runId: string;
+  freshStore: boolean;
   viz: {
     nodeUrl: string;
     testWif: string;
@@ -58,7 +59,7 @@ export function loadE2eConfig(env: NodeJS.ProcessEnv, chain: "ton" | "solana"): 
     burnOwner: req(env, "E2E_TON_BURN_OWNER"),
     minGasNano: BigInt(req(env, "E2E_TON_MIN_GAS_NANO")),
   };
-  return { chain, runId: makeRunId(), viz, ton };
+  return { chain, runId: makeRunId(), freshStore: env.E2E_FRESH_STORE === "1", viz, ton };
 }
 
 export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
@@ -79,8 +80,13 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     FEDERATION_N: "1",
     FEDERATION_THRESHOLD: "1",
     OPERATOR_ID: "op-1",
-    // Fresh store per run (clean idempotency slate)
-    STORE_URL: `sqlite:./data/${cfg.runId}.sqlite`,
+    // Persistent store across runs (matches production) so idempotency memory
+    // survives: a peg-out burn already released on a prior run is NOT re-released
+    // when it's still inside the watcher's scan window. Set E2E_FRESH_STORE=1 for
+    // a clean idempotency slate keyed by runId (old per-run behaviour).
+    STORE_URL: cfg.freshStore
+      ? `sqlite:./data/${cfg.runId}.sqlite`
+      : `sqlite:./data/e2e.sqlite`,
     // Coordinator/signer wiring (loopback, solo)
     COORDINATOR_LISTEN: "127.0.0.1:8080",
     COORDINATOR_URL: "http://127.0.0.1:8080",
