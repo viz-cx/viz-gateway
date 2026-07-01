@@ -157,12 +157,16 @@ async function reReadParentPegIn(
   const parentId = action.id.slice(0, -suffix.length);
   const sep = parentId.indexOf(":");
   const trxId = sep > 0 ? parentId.slice(0, sep) : "";
-  const opIndex = Number.parseInt(parentId.slice(sep + 1), 10);
-  if (!trxId || Number.isNaN(opIndex)) {
+  // Strict opIndex: a lenient parseInt would accept trailing garbage ("0x" -> 0),
+  // letting a compromised coordinator forge a distinct child id that still resolves
+  // to the real parent deposit. Require a pure integer suffix.
+  const opStr = parentId.slice(sep + 1);
+  if (!trxId || !/^\d+$/.test(opStr)) {
     throw new SourceMismatchError(
       `malformed ${suffix} child id "${action.id}" (expected "<trxId>:<opIndex>${suffix}")`,
     );
   }
+  const opIndex = Number.parseInt(opStr, 10);
   const deposit = await deps.vizChain.getDeposit(trxId, opIndex);
   if (!deposit) {
     throw new SourceMismatchError(
@@ -230,10 +234,13 @@ async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps
 async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
   const sep = action.id.indexOf(":");
   const trxId = sep > 0 ? action.id.slice(0, sep) : "";
-  const opIndex = Number.parseInt(action.id.slice(sep + 1), 10);
-  if (!trxId || Number.isNaN(opIndex)) {
+  // Strict opIndex (see reReadParentPegIn): reject any non-integer suffix so a
+  // parse-equivalent but distinct id can never resolve to the real deposit.
+  const opStr = action.id.slice(sep + 1);
+  if (!trxId || !/^\d+$/.test(opStr)) {
     throw new SourceMismatchError(`malformed PEG_IN source id "${action.id}" (expected "<trxId>:<opIndex>")`);
   }
+  const opIndex = Number.parseInt(opStr, 10);
   const deposit = await deps.vizChain.getDeposit(trxId, opIndex);
   if (!deposit) {
     throw new SourceMismatchError(`PEG_IN source ${action.id} not found or not yet irreversible on VIZ`);
@@ -280,6 +287,14 @@ async function validateTonPegOut(action: CanonicalAction, deps: SourceValidatorD
 
 /** Deep-equal the trust-critical fields; the digest is authoritative, the rest sharpen errors. */
 function assertSameAction(derived: CanonicalAction, wire: CanonicalAction): void {
+  // The id is the outbox idempotency key AND the on-chain memo (Solana). The digest
+  // binds the SOURCE-DERIVED id, not the wire id, so without this check a compromised
+  // coordinator could carry a distinct-but-parse-equivalent id (e.g. a trailing char
+  // the deposit-key parser tolerates) past validation and drive a SECOND mint/release
+  // for the same real source event. Assert the wire id equals the one we re-derived.
+  if (derived.id !== wire.id) {
+    throw new SourceMismatchError(`id ${wire.id} != source-derived ${derived.id}`);
+  }
   if (derived.direction !== wire.direction) {
     throw new SourceMismatchError(`direction ${wire.direction} != source-derived ${derived.direction} (${wire.id})`);
   }
