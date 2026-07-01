@@ -171,10 +171,17 @@ security guarantee.
 > coordinator** (or a shared upstream). Treat a matching endpoint as a sev-1 misconfig.
 >
 > Note also: PEG_OUT is dispatched by source-id **shape**, not the coordinator-supplied
-> `remoteChain` — a Solana signature (base58) → Solana re-read, a 64-hex burn tx hash → TON
-> re-read, anything else → refused fail-closed. TON peg-out re-read is now implemented
-> (`TonHttpChain.getBurn` bounded-scans the gateway jetton wallet on the operator's own
-> node); the signer needs `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` pointed at that node.
+> `remoteChain` — a `:fee`/`:refund` suffix → gateway-internal re-derivation (below), a
+> Solana signature (base58) → Solana re-read, a 64-hex burn tx hash → TON re-read, anything
+> else → refused fail-closed. TON peg-out re-read is now implemented (`TonHttpChain.getBurn`
+> bounded-scans the gateway jetton wallet on the operator's own node); the signer needs
+> `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` pointed at that node.
+>
+> **Gateway-internal releases (FEE_SWEEP / REFUND)** have no remote source; the signer
+> re-derives them from the PEG_IN they settle (re-read from its OWN VIZ node). A FEE_SWEEP
+> may only release to the operator's OWN `fees.gate` for an amount within the independently
+> derived fee band `[base, base + activationSurcharge]`; a REFUND may only return the GROSS
+> deposit to its original sender. Both bind the child digest to the parent PEG_IN digest.
 
 For Solana **peg-out**, the signer re-derives the per-account deposit address to confirm
 the release target, using a **public** master key (no spend authority):
@@ -417,10 +424,11 @@ operator to carry a Solana pubkey and fails if one is missing.
   message at the gateway jetton wallet) plus `TonHttpChain.getBurn` + the TON branch in
   `sourceValidator.ts` (offline-proven in `tools/ton-pegout-f2-spike.cjs`). Plan:
   `docs/plan-ton-pegout-source-validation.md`.
-- **FEE_SWEEP / REFUND signer validation** — 🟠 these gateway-internal VIZ releases match
-  neither source-id shape, so they hit the signer's fail-closed branch (no remote source to
-  re-read) and fees never sweep. Needs its own policy-based validation path (noted in the
-  peg-out plan §"Related gap").
+- **FEE_SWEEP / REFUND signer validation** — ✅ DONE 2026-07-01. These gateway-internal VIZ
+  releases are now re-derived from the PEG_IN they settle (see the gateway-internal note
+  above): FEE_SWEEP → own `fees.gate`, amount in the derived fee band; REFUND → gross to the
+  original sender. Offline-proven in `tools/fee-sweep-refund-spike.cjs`. `recon`'s `unswept`
+  now drains instead of growing without bound.
 - **Fee split at mint** — mint `gross` with `net` to the user and `fee` to the
   treasury jetton wallet (keeps 1:1); the quote is already computed by the watcher.
 - **Gas-wallet watermark** — auto-pause peg-in when the multisig TON balance is

@@ -1,10 +1,14 @@
 import {
+  baseFee,
   canonicalPegIn,
   canonicalPegOut,
+  pegInFeePolicyFor,
   type CanonicalAction,
+  type GatewayFeeConfig,
   type GatewayStore,
   type RemoteBurn,
   type VizChain,
+  type VizDeposit,
 } from "@gateway/common";
 import { depositAddressFromMasterPub } from "@gateway/solana-watcher/dist/depositAddress";
 
@@ -49,7 +53,22 @@ export interface SourceValidatorDeps {
   store: Pick<GatewayStore, "depositAddressBy">;
   /** Base58 DEPOSIT_MASTER_PUB — public derivation only, no spend authority. */
   depositMasterPub: string;
+  /**
+   * The operator's OWN fee configuration — used to independently re-derive the fee a
+   * FEE_SWEEP is allowed to sweep. Must be the identical config every operator runs
+   * (see GatewayFeeConfig): the fee math is a pure function of the (immutable) gross.
+   */
+  fees: GatewayFeeConfig;
+  /**
+   * The operator's OWN fees.gate account. A FEE_SWEEP may only ever release to THIS
+   * address; a coordinator-supplied recipient is ignored beyond the equality check.
+   */
+  feesGateAccount: string;
 }
+
+/** Child-action id suffixes for gateway-internal VIZ releases spawned off a PEG_IN. */
+const FEE_SWEEP_SUFFIX = ":fee";
+const REFUND_SUFFIX = ":refund";
 
 /** Solana signatures base58-decode to 64 bytes (~86-90 base58 chars). */
 const SOLANA_SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{86,90}$/;
@@ -90,6 +109,20 @@ async function validateActionInner(action: CanonicalAction, deps: SourceValidato
     await validatePegIn(action, deps);
     return;
   }
+  // Gateway-INTERNAL VIZ releases spawned off a PEG_IN (FEE_SWEEP / REFUND) have no
+  // remote source event to re-read; instead they are re-derived from the PEG_IN they
+  // settle. Their ids carry a deterministic suffix on the parent PEG_IN id
+  // ("<trxId>:<opIndex>:fee" / ":refund") — unambiguous, because a Solana signature
+  // (base58, no ':') and a TON tx hash (64 hex, no ':') can never end this way. Dispatch
+  // on the honest id suffix, never on the coordinator-supplied direction/remoteChain.
+  if (action.id.endsWith(FEE_SWEEP_SUFFIX)) {
+    await validateFeeSweep(action, deps);
+    return;
+  }
+  if (action.id.endsWith(REFUND_SUFFIX)) {
+    await validateRefund(action, deps);
+    return;
+  }
   // PEG_OUT: dispatch by source-id SHAPE, not by action.remoteChain. The action is
   // coordinator-supplied (actionFromWire), so a remoteChain field on it is attacker-
   // controlled and dispatching on it would let a compromised coordinator route a real
@@ -103,13 +136,95 @@ async function validateActionInner(action: CanonicalAction, deps: SourceValidato
     await validateTonPegOut(action, deps);
     return;
   }
-  // Neither a Solana signature nor a TON burn-tx hash. This is where gateway-internal VIZ
-  // releases with no remote source event land too (FEE_SWEEP/REFUND ids like "<id>:fee"),
-  // which need policy validation, not source re-read (see plan-ton-pegout-source-validation
-  // §"Related gap"). FAIL CLOSED: refuse rather than sign without an independent check.
+  // Neither a Solana signature, a TON burn-tx hash, nor a FEE_SWEEP/REFUND child id.
+  // FAIL CLOSED: refuse rather than sign without an independent check.
   throw new SourceMismatchError(
-    `PEG_OUT ${action.id} matches no known remote source-id shape (Solana signature or TON tx hash) — refusing to sign without an independent source check`,
+    `PEG_OUT ${action.id} matches no known source-id shape (Solana signature, TON tx hash, or FEE_SWEEP/REFUND child) — refusing to sign without an independent source check`,
   );
+}
+
+/**
+ * Re-read the parent PEG_IN a child (FEE_SWEEP / REFUND) settles, from the operator's OWN
+ * VIZ node, and return the deposit plus the re-derived parent canonical action. The child
+ * id is the parent PEG_IN id ("<trxId>:<opIndex>") plus a suffix, so stripping the suffix
+ * yields the parent key — which the operator resolves independently of the coordinator.
+ */
+async function reReadParentPegIn(
+  action: CanonicalAction,
+  suffix: string,
+  deps: SourceValidatorDeps,
+): Promise<{ deposit: VizDeposit; parent: CanonicalAction }> {
+  const parentId = action.id.slice(0, -suffix.length);
+  const sep = parentId.indexOf(":");
+  const trxId = sep > 0 ? parentId.slice(0, sep) : "";
+  const opIndex = Number.parseInt(parentId.slice(sep + 1), 10);
+  if (!trxId || Number.isNaN(opIndex)) {
+    throw new SourceMismatchError(
+      `malformed ${suffix} child id "${action.id}" (expected "<trxId>:<opIndex>${suffix}")`,
+    );
+  }
+  const deposit = await deps.vizChain.getDeposit(trxId, opIndex);
+  if (!deposit) {
+    throw new SourceMismatchError(
+      `parent PEG_IN ${parentId} for ${action.id} not found or not yet irreversible on VIZ`,
+    );
+  }
+  return { deposit, parent: canonicalPegIn(deposit) };
+}
+
+/**
+ * FEE_SWEEP — the gateway sweeps the withheld peg-in fee to fees.gate. There is no remote
+ * source event; instead the signer re-derives it from the PEG_IN it settles:
+ *   - recipient MUST be the operator's OWN fees.gate account (config, never coordinator-fed),
+ *     so a compromised coordinator can never redirect swept fees to an attacker;
+ *   - amount MUST fall within [base, base + activationSurcharge]. The exact fee depends on
+ *     the pinned `destProvisioned` flag, which the signer does not persist from mint time,
+ *     so it bounds rather than exact-matches. This is the SAME tolerance the PEG_IN mint
+ *     path already accepts (a wrong flag shifts <= the surcharge between the user and
+ *     fees.gate, never the backing) — and here the funds can only ever land at fees.gate;
+ *   - the child digest MUST be bound to the re-derived parent digest ("<parentDigest>:fee").
+ */
+async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+  const { deposit, parent } = await reReadParentPegIn(action, FEE_SWEEP_SUFFIX, deps);
+  if (action.recipient !== deps.feesGateAccount) {
+    throw new SourceMismatchError(
+      `FEE_SWEEP recipient ${action.recipient} != operator's own fees.gate ${deps.feesGateAccount} (${action.id})`,
+    );
+  }
+  if (action.digest !== `${parent.digest}${FEE_SWEEP_SUFFIX}`) {
+    throw new SourceMismatchError(`FEE_SWEEP digest not bound to parent PEG_IN ${parent.id} (${action.id})`);
+  }
+  const policy = pegInFeePolicyFor(deps.fees, deposit.remoteChain);
+  const base = baseFee(deposit.amountMilliViz, policy);
+  const maxFee = base + policy.activationSurchargeMilliViz;
+  if (action.amountMilliViz < base || action.amountMilliViz > maxFee) {
+    throw new SourceMismatchError(
+      `FEE_SWEEP amount ${action.amountMilliViz} outside derived fee range [${base}, ${maxFee}] for ${action.id}`,
+    );
+  }
+}
+
+/**
+ * REFUND — the gateway returns a stranded peg-in to its original VIZ sender (gross, no
+ * fee). Fully independent: both the recipient (the deposit's sender) and the amount (the
+ * gross deposit) come straight from the operator's own re-read of the source deposit, so
+ * no tolerance is needed. The child digest MUST be bound to the parent ("<parentDigest>:refund").
+ */
+async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+  const { deposit, parent } = await reReadParentPegIn(action, REFUND_SUFFIX, deps);
+  if (action.recipient !== deposit.from) {
+    throw new SourceMismatchError(
+      `REFUND recipient ${action.recipient} != deposit sender ${deposit.from} (${action.id})`,
+    );
+  }
+  if (action.amountMilliViz !== deposit.amountMilliViz) {
+    throw new SourceMismatchError(
+      `REFUND amount ${action.amountMilliViz} != deposit gross ${deposit.amountMilliViz} (${action.id})`,
+    );
+  }
+  if (action.digest !== `${parent.digest}${REFUND_SUFFIX}`) {
+    throw new SourceMismatchError(`REFUND digest not bound to parent PEG_IN ${parent.id} (${action.id})`);
+  }
 }
 
 async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {

@@ -80,6 +80,10 @@ async function main(): Promise<void> {
     tonChain: tonReader,
     store,
     depositMasterPub: cfg.solana.depositMasterPub,
+    // FEE_SWEEP/REFUND re-derivation: the operator's OWN fee config + fees.gate account,
+    // never coordinator-fed, so a swept fee can only ever land at this operator's fees.gate.
+    fees: cfg.fees,
+    feesGateAccount: cfg.feesGateAccount,
   };
 
   const signer = new KeyedSigner(
