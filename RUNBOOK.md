@@ -223,11 +223,14 @@ This starts watchers + signer + recon + coordinator in one stack (solo). Check
 > re-read. The signer's `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` **must** point at the
 > operator's own node (the F2 independence invariant).
 >
-> ⚠️ **Harness caveat:** the e2e harness uses a fresh store per run, so any peg-out burns
-> still inside the watcher's `TON_MAX_TRANSACTIONS` scan window get re-detected and
-> re-released on the next run (fresh store = no idempotency memory). In production the store
-> is persistent, so each burn releases once. Don't infer a double-spend bug from repeated
-> e2e runs releasing the same testnet burn.
+> ✅ **Persistent store (default since 2026-07-01):** the harness now points every run at a
+> stable `sqlite:./data/e2e.sqlite`, so idempotency memory survives across runs — a peg-out
+> burn already released on a prior run is **not** re-released when it's still inside the
+> watcher's `TON_MAX_TRANSACTIONS` scan window (matches production). Set `E2E_FRESH_STORE=1`
+> to opt back into a per-run store keyed by `runId` (a clean idempotency slate; the old
+> behaviour). Note: with the persistent store, re-running the *same* round-trip re-detects the
+> prior burn as already-processed — use a fresh burn (each run mints a unique amount) or
+> `E2E_FRESH_STORE=1` when you want the full peg-out leg to fire again.
 
 You need some wVIZ to send. As multisig admin, mint a little wVIZ to a test
 user wallet (one multisig order). Then from that wallet, **send the wVIZ to
