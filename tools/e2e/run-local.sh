@@ -4,7 +4,7 @@
 #   cp .env.e2e.example .env.e2e   # fill in once
 #   tools/e2e/run-local.sh
 #
-# Loads + validates the 16 E2E vars, then runs `npm run e2e:ton`.
+# Loads + validates the 17 E2E vars, then runs `npm run e2e:ton`.
 set -euo pipefail
 
 # shellcheck source=tools/e2e/secrets.lib.sh
