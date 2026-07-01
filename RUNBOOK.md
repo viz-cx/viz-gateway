@@ -208,11 +208,19 @@ This starts watchers + signer + recon + coordinator in one stack (solo). Check
 
 ## 8. Test peg-out
 
-> TON peg-out source validation is implemented (2026-07-01): the signer re-reads the burn
-> from its own node (`TonHttpChain.getBurn`) and asserts the re-derived action matches the
-> coordinator's before signing. Offline-proven in `tools/ton-pegout-f2-spike.cjs`. The
-> signer's `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` **must** point at the operator's own
-> node (the F2 independence invariant). A live testnet round-trip is the remaining step.
+> ✅ **TON peg-out PROVEN end-to-end (2026-07-01).** A live testnet round-trip detected the
+> burn, the signer independently re-read it (`TonHttpChain.getBurn`), validated the release
+> against its own node view, and broadcast the VIZ release (1-of-1). Two fixes were required
+> to get here: (1) the watcher now parses the gateway jetton wallet's real inbound message,
+> TEP-74 `internal_transfer` (0x178d4519), not `transfer_notification`; (2) F2 source
+> re-read. The signer's `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` **must** point at the
+> operator's own node (the F2 independence invariant).
+>
+> ⚠️ **Harness caveat:** the e2e harness uses a fresh store per run, so any peg-out burns
+> still inside the watcher's `TON_MAX_TRANSACTIONS` scan window get re-detected and
+> re-released on the next run (fresh store = no idempotency memory). In production the store
+> is persistent, so each burn releases once. Don't infer a double-spend bug from repeated
+> e2e runs releasing the same testnet burn.
 
 You need some wVIZ to send. As multisig admin, mint a little wVIZ to a test
 user wallet (one multisig order). Then from that wallet, **send the wVIZ to
@@ -404,9 +412,10 @@ operator to carry a Solana pubkey and fails if one is missing.
 
 - **`submitMintOrder`** — ✅ DONE + proven live on TON testnet 2026-07-01 (peg-in
   round-trips through the full stack).
-- **TON peg-out source validation** — ✅ implemented 2026-07-01 (`TonHttpChain.getBurn` +
-  the TON branch in `sourceValidator.ts`, offline-proven in `tools/ton-pegout-f2-spike.cjs`).
-  Live testnet round-trip is the remaining verification. Plan:
+- **TON peg-out (detection + source validation)** — ✅ PROVEN end-to-end on testnet
+  2026-07-01. Required fixing burn detection to parse `internal_transfer` (the real inbound
+  message at the gateway jetton wallet) plus `TonHttpChain.getBurn` + the TON branch in
+  `sourceValidator.ts` (offline-proven in `tools/ton-pegout-f2-spike.cjs`). Plan:
   `docs/plan-ton-pegout-source-validation.md`.
 - **FEE_SWEEP / REFUND signer validation** — 🟠 these gateway-internal VIZ releases match
   neither source-id shape, so they hit the signer's fail-closed branch (no remote source to

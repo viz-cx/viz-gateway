@@ -1,9 +1,12 @@
 # Plan — TON peg-out source validation (signer F2 for TON)
 
-**Status:** ✅ IMPLEMENTED 2026-07-01 (tasks 1–4). `TonHttpChain.getBurn` + the TON branch
-in `sourceValidator.ts` are landed and offline-proven by `tools/ton-pegout-f2-spike.cjs`
-(in the `verify` chain). **Remaining:** task 5 — the live testnet round-trip. Task 6
-(FEE_SWEEP/REFUND policy validation, §"Related gap") is deferred to a follow-up.
+**Status:** ✅ DONE + PROVEN end-to-end on TON testnet 2026-07-01 (tasks 1–5). Beyond the
+planned F2 work, the live run surfaced a prerequisite bug: burn **detection** parsed
+`transfer_notification`, but the gateway jetton wallet actually receives `internal_transfer`
+(0x178d4519) — fixed (`parseJettonDeposit`), so both the watcher and the F2 re-read now match
+the real inbound message. Round trip verified: watcher detected the burn, signer re-read +
+validated it, coordinator broadcast the VIZ release. Task 6 (FEE_SWEEP/REFUND policy
+validation, §"Related gap") remains deferred to a follow-up.
 **Severity:** 🟠 — liveness blocker: TON peg-out cannot complete until this lands (the
 signer correctly fail-closes). Not a theft vector (fail-closed is safe), but the single
 thing between here and a green TON round-trip.
