@@ -40,13 +40,16 @@ const AMOUNT = 500_000n; // base units == milli-VIZ (3 decimals)
 const COMMENT = "alice"; // the VIZ recipient, carried in the transfer comment
 const BURN_HASH = "b1".repeat(32); // 64-hex burn tx hash == the peg-out action.id
 
-// A TEP-74 transfer_notification body (forward_payload inline, text comment).
-function notificationBody(amount, comment, sender) {
+// A TEP-74 internal_transfer body (0x178d4519) — the message the gateway's OWN jetton
+// wallet actually receives for an inbound transfer (forward_payload inline text comment).
+function internalTransferBody(amount, comment, sender) {
   return beginCell()
-    .storeUint(0x7362d09c, 32) // transfer_notification
+    .storeUint(0x178d4519, 32) // internal_transfer
     .storeUint(0, 64) // query_id
     .storeCoins(amount)
-    .storeAddress(Address.parse(sender))
+    .storeAddress(Address.parse(sender)) // from
+    .storeAddress(Address.parse(sender)) // response_address
+    .storeCoins(50000000n) // forward_ton_amount
     .storeBit(0) // inline forward_payload
     .storeUint(0, 32) // comment tag
     .storeStringTail(comment)
@@ -100,7 +103,7 @@ const depsWith = (chain) => ({
   const notFinalNow = nowSec + 5; // inside the buffer -> not yet final
 
   // The TRUE burn the operator's own node would re-derive.
-  const trueTx = makeTx(BURN_HASH, finalNow, notificationBody(AMOUNT, COMMENT, SENDER));
+  const trueTx = makeTx(BURN_HASH, finalNow, internalTransferBody(AMOUNT, COMMENT, SENDER));
 
   // 1) getBurn returns the on-chain burn for a matching hash.
   {
@@ -149,7 +152,7 @@ const depsWith = (chain) => ({
 
   // 6) Not-yet-final burn: the matching tx is inside the finality buffer -> null -> reject.
   {
-    const freshTx = makeTx(BURN_HASH, notFinalNow, notificationBody(AMOUNT, COMMENT, SENDER));
+    const freshTx = makeTx(BURN_HASH, notFinalNow, internalTransferBody(AMOUNT, COMMENT, SENDER));
     const action = canonicalPegOut({
       sourceId: BURN_HASH,
       height: 0,
