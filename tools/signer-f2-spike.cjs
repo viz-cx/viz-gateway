@@ -162,12 +162,13 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: tonHash }, aliceRec)), "6c TON PEG_OUT burn not final (fail-closed)");
   }
 
-  // 6d) An id matching NEITHER a Solana signature NOR a TON tx hash (e.g. a gateway-internal
-  //     "<id>:fee" release): no source re-read applies, so the dispatcher must FAIL CLOSED
-  //     (regression guard for the silent-bypass hole).
+  // 6d) An id matching NEITHER a Solana signature, a TON tx hash, NOR a FEE_SWEEP/REFUND
+  //     child suffix (e.g. a bare token): no source re-read applies, so the dispatcher must
+  //     FAIL CLOSED (regression guard for the silent-bypass hole). FEE_SWEEP/REFUND
+  //     validation itself is exercised in tools/fee-sweep-refund-spike.cjs.
   {
-    const action = canonicalPegOut({ ...trueBurn, sourceId: "deadbeef:fee", homeDestination: VIZ_ACCT });
-    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: "deadbeef:fee" }, aliceRec)), "6d unknown-shape PEG_OUT refused (fail-closed)");
+    const action = canonicalPegOut({ ...trueBurn, sourceId: "not-a-known-shape", homeDestination: VIZ_ACCT });
+    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: "not-a-known-shape" }, aliceRec)), "6d unknown-shape PEG_OUT refused (fail-closed)");
   }
 
   // ===================== additive ed25519 key roundtrip =========================

@@ -100,15 +100,34 @@ the burn, comment, and amount; a compromised coordinator cannot forge it.
 - **Finality buffer parity:** reuse the exact cutoff from `finalizedBurnsSince` so the
   signer never validates a burn the watcher wouldn't have treated as final.
 
-## Related gap (decide in this session, may be separate task)
+## Related gap — task 6 ✅ DONE 2026-07-01
 
-**FEE_SWEEP / REFUND also 500 at the signer.** Observed live: `<id>:fee` (FEE_SWEEP) hits
+**FEE_SWEEP / REFUND also 500 at the signer.** Observed live: `<id>:fee` (FEE_SWEEP) hit
 the same fail-closed peg-out branch (its id is neither a Solana sig nor a TON hash). These
 are **gateway-internal VIZ releases with no remote source event**, so source re-read
-doesn't apply. They need a different validation: e.g. re-derive the sweep from the
-PEG_IN it settles (amount = withheld fee, target = `fees.gate`), or validate against
-policy. Without it, fees never sweep and `recon` will show `unswept > 0` indefinitely.
-Scope this as task 6 or a follow-up plan — it does not block the peg-out release itself.
+doesn't apply — they are re-derived from the PEG_IN they settle.
+
+Implemented in `packages/signer/src/sourceValidator.ts`: the PEG_OUT dispatch now
+discriminates the child id suffix (`:fee` / `:refund`) **before** the Solana/TON shape
+checks (unambiguous — a Solana sig / TON hash never contains `:`), re-reads the parent
+PEG_IN from the operator's OWN VIZ node (`getDeposit`), and validates:
+
+- **FEE_SWEEP** — recipient MUST equal the operator's OWN `fees.gate` (config, never
+  coordinator-fed, so a swept fee can only ever land at the federation's fee account);
+  amount MUST fall in `[base, base + activationSurcharge]` (the exact fee depends on the
+  pinned `destProvisioned`, which the signer does not persist from mint time, so it bounds
+  rather than exact-matches — the SAME tolerance the PEG_IN mint path already accepts);
+  digest MUST equal `<re-derived parentDigest>:fee`.
+- **REFUND** — recipient MUST equal the deposit's original sender and amount MUST equal the
+  gross deposit (both fully independent, no tolerance); digest MUST equal
+  `<parentDigest>:refund`.
+
+Wired via `SourceValidatorDeps.{fees, feesGateAccount}` in `signer/index.ts`. Offline-
+verified: `tools/fee-sweep-refund-spike.cjs` (13 cases: honest lower/upper-bound sweeps,
+honest refund, and every tamper — wrong recipient/amount/digest, out-of-band fee, missing
+parent, malformed id) added to the `verify` chain. `signer-f2-spike.cjs` case 6d updated
+(the fail-closed guard now uses a bare token, since `:fee` routes to the new branch).
+With this, `recon`'s `unswept` drains instead of growing without bound.
 
 ## Files
 
