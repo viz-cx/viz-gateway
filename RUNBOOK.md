@@ -204,7 +204,14 @@ This starts watchers + signer + recon + coordinator in one stack (solo). Check
 `recon` logs show `locked=… circulating=… status=OK` and `coordinator` logs
 `listening … threshold=1-of-1`.
 
-## 8. Test peg-out first (it's the fully-wired path)
+## 8. Test peg-out
+
+> ⚠️ **Peg-out VIZ release is currently BLOCKED at the signer** (2026-07-01). The
+> TON side works — the wVIZ transfer to `TON_GATEWAY_JETTON_WALLET` lands and
+> `ton-watcher` enqueues the release — but the signer **fail-closes on TON peg-out**
+> because TON source re-validation is not implemented (`sourceValidator.ts`). The
+> release stalls (safe, never a wrong signature) until that lands. See
+> `docs/plan-ton-pegout-source-validation.md`.
 
 You need some wVIZ to send. As multisig admin, mint a little wVIZ to a test
 user wallet (one multisig order). Then from that wallet, **send the wVIZ to
@@ -225,11 +232,12 @@ Send **≥ 2,000 VIZ** to `viz-gateway` with the memo set to your **TON address*
 Expected: `viz-watcher` detects the deposit after irreversibility (~14 blocks),
 applies the fee/min, and POSTs the peg-in action to the coordinator.
 
-The final step — `submitMintOrder` — is the one piece to finish: it must send a
-`new_order` to the multisig that mints `net` wVIZ to the user (and the fee to the
-treasury), with `approve_on_init=true` (1-of-1 executes immediately). Wire it
-using the `Multisig` wrapper from step 1. Once wired, the user receives wVIZ and
-`recon` shows `locked == circulating`.
+`submitMint` (`packages/ton-watcher/src/tonChain.ts`) sends the `new_order` to the
+multisig that mints `net` wVIZ to the user, with `approve_on_init=true` (1-of-1
+executes immediately). **PROVEN end-to-end on TON testnet 2026-07-01**: a live
+peg-in through the full stack (viz-watcher → coordinator → signer → `submitMint`)
+minted `net` wVIZ to the recipient. The fee-split mint (fee → treasury) is still a
+gap (see below).
 
 ## How peg-in mint works on Solana
 
@@ -393,8 +401,14 @@ operator to carry a Solana pubkey and fails if one is missing.
 
 ## Known gaps to close during bring-up
 
-- **`submitMintOrder`** — wire the on-chain `new_order`/approve via the Multisig
-  wrapper (step 9). This is the only thing between here and a full round-trip.
+- **`submitMintOrder`** — ✅ DONE + proven live on TON testnet 2026-07-01 (peg-in
+  round-trips through the full stack).
+- **TON peg-out source validation** — 🟠 the signer fail-closes on TON peg-out, so
+  the VIZ release stalls (step 8). The one blocker for a green TON round-trip. Plan:
+  `docs/plan-ton-pegout-source-validation.md`.
+- **FEE_SWEEP / REFUND signer validation** — these gateway-internal VIZ releases also
+  hit the signer's fail-closed peg-out branch (no remote source to re-read), so fees
+  never sweep. Needs its own validation path (noted in the peg-out plan).
 - **Fee split at mint** — mint `gross` with `net` to the user and `fee` to the
   treasury jetton wallet (keeps 1:1); the quote is already computed by the watcher.
 - **Gas-wallet watermark** — auto-pause peg-in when the multisig TON balance is
