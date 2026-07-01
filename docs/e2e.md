@@ -88,6 +88,7 @@ Set these as encrypted Actions secrets in the repo settings, or in a local `.env
 | `E2E_VIZ_TEST_WIF` | WIF private key for the VIZ test account (active authority) |
 | `E2E_VIZ_TEST_ACCOUNT` | VIZ test account name (locks VIZ on peg-in) |
 | `E2E_VIZ_GATEWAY_ACCOUNT` | Gateway VIZ account name |
+| `E2E_VIZ_GATEWAY_WIF` | WIF active key of the gateway account (signs peg-out releases) |
 | `E2E_VIZ_RECIPIENT` | VIZ release recipient account name |
 | `E2E_VIZ_MIN_BALANCE_MILLI_VIZ` | Minimum test account balance floor (e.g. `5000000` = 5 VIZ) |
 | `E2E_TON_ENDPOINT` | TON testnet endpoint URL |
