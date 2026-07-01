@@ -14,6 +14,7 @@ const env = {
   E2E_VIZ_TEST_WIF: "5JtestWIF",
   E2E_VIZ_TEST_ACCOUNT: "e2e.test",
   E2E_VIZ_GATEWAY_ACCOUNT: "viz-gateway",
+  E2E_VIZ_GATEWAY_WIF: "5JgatewayWIF",
   E2E_VIZ_RECIPIENT: "e2e.recv",
   E2E_VIZ_MIN_BALANCE_MILLI_VIZ: "5000000",
   E2E_TON_ENDPOINT: "https://testnet.toncenter.com/api/v2/jsonRPC",
