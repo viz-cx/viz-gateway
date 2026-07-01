@@ -11,3 +11,6 @@ data/
 .DS_Store
 tools/e2e/dist/
 tools/e2e/logs/
+# Compiled contract bytecode — reproducible build artifacts; provenance tracked
+# in contracts/ton/boc/PROVENANCE.md
+contracts/ton/boc/*.boc

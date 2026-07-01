@@ -24,6 +24,22 @@ one piece still to wire (see step 9). Everything else runs today.
 
 > For the automated end-to-end round-trip harness, see [docs/e2e.md](docs/e2e.md).
 
+## Deployed — TON testnet (1-of-1, 2026-07-01)
+
+Live bring-up instances (recorded in `.env.e2e`; code provenance in
+`contracts/ton/boc/PROVENANCE.md`):
+
+| Contract | Address |
+|---|---|
+| Multisig (1-of-1) | `EQAAT5z3d9RQYAoEMcNbvniJWxnMS5zrriVmCtRWUbTFFRlJ` |
+| wVIZ Jetton minter (admin = multisig) | `EQDtadChfr01tTZb3DIgBTww9b4w3Ejxja1VNh5sAx3gKEW7` |
+| Gateway jetton wallet (multisig-owned, peg-out deposits) | `EQDcktQd-hXf_s0qaubJoBi2RsSYf_Y9GoW9TbHFM78X0AOa` |
+| Signer / deployer WalletV4 | `EQDyPBoVwQLyUGjWdetwoVMdw9-aP0BkyvbWZAdONbfNdKDb` |
+
+Done: multisig deployed → minter deployed → minter admin handed to the multisig
+(verified on-chain: `mintable=true`, `adminAddress==multisig`). Next: fund the
+multisig gas (step 6) and run a peg-out (step 8).
+
 ## 0. Networks & funds
 
 - **TON testnet** for the multisig + wVIZ jetton. Get test TON from the testnet
@@ -39,13 +55,25 @@ one piece still to wire (see step 9). Everything else runs today.
 
 ```
 git clone https://github.com/ton-blockchain/multisig-contract-v2
-cd multisig-contract-v2 && npm i && npx blueprint build      # -> Multisig wrapper + code
-# export the compiled multisig code cell to a .boc  (build the init data via the wrapper)
+cd multisig-contract-v2 && git checkout 9a4b13d   # pin = our vendored wrappers
+npm install --ignore-scripts && npx blueprint build --all    # -> build/Multisig.compiled.json
+# the .compiled.json `hex` field IS the code-cell BOC: Buffer.from(hex,"hex") -> multisig.code.boc
 
-git clone https://github.com/ton-blockchain/stablecoin-contract
-cd stablecoin-contract && npm i && npx blueprint build       # -> JettonMinter + JettonWallet code
-# export the minter + wallet code cells to .boc
+git clone https://github.com/ton-blockchain/token-contract
+cd token-contract
+# blueprint here needs @ton/ton + typescript alongside the pinned @ton/core:
+npm install --ignore-scripts --legacy-peer-deps
+npm install --ignore-scripts --legacy-peer-deps @ton/ton@13.9.0 @ton/crypto@3.2.0 typescript@5
+npx blueprint build --all                                    # -> build/JettonMinter + JettonWallet
+# export minter + wallet code cells to .boc (same hex->boc extraction)
 ```
+
+> **Minter source = `token-contract`, NOT `stablecoin-contract`.** Our code
+> (`packages/ton-watcher/src/tonChain.ts`, `contracts/ton/src/{minter,setMinterAdmin}.ts`)
+> targets the standard governed minter: `op::mint()=21`, `internal_transfer=0x178d4519`,
+> single-step `change_admin` (op 3), storage `total_supply admin content jetton_wallet_code`.
+> `token-contract/ft/jetton-minter-discoverable.fc` matches exactly; stablecoin-contract's
+> layout (`+transfer_admin`, two-step admin) does not. See `contracts/ton/boc/PROVENANCE.md`.
 
 Build the multisig **init data** with that repo's wrapper (this is the only
 correct way to get the storage layout):
