@@ -374,15 +374,18 @@ APPLY=1 VIZ_SIGNING_WIF=<op1-active-wif> npm run rotate -- broadcast viz rotatio
 set — this proves an active-only `account_update` lands with only active-authority
 signatures (no master).
 
-> **Verification record — TODO (live testnet).** Everything in the rotation tool
-> is verified offline (`tools/rotation-spike.cjs`); the one claim still needing an
-> on-chain proof is that VIZ accepts an active-only `account_update` with no master
-> signature. Run the 3-command ceremony above on VIZ **testnet** against a gateway
-> account whose `active` is a key-set you control, then record here:
-> - [ ] date + node URL
-> - [ ] broadcast tx id / block num
-> - [ ] confirmed `active_authority.key_auths` equals the new set
->       (`viz.api.getAccounts(["<gateway>"])`)
+> **Verification record — ✅ PROVEN (VIZ mainnet, 2026-07-01).** The one claim needing
+> an on-chain proof — that VIZ accepts an active-only `account_update` (rewrites
+> `active`+`regular`, no `master` field) signed by **only** the active authority — is
+> confirmed. Round-trip on gateway account `tester4` via `npm run rotate` (`node.viz.cx`),
+> `master` (`VIZ7Mh5…`) untouched throughout and never signed:
+> - [x] date + node URL: 2026-07-01, `https://node.viz.cx`
+> - [x] forward tx (active→throwaway proof key): `cd5ae81759ad6d9893fbf8af5415c1f8abb05e20`
+> - [x] confirmed `active_authority.key_auths == [[VIZ5dPcTxWrWN53Q…proof,1]]`, `master` unchanged
+> - [x] restore tx (active→original, signed by the proof key): `936770bcb59daa41fd99d311a3a8ec1e4f776fa4`
+> - [x] regular-authority exact restore tx: `1171cee260f3b806d7d4988c0314dca08e3d52ec`
+>       (`tester4` ended byte-identical to pre-proof: active/regular/master/memo_key)
+> Offline coverage remains in `tools/rotation-spike.cjs`.
 
 ### TON side of a rotation (on-chain, asynchronous)
 
