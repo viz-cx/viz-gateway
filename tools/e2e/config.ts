@@ -6,6 +6,7 @@ export interface E2eConfig {
     testWif: string;
     testAccount: string;
     gatewayAccount: string;
+    gatewayWif: string;
     recipient: string;
     minBalanceMilliViz: bigint;
   };
@@ -41,6 +42,7 @@ export function loadE2eConfig(env: NodeJS.ProcessEnv, chain: "ton" | "solana"): 
     testWif: req(env, "E2E_VIZ_TEST_WIF"),
     testAccount: req(env, "E2E_VIZ_TEST_ACCOUNT"),
     gatewayAccount: req(env, "E2E_VIZ_GATEWAY_ACCOUNT"),
+    gatewayWif: req(env, "E2E_VIZ_GATEWAY_WIF"),
     recipient: req(env, "E2E_VIZ_RECIPIENT"),
     minBalanceMilliViz: BigInt(req(env, "E2E_VIZ_MIN_BALANCE_MILLI_VIZ")),
   };
@@ -64,7 +66,7 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     // VIZ
     VIZ_NODE_URL: cfg.viz.nodeUrl,
     VIZ_GATEWAY_ACCOUNT: cfg.viz.gatewayAccount,
-    VIZ_SIGNING_WIF: cfg.viz.testWif,
+    VIZ_SIGNING_WIF: cfg.viz.gatewayWif,
     VIZ_EXTRA_CONFIRMATIONS: "2",
     // TON
     TON_ENDPOINT: cfg.ton.endpoint,
