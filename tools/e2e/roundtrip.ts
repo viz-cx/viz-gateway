@@ -82,5 +82,8 @@ async function main() {
 
 main().catch((err) => {
   console.error(`[e2e] FAILED: ${(err as Error).message}`);
+  // Print the full error (stack + any cause) — a bare .message is often empty for
+  // wrapped RPC/network errors, which makes a failed live run undiagnosable.
+  console.error(err);
   process.exit(1);
 });

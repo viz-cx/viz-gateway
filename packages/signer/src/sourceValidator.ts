@@ -43,6 +43,8 @@ export interface SourceValidatorDeps {
   vizChain: Pick<VizChain, "getDeposit">;
   /** Operator's own Solana reader (peg-out source). */
   solanaChain: BurnReader;
+  /** Operator's own TON reader (peg-out source). */
+  tonChain: BurnReader;
   /** Shared deposit-address registry (peg-out routing identity). */
   store: Pick<GatewayStore, "depositAddressBy">;
   /** Base58 DEPOSIT_MASTER_PUB — public derivation only, no spend authority. */
@@ -55,6 +57,12 @@ const SOLANA_SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{86,90}$/;
 /** A VIZ peg-in source id is "<trxIdHex>:<opIndex>". */
 function looksLikeSolanaSignature(id: string): boolean {
   return SOLANA_SIGNATURE_RE.test(id);
+}
+
+/** A TON peg-out source id is the burn tx hash — exactly 64 hex chars. */
+const TON_TX_HASH_RE = /^[0-9a-f]{64}$/i;
+function looksLikeTonTxHash(id: string): boolean {
+  return TON_TX_HASH_RE.test(id);
 }
 
 /**
@@ -91,14 +99,16 @@ async function validateActionInner(action: CanonicalAction, deps: SourceValidato
     await validateSolanaPegOut(action, deps);
     return;
   }
-  // Anything else is a non-Solana (presumptively TON) peg-out. TON source re-read is not
-  // implemented yet (sourceId is a message hash; toncenter v2 has no clean fetch-by-hash)
-  // and TON peg-out is not active. FAIL CLOSED: refuse rather than sign without a source
-  // check. A misclassified Solana signature of unusual length lands here too — a liveness
-  // stall (safe), never a forged signature. Implement TON source validation before
-  // enabling TON peg-out; do not relax this to warn-and-proceed.
+  if (looksLikeTonTxHash(action.id)) {
+    await validateTonPegOut(action, deps);
+    return;
+  }
+  // Neither a Solana signature nor a TON burn-tx hash. This is where gateway-internal VIZ
+  // releases with no remote source event land too (FEE_SWEEP/REFUND ids like "<id>:fee"),
+  // which need policy validation, not source re-read (see plan-ton-pegout-source-validation
+  // §"Related gap"). FAIL CLOSED: refuse rather than sign without an independent check.
   throw new SourceMismatchError(
-    `PEG_OUT ${action.id} is not a Solana signature and TON peg-out source validation is not implemented — refusing to sign without an independent source check`,
+    `PEG_OUT ${action.id} matches no known remote source-id shape (Solana signature or TON tx hash) — refusing to sign without an independent source check`,
   );
 }
 
@@ -138,6 +148,18 @@ async function validateSolanaPegOut(action: CanonicalAction, deps: SourceValidat
     );
   }
   burn.homeDestination = rec.vizAccount;
+  assertSameAction(canonicalPegOut(burn), action);
+}
+
+async function validateTonPegOut(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+  const burn = await deps.tonChain.getBurn(action.id);
+  if (!burn) {
+    throw new SourceMismatchError(`PEG_OUT burn ${action.id} not found or not yet final on TON`);
+  }
+  // Unlike Solana, TON needs no deposit-address registry: the VIZ recipient is the
+  // on-chain transfer comment, which the operator's own node returns directly in the burn
+  // (burn.homeDestination). The digest binds src + recipient + amount, so re-deriving the
+  // canonical action from the re-read burn and asserting equality is the full check.
   assertSameAction(canonicalPegOut(burn), action);
 }
 

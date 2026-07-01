@@ -88,6 +88,7 @@ Set these as encrypted Actions secrets in the repo settings, or in a local `.env
 | `E2E_VIZ_TEST_WIF` | WIF private key for the VIZ test account (active authority) |
 | `E2E_VIZ_TEST_ACCOUNT` | VIZ test account name (locks VIZ on peg-in) |
 | `E2E_VIZ_GATEWAY_ACCOUNT` | Gateway VIZ account name |
+| `E2E_VIZ_GATEWAY_WIF` | WIF active key of the gateway account (signs peg-out releases) |
 | `E2E_VIZ_RECIPIENT` | VIZ release recipient account name |
 | `E2E_VIZ_MIN_BALANCE_MILLI_VIZ` | Minimum test account balance floor (e.g. `5000000` = 5 VIZ) |
 | `E2E_TON_ENDPOINT` | TON testnet endpoint URL |
@@ -106,11 +107,11 @@ Set these as encrypted Actions secrets in the repo settings, or in a local `.env
 ## 3. Local run
 
 ```bash
-# Copy and fill in the provisioned secrets (only the 16 E2E_* vars are read)
+# Copy and fill in the provisioned secrets (only the 17 E2E_* vars are read)
 cp .env.e2e.example .env.e2e
 # edit .env.e2e — keep the 24-word mnemonics double-quoted
 
-# Validates all 16 vars are present, then runs the round trip:
+# Validates all 17 vars are present, then runs the round trip:
 tools/e2e/run-local.sh
 ```
 
@@ -120,7 +121,7 @@ fails fast listing any missing vars. To push the same values to GitHub Actions:
 
 ```bash
 tools/e2e/set-secrets.sh --dry-run   # preview (values masked)
-tools/e2e/set-secrets.sh             # gh secret set × 16 on origin
+tools/e2e/set-secrets.sh             # gh secret set × 17 on origin
 ```
 
 On success: `[e2e] ROUND TRIP OK: released <net> mVIZ to <recipient>` and exits 0.

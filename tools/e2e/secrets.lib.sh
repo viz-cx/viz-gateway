@@ -4,13 +4,14 @@
 #
 # Source this; do not execute it directly.
 
-# The 16 vars the harness reads. Single source of truth for both
+# The 17 vars the harness reads. Single source of truth for both
 # run-local.sh and set-secrets.sh so they cannot drift.
 E2E_VARS=(
   E2E_VIZ_NODE_URL
   E2E_VIZ_TEST_WIF
   E2E_VIZ_TEST_ACCOUNT
   E2E_VIZ_GATEWAY_ACCOUNT
+  E2E_VIZ_GATEWAY_WIF
   E2E_VIZ_RECIPIENT
   E2E_VIZ_MIN_BALANCE_MILLI_VIZ
   E2E_TON_ENDPOINT

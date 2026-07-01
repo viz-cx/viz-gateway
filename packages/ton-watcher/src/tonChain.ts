@@ -1,6 +1,6 @@
 import { Address, JettonMaster, TonClient, internal, SendMode, WalletContractV4, toNano } from "@ton/ton";
 import { beginCell } from "@ton/core";
-import type { Slice } from "@ton/core";
+import type { Slice, Transaction } from "@ton/core";
 import type { RemoteBurn, RemoteChain, TonMintProposal } from "@gateway/common";
 import { Multisig } from "@gateway/contracts-ton";
 import { keyPairFromMnemonic } from "./tonSign";
@@ -10,16 +10,22 @@ import { keyPairFromMnemonic } from "./tonSign";
  * Write path: submit the multisig-v2 new_order that mints wVIZ (peg-in).
  *
  * Peg-out model: user sends wVIZ to the gateway's Jetton wallet with a text
- * comment = their VIZ account. The gateway receives a TEP-74
- * transfer_notification (0x7362d09c) carrying amount, sender, and the
- * forward payload (comment). The watcher enqueues a VIZ release.
+ * comment = their VIZ account. The gateway jetton wallet RECEIVES a TEP-74
+ * internal_transfer (0x178d4519) carrying amount, sender (from), and the
+ * forward payload (comment) — NOT a transfer_notification, which a jetton wallet
+ * emits to its owner. The watcher parses that (parseJettonDeposit) and enqueues
+ * a VIZ release.
  *
  * Verified against toncenter: getMasterchainInfo().latestSeqno and
- * JettonMaster.getJettonData().totalSupply both read live. The
- * transfer_notification parser is verified by a constructed round-trip
- * (tools/ton-notification-spike.cjs).
+ * JettonMaster.getJettonData().totalSupply both read live; the inbound-message
+ * parser is verified against real on-chain internal_transfer bodies and by a
+ * constructed round-trip (tools/ton-notification-spike.cjs).
  */
 
+// TEP-74 op codes. A jetton wallet RECEIVES internal_transfer (from the sender's
+// wallet) and EMITS transfer_notification (to its own owner). So the gateway's OWN
+// jetton wallet sees internal_transfer as its inbound message; transfer_notification
+// only appears when watching the owner address.
 const OP_TRANSFER_NOTIFICATION = 0x7362d09c;
 // Standard governed-minter op codes (ton-blockchain/token-contract).
 const OP_MINT = 21;
@@ -27,16 +33,30 @@ const OP_INTERNAL_TRANSFER = 0x178d4519;
 // TTL for a new multisig order (1 hour should cover any signing latency).
 const ORDER_TTL_SEC = 3600;
 
-/** Read a TEP-74 transfer_notification body: returns amount, sender, comment. */
-export function parseTransferNotification(
+/**
+ * Parse an inbound jetton message at the gateway's OWN jetton wallet into
+ * {amount, sender, comment}. Accepts BOTH:
+ *  - internal_transfer (0x178d4519): what the watched jetton wallet actually receives
+ *    for every inbound transfer (even with zero forward_ton_amount). Layout adds
+ *    response_address + forward_ton_amount before the forward_payload.
+ *  - transfer_notification (0x7362d09c): what a jetton wallet emits to its owner —
+ *    only seen if the watcher points at the owner address instead of the jetton wallet.
+ * `sender` is the notification `sender` / internal_transfer `from`; `comment` is the
+ * text forward_payload (the VIZ recipient). Returns null for any other op.
+ */
+export function parseJettonDeposit(
   body: Slice,
 ): { amountBaseUnits: bigint; sender: string; comment: string } | null {
   if (body.remainingBits < 32) return null;
   const op = body.loadUint(32);
-  if (op !== OP_TRANSFER_NOTIFICATION) return null;
+  if (op !== OP_TRANSFER_NOTIFICATION && op !== OP_INTERNAL_TRANSFER) return null;
   body.loadUintBig(64); // query_id
   const amountBaseUnits = body.loadCoins();
-  const sender = body.loadAddress().toString();
+  const sender = body.loadAddress().toString(); // notification: sender; internal_transfer: from
+  if (op === OP_INTERNAL_TRANSFER) {
+    body.loadMaybeAddress(); // response_address (may be addr_none)
+    body.loadCoins(); // forward_ton_amount
+  }
   // forward_payload: Either inline (bit 0) or in a ref (bit 1).
   const fp: Slice = body.loadBit() ? body.loadRef().beginParse() : body;
   let comment = "";
@@ -94,26 +114,62 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     return state.state === "active";
   }
 
+  /**
+   * Parse one gateway-wallet tx into a RemoteBurn, or null if it is not a final
+   * transfer_notification. Shared by the watcher's forward scan (finalizedBurnsSince)
+   * and the signer's independent re-read (getBurn) so both apply the SAME finality
+   * cutoff and parse — the signer never validates a burn the watcher wouldn't treat as
+   * final.
+   */
+  private burnFromTx(tx: Transaction, cutoff: number, height: number): RemoteBurn | null {
+    if (tx.now > cutoff) return null; // not yet final per the time buffer
+    const inMsg = tx.inMessage;
+    if (!inMsg || inMsg.body.bits.length === 0) return null;
+    const parsed = parseJettonDeposit(inMsg.body.beginParse());
+    if (!parsed) return null;
+    return {
+      sourceId: tx.hash().toString("hex"),
+      height,
+      from: parsed.sender,
+      amountMilliViz: parsed.amountBaseUnits,
+      homeDestination: parsed.comment.trim(),
+    };
+  }
+
   async finalizedBurnsSince(_fromHeight: number, toHeight: number): Promise<RemoteBurn[]> {
     if (!this.gatewayWallet) return [];
     const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
     const txs = await this.client.getTransactions(this.gatewayWallet, { limit: this.maxTransactions });
     const burns: RemoteBurn[] = [];
     for (const tx of txs) {
-      if (tx.now > cutoff) continue; // not yet final per the time buffer
-      const inMsg = tx.inMessage;
-      if (!inMsg || inMsg.body.bits.length === 0) continue;
-      const parsed = parseTransferNotification(inMsg.body.beginParse());
-      if (!parsed) continue;
-      burns.push({
-        sourceId: tx.hash().toString("hex"),
-        height: toHeight,
-        from: parsed.sender,
-        amountMilliViz: parsed.amountBaseUnits,
-        homeDestination: parsed.comment.trim(),
-      });
+      const burn = this.burnFromTx(tx, cutoff, toHeight);
+      if (burn) burns.push(burn);
     }
     return burns;
+  }
+
+  /**
+   * F2 independent re-read: given a burn tx hash (the peg-out action.id), re-derive the
+   * RemoteBurn from the operator's OWN node. The sourceId alone lacks lt/address for a
+   * direct fetch, so we bounded-scan the gateway wallet's own recent transactions — the
+   * same view finalizedBurnsSince uses — and match by tx hash. A compromised coordinator
+   * cannot forge this: the burn, comment (VIZ recipient), and amount all come from chain.
+   *
+   * Returns null (→ fail-closed stall at the signer) when the tx is not in the scan
+   * window, is not a transfer_notification, or is not yet final. Bound: only the last
+   * `maxTransactions` gateway txs are visible — a release delayed past that window cannot
+   * be validated until the limit is raised or the scan paginated.
+   */
+  async getBurn(sourceId: string): Promise<RemoteBurn | null> {
+    if (!this.gatewayWallet) return null;
+    const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
+    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: this.maxTransactions });
+    for (const tx of txs) {
+      if (tx.hash().toString("hex") !== sourceId) continue;
+      const height = (await this.client.getMasterchainInfo()).latestSeqno;
+      return this.burnFromTx(tx, cutoff, height);
+    }
+    return null;
   }
 
   /**

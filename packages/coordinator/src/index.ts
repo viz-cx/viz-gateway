@@ -108,6 +108,7 @@ async function main(): Promise<void> {
             console.log(`[coordinator] ${action.id} -> ${JSON.stringify(result)}`);
             json(200, result);
           } catch (err) {
+            console.error("[coordinator] /submit failed:", err);
             json(500, { error: String(err) });
           }
         })();

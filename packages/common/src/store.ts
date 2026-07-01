@@ -96,9 +96,13 @@ export class SqliteGatewayStore implements GatewayStore {
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    // busy_timeout MUST be set before journal_mode: switching to WAL takes a
+    // brief exclusive lock, and when the whole stack (watchers + signer +
+    // coordinator + dispatcher) opens this shared DB at once, the loser needs
+    // to wait rather than fail instantly with SQLITE_BUSY ("database is locked").
     this.db.exec(
-      `PRAGMA journal_mode=WAL;
-       PRAGMA busy_timeout=5000;
+      `PRAGMA busy_timeout=10000;
+       PRAGMA journal_mode=WAL;
        CREATE TABLE IF NOT EXISTS action_outbox(
          id               TEXT PRIMARY KEY,
          direction        TEXT NOT NULL,

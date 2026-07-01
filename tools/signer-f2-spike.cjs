@@ -66,6 +66,7 @@ async function expectReject(promise, label) {
   const depsPegIn = (deposit) => ({
     vizChain: vizChainReturning(deposit),
     solanaChain: solanaReturning(null),
+    tonChain: solanaReturning(null),
     store: storeWith(undefined),
     depositMasterPub: MPUB,
   });
@@ -112,6 +113,7 @@ async function expectReject(promise, label) {
   const depsPegOut = (burn, rec) => ({
     vizChain: vizChainReturning(null),
     solanaChain: solanaReturning(burn),
+    tonChain: solanaReturning(null),
     store: storeWith(rec),
     depositMasterPub: MPUB,
   });
@@ -151,13 +153,21 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(action, depsPegOut(null, aliceRec)), "6b PEG_OUT burn not finalized");
   }
 
-  // 6c) Non-Solana-shaped PEG_OUT id (e.g. a TON message hash): TON source validation is
-  //     not implemented, so the dispatcher must FAIL CLOSED and refuse — never sign
-  //     without an independent source check (regression guard for the silent-bypass hole).
+  // 6c) TON-shaped PEG_OUT id (64-hex burn tx hash) but the operator's TON node has no such
+  //     burn (getBurn -> null): the TON branch fails closed. Full TON validation is exercised
+  //     in tools/ton-pegout-f2-spike.cjs; here we just prove the dispatch + fail-closed path.
   {
-    const tonHash = "a".repeat(64); // 64-hex message hash — not a base58 Solana signature
+    const tonHash = "a".repeat(64); // 64-hex burn tx hash — routes to the TON branch
     const action = canonicalPegOut({ ...trueBurn, sourceId: tonHash, homeDestination: VIZ_ACCT });
-    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: tonHash }, aliceRec)), "6c non-Solana PEG_OUT refused (fail-closed)");
+    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: tonHash }, aliceRec)), "6c TON PEG_OUT burn not final (fail-closed)");
+  }
+
+  // 6d) An id matching NEITHER a Solana signature NOR a TON tx hash (e.g. a gateway-internal
+  //     "<id>:fee" release): no source re-read applies, so the dispatcher must FAIL CLOSED
+  //     (regression guard for the silent-bypass hole).
+  {
+    const action = canonicalPegOut({ ...trueBurn, sourceId: "deadbeef:fee", homeDestination: VIZ_ACCT });
+    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: "deadbeef:fee" }, aliceRec)), "6d unknown-shape PEG_OUT refused (fail-closed)");
   }
 
   // ===================== additive ed25519 key roundtrip =========================

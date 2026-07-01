@@ -24,6 +24,22 @@ one piece still to wire (see step 9). Everything else runs today.
 
 > For the automated end-to-end round-trip harness, see [docs/e2e.md](docs/e2e.md).
 
+## Deployed — TON testnet (1-of-1, 2026-07-01)
+
+Live bring-up instances (recorded in `.env.e2e`; code provenance in
+`contracts/ton/boc/PROVENANCE.md`):
+
+| Contract | Address |
+|---|---|
+| Multisig (1-of-1) | `EQAAT5z3d9RQYAoEMcNbvniJWxnMS5zrriVmCtRWUbTFFRlJ` |
+| wVIZ Jetton minter (admin = multisig) | `EQDtadChfr01tTZb3DIgBTww9b4w3Ejxja1VNh5sAx3gKEW7` |
+| Gateway jetton wallet (multisig-owned, peg-out deposits) | `EQDcktQd-hXf_s0qaubJoBi2RsSYf_Y9GoW9TbHFM78X0AOa` |
+| Signer / deployer WalletV4 | `EQDyPBoVwQLyUGjWdetwoVMdw9-aP0BkyvbWZAdONbfNdKDb` |
+
+Done: multisig deployed → minter deployed → minter admin handed to the multisig
+(verified on-chain: `mintable=true`, `adminAddress==multisig`). Next: fund the
+multisig gas (step 6) and run a peg-out (step 8).
+
 ## 0. Networks & funds
 
 - **TON testnet** for the multisig + wVIZ jetton. Get test TON from the testnet
@@ -39,13 +55,25 @@ one piece still to wire (see step 9). Everything else runs today.
 
 ```
 git clone https://github.com/ton-blockchain/multisig-contract-v2
-cd multisig-contract-v2 && npm i && npx blueprint build      # -> Multisig wrapper + code
-# export the compiled multisig code cell to a .boc  (build the init data via the wrapper)
+cd multisig-contract-v2 && git checkout 9a4b13d   # pin = our vendored wrappers
+npm install --ignore-scripts && npx blueprint build --all    # -> build/Multisig.compiled.json
+# the .compiled.json `hex` field IS the code-cell BOC: Buffer.from(hex,"hex") -> multisig.code.boc
 
-git clone https://github.com/ton-blockchain/stablecoin-contract
-cd stablecoin-contract && npm i && npx blueprint build       # -> JettonMinter + JettonWallet code
-# export the minter + wallet code cells to .boc
+git clone https://github.com/ton-blockchain/token-contract
+cd token-contract
+# blueprint here needs @ton/ton + typescript alongside the pinned @ton/core:
+npm install --ignore-scripts --legacy-peer-deps
+npm install --ignore-scripts --legacy-peer-deps @ton/ton@13.9.0 @ton/crypto@3.2.0 typescript@5
+npx blueprint build --all                                    # -> build/JettonMinter + JettonWallet
+# export minter + wallet code cells to .boc (same hex->boc extraction)
 ```
+
+> **Minter source = `token-contract`, NOT `stablecoin-contract`.** Our code
+> (`packages/ton-watcher/src/tonChain.ts`, `contracts/ton/src/{minter,setMinterAdmin}.ts`)
+> targets the standard governed minter: `op::mint()=21`, `internal_transfer=0x178d4519`,
+> single-step `change_admin` (op 3), storage `total_supply admin content jetton_wallet_code`.
+> `token-contract/ft/jetton-minter-discoverable.fc` matches exactly; stablecoin-contract's
+> layout (`+transfer_admin`, two-step admin) does not. See `contracts/ton/boc/PROVENANCE.md`.
 
 Build the multisig **init data** with that repo's wrapper (this is the only
 correct way to get the storage layout):
@@ -142,9 +170,11 @@ security guarantee.
 > monitoring should **alert if any signer's node URL resolves to the same host/IP as the
 > coordinator** (or a shared upstream). Treat a matching endpoint as a sev-1 misconfig.
 >
-> Note also: a non-Solana PEG_OUT (TON source validation is not yet implemented) is now
-> **refused fail-closed** by the signer, not warned-and-signed. Implement TON source
-> re-validation before enabling TON peg-out, or every TON release will (correctly) stall.
+> Note also: PEG_OUT is dispatched by source-id **shape**, not the coordinator-supplied
+> `remoteChain` — a Solana signature (base58) → Solana re-read, a 64-hex burn tx hash → TON
+> re-read, anything else → refused fail-closed. TON peg-out re-read is now implemented
+> (`TonHttpChain.getBurn` bounded-scans the gateway jetton wallet on the operator's own
+> node); the signer needs `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` pointed at that node.
 
 For Solana **peg-out**, the signer re-derives the per-account deposit address to confirm
 the release target, using a **public** master key (no spend authority):
@@ -176,7 +206,21 @@ This starts watchers + signer + recon + coordinator in one stack (solo). Check
 `recon` logs show `locked=… circulating=… status=OK` and `coordinator` logs
 `listening … threshold=1-of-1`.
 
-## 8. Test peg-out first (it's the fully-wired path)
+## 8. Test peg-out
+
+> ✅ **TON peg-out PROVEN end-to-end (2026-07-01).** A live testnet round-trip detected the
+> burn, the signer independently re-read it (`TonHttpChain.getBurn`), validated the release
+> against its own node view, and broadcast the VIZ release (1-of-1). Two fixes were required
+> to get here: (1) the watcher now parses the gateway jetton wallet's real inbound message,
+> TEP-74 `internal_transfer` (0x178d4519), not `transfer_notification`; (2) F2 source
+> re-read. The signer's `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` **must** point at the
+> operator's own node (the F2 independence invariant).
+>
+> ⚠️ **Harness caveat:** the e2e harness uses a fresh store per run, so any peg-out burns
+> still inside the watcher's `TON_MAX_TRANSACTIONS` scan window get re-detected and
+> re-released on the next run (fresh store = no idempotency memory). In production the store
+> is persistent, so each burn releases once. Don't infer a double-spend bug from repeated
+> e2e runs releasing the same testnet burn.
 
 You need some wVIZ to send. As multisig admin, mint a little wVIZ to a test
 user wallet (one multisig order). Then from that wallet, **send the wVIZ to
@@ -197,11 +241,12 @@ Send **≥ 2,000 VIZ** to `viz-gateway` with the memo set to your **TON address*
 Expected: `viz-watcher` detects the deposit after irreversibility (~14 blocks),
 applies the fee/min, and POSTs the peg-in action to the coordinator.
 
-The final step — `submitMintOrder` — is the one piece to finish: it must send a
-`new_order` to the multisig that mints `net` wVIZ to the user (and the fee to the
-treasury), with `approve_on_init=true` (1-of-1 executes immediately). Wire it
-using the `Multisig` wrapper from step 1. Once wired, the user receives wVIZ and
-`recon` shows `locked == circulating`.
+`submitMint` (`packages/ton-watcher/src/tonChain.ts`) sends the `new_order` to the
+multisig that mints `net` wVIZ to the user, with `approve_on_init=true` (1-of-1
+executes immediately). **PROVEN end-to-end on TON testnet 2026-07-01**: a live
+peg-in through the full stack (viz-watcher → coordinator → signer → `submitMint`)
+minted `net` wVIZ to the recipient. The fee-split mint (fee → treasury) is still a
+gap (see below).
 
 ## How peg-in mint works on Solana
 
@@ -365,8 +410,17 @@ operator to carry a Solana pubkey and fails if one is missing.
 
 ## Known gaps to close during bring-up
 
-- **`submitMintOrder`** — wire the on-chain `new_order`/approve via the Multisig
-  wrapper (step 9). This is the only thing between here and a full round-trip.
+- **`submitMintOrder`** — ✅ DONE + proven live on TON testnet 2026-07-01 (peg-in
+  round-trips through the full stack).
+- **TON peg-out (detection + source validation)** — ✅ PROVEN end-to-end on testnet
+  2026-07-01. Required fixing burn detection to parse `internal_transfer` (the real inbound
+  message at the gateway jetton wallet) plus `TonHttpChain.getBurn` + the TON branch in
+  `sourceValidator.ts` (offline-proven in `tools/ton-pegout-f2-spike.cjs`). Plan:
+  `docs/plan-ton-pegout-source-validation.md`.
+- **FEE_SWEEP / REFUND signer validation** — 🟠 these gateway-internal VIZ releases match
+  neither source-id shape, so they hit the signer's fail-closed branch (no remote source to
+  re-read) and fees never sweep. Needs its own policy-based validation path (noted in the
+  peg-out plan §"Related gap").
 - **Fee split at mint** — mint `gross` with `net` to the user and `fee` to the
   treasury jetton wallet (keeps 1:1); the quote is already computed by the watcher.
 - **Gas-wallet watermark** — auto-pause peg-in when the multisig TON balance is
