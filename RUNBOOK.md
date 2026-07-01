@@ -291,9 +291,50 @@ Mint flow per peg-in:
    signatures, and broadcasts.
 
 The cryptographic assembly is verified offline by
-`tools/solana-writepath-spike.cjs` (in `npm run verify`). The nonce-fetch,
-broadcast, and routing Solana peg-ins through the signer service are deferred to
-a manual devnet validation run.
+`tools/solana-writepath-spike.cjs` (in `npm run verify`). The two live steps —
+the durable-**nonce fetch** and the on-chain **broadcast** — are exercised by
+`tools/solana-devnet-proof.cjs`, which drives the real `SolanaChain` +
+`KeyedSigner.approveSolanaMint` against a cluster (F2 source validation disabled
+there: this proof targets the write path, not the F2 re-read).
+
+To re-run against a fresh local cluster:
+
+```bash
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+solana-test-validator --reset --quiet &            # local cluster
+S=/tmp/viz-solana-proof; mkdir -p $S
+for n in payer submitter opA opB recipient nonce; do \
+  solana-keygen new --no-bip39-passphrase --silent -o $S/$n.json --force; done
+solana -u http://127.0.0.1:8899 airdrop 100 $S/payer.json
+solana -u http://127.0.0.1:8899 airdrop 100 $S/submitter.json
+# deploy the 2-of-2 mint
+SOLANA_RPC_URL=http://127.0.0.1:8899 DEPLOY_SEND=1 SOLANA_THRESHOLD=2 \
+  SOLANA_PAYER_SECRET="$(cat $S/payer.json)" \
+  SOLANA_SIGNERS="$(solana-keygen pubkey $S/opA.json),$(solana-keygen pubkey $S/opB.json)" \
+  npm run deploy:solana                            # prints MINT + MULTISIG
+# durable nonce account, authority = submitter
+solana -u http://127.0.0.1:8899 -k $S/submitter.json create-nonce-account $S/nonce.json 0.01 \
+  --nonce-authority "$(solana-keygen pubkey $S/submitter.json)"
+# round-trip mint (fill MINT/MULTISIG from the deploy output)
+SOLANA_RPC_URL=http://127.0.0.1:8899 PROOF_DIR=$S \
+  SOLANA_WVIZ_MINT=<mint> SOLANA_MULTISIG=<multisig> \
+  SOLANA_NONCE_ACCOUNT="$(solana-keygen pubkey $S/nonce.json)" \
+  node tools/solana-devnet-proof.cjs
+```
+
+> **Verification record — PROVEN (local cluster, 2026-07-01).**
+> Agave `solana-test-validator` 4.0.2, RPC `http://127.0.0.1:8899`.
+> - wVIZ mint `EWB6z5sRCCsj5rQLwxwznT7PN3gY7dKzgA8YwQoRhPXg` (Token-2022, 3 dec),
+>   mint+freeze authority = SPL multisig `EcmP4QR8PGD2E8UGgUzGFXgStcbZmnYcKqwxd9ckdpd6` (**2-of-2**).
+> - durable nonce account `DKEXAWAJnn5qgAiYeTRxtxwAJfS8RrdYVhvchyPVq3gC`, authority = submitter.
+> - live round-trip: nonce fetched → 2 operator partials merged into one durable-nonce
+>   tx → broadcast + confirmed. Clean run tx
+>   `dcuxDyCWCJT7LV5PHC97j56jw3pKd3rpaYY32Yo14CkhhqVDcXGeiKLHWByEoeqRZnAwL1AUY9A9jb9KBGnferS`;
+>   recipient wVIZ ATA `0 → 1048237` (= NET; GROSS 1068237, fee 20000, incl. activation
+>   surcharge since the ATA was created by the mint). `mintByActionId` located the tx by
+>   its SPL-Memo action-id marker.
+> - Public devnet faucet is rate-limited (per the rotation dry-run); a local
+>   `solana-test-validator` exercises identical program paths (Token-2022 + SPL multisig).
 
 ## 10. Verify & drills
 
