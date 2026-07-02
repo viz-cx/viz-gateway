@@ -1320,10 +1320,18 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "litesvm",
+ "serde_json",
+ "solana-instruction",
  "solana-keypair",
  "solana-message",
+ "solana-program-pack",
+ "solana-pubkey 3.0.0",
  "solana-signer",
+ "solana-system-interface 2.0.0",
  "solana-transaction",
+ "spl-associated-token-account-interface",
+ "spl-token-2022-interface",
+ "spl-token-interface",
 ]
 
 [[package]]

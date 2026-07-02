@@ -1,14 +1,20 @@
-{
+/**
+ * Program IDL in camelCase format in order to be used in JS/TS.
+ *
+ * Note that this is only a type helper and is not the actual IDL. The original
+ * IDL can be found at `target/idl/gateway_deposit.json`.
+ */
+export type GatewayDeposit = {
   "address": "MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1",
   "metadata": {
-    "name": "gateway_deposit",
+    "name": "gatewayDeposit",
     "version": "0.1.0",
     "spec": "0.1.0",
     "description": "Created with Anchor"
   },
   "instructions": [
     {
-      "name": "burn_deposit",
+      "name": "burnDeposit",
       "docs": [
         "Burn `amount` wVIZ from the deposit ATA owned by the PDA derived from",
         "`viz_account`. This is the ONLY state-changing instruction: there is no",
@@ -27,7 +33,7 @@
       ],
       "accounts": [
         {
-          "name": "deposit_authority",
+          "name": "depositAuthority",
           "docs": [
             "PDA that owns the deposit ATA; off-curve, no private key. The \"deposit address\"."
           ],
@@ -47,7 +53,7 @@
               },
               {
                 "kind": "arg",
-                "path": "viz_account"
+                "path": "vizAccount"
               }
             ]
           }
@@ -57,17 +63,17 @@
           "writable": true
         },
         {
-          "name": "deposit_ata",
+          "name": "depositAta",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "account",
-                "path": "deposit_authority"
+                "path": "depositAuthority"
               },
               {
                 "kind": "account",
-                "path": "token_program"
+                "path": "tokenProgram"
               },
               {
                 "kind": "account",
@@ -114,13 +120,13 @@
           }
         },
         {
-          "name": "token_program",
+          "name": "tokenProgram",
           "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
         }
       ],
       "args": [
         {
-          "name": "viz_account",
+          "name": "vizAccount",
           "type": "string"
         },
         {
@@ -130,4 +136,4 @@
       ]
     }
   ]
-}
+};
