@@ -86,7 +86,8 @@ native Rust/Anchor program (`programs/gateway-deposit`). The Anchor workspace is
 **Toolchain versions (installed 2026-07-02):**
 | Tool | Version |
 |------|---------|
-| `rustc` | 1.96.1 |
+| `rustc` (host, via rustup) | 1.96.1 |
+| `rustc` (pinned, via `rust-toolchain.toml`) | 1.89.0 — used for all `contracts/solana` builds |
 | `solana-cli` (Agave) | 3.1.10 |
 | `anchor-cli` (avm) | 1.1.2 |
 
