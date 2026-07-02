@@ -38,6 +38,11 @@ const L = Point.Fn.ORDER; // ed25519 prime-order subgroup order
 const DERIVATION_DOMAIN = "viz-gateway:peg-out:v2"; // v2 = additive ed25519 (was HMAC v1)
 const NONCE_DOMAIN = "viz-gateway:peg-out:nonce:v2";
 
+// The whole scheme's security reduces to this seed's entropy — SHA-512 manufactures none
+// (audit F-7, docs/audit-ed25519-additive-derivation.md). Reject low-entropy passphrases;
+// operators must supply a high-entropy random secret (≥256-bit, e.g. `openssl rand -base64 32`).
+const MIN_SEED_LEN = 32;
+
 // --- low-level scalar/byte helpers (little-endian, per RFC 8032) ----------------
 
 function sha512(...parts: Uint8Array[]): Uint8Array {
@@ -68,7 +73,13 @@ function bigIntToLe32(n: bigint): Uint8Array {
   return o;
 }
 
-/** ed25519 clamp of the low 32 bytes of SHA-512(seed) -> the master scalar's bits. */
+/**
+ * ed25519 clamp of the low 32 bytes of SHA-512(seed) -> the master scalar's bits.
+ * NOTE (audit F-5): after the `% L` reduction in `masterScalar` the clamp bits carry no
+ * meaning — this is effectively "take 32 bytes, reduce mod L" and provides NO cofactor /
+ * small-subgroup protection. That is fine: the master scalar is a trusted private
+ * multiplier, never attacker-influenced. Kept for continuity with the RFC 8032 expansion.
+ */
 function clamp(h: Uint8Array): Uint8Array {
   const c = Uint8Array.from(h.subarray(0, 32));
   c[0] = (c[0] ?? 0) & 248;
@@ -88,6 +99,11 @@ function clamp(h: Uint8Array): Uint8Array {
  */
 function masterScalar(masterSeed: string): bigint {
   if (!masterSeed) throw new Error("DEPOSIT_MASTER_SEED not set; cannot derive deposit keys");
+  if (masterSeed.length < MIN_SEED_LEN)
+    throw new Error(
+      `DEPOSIT_MASTER_SEED too short (${masterSeed.length} < ${MIN_SEED_LEN} chars); ` +
+        "use a high-entropy random secret (e.g. `openssl rand -base64 32`)",
+    );
   return leToBigInt(clamp(sha512(utf8(masterSeed)))) % L;
 }
 

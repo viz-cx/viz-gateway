@@ -2,7 +2,7 @@ import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gatew
 import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "./solanaChain";
-import { deriveDepositSigner } from "./depositAddress";
+import { deriveDepositSigner, masterPubFromSeed } from "./depositAddress";
 import { classifySeenRecovery, guardPegOut } from "./pegoutGuard";
 
 /**
@@ -51,6 +51,10 @@ async function main(): Promise<void> {
   process.on("SIGTERM", stop);
 
   console.log(`[pegout-scanner] mint=${cfg.solana.wvizMint} batch=${cfg.solana.scanAddressBatch}`);
+  // Audit F-4: log the derived master pub so operators diff it against the DEPOSIT_MASTER_PUB
+  // published to signers — a mismatch means this sweeper cannot spend the addresses signers
+  // validate releases against (silent config drift across processes).
+  console.log(`[pegout-scanner] deposit master pub = ${masterPubFromSeed(cfg.solana.depositMasterSeed)} (must equal signers' DEPOSIT_MASTER_PUB)`);
 
   // A PEG_OUT row left in SEEN past this is a crash between burn and the QUEUED
   // hand-off. The scanner checkpoints the burn signature onto the row (txid) right
