@@ -3,9 +3,9 @@
   "n": 3,
   "threshold": 2,
   "operators": [
-    { "id": "op-1", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" },
-    { "id": "op-2", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" },
-    { "id": "op-3", "vizPubkey": "VIZ1...", "tonPubkey": "<ed25519-hex>" }
+    { "id": "op-1", "vizPubkey": "VIZ65QRpXcP5TC4grAoB58U4JUSwr7TyPdJoEewYSFLEXf1jgCoJy", "tonPubkey": "<ed25519-hex>" },
+    { "id": "op-2", "vizPubkey": "VIZ8KDgP7NqqSJDag78tGco7f5vrM4EFwqSoA2qoeX4CkwNkM5U5G", "tonPubkey": "<ed25519-hex>" },
+    { "id": "op-3", "vizPubkey": "VIZ7UADKgSGMedvKCGPzkquaJd7AP7w3EPXmqLVdvRQV58T45cmjK", "tonPubkey": "<ed25519-hex>" }
   ],
   "fees": {
     "floorMilliViz": 10000,

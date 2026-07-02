@@ -15,3 +15,4 @@ logs/
 # Compiled contract bytecode — reproducible build artifacts; provenance tracked
 # in contracts/ton/boc/PROVENANCE.md
 contracts/ton/boc/*.boc
+docs/federation-keys.md

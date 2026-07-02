@@ -33,7 +33,10 @@
     "rotate:ton": "node contracts/ton/dist/rotateTon.js",
     "rotate:solana": "node contracts/solana/dist/rotateSolana.js",
     "e2e:ton": "npm run build && node tools/e2e/dist/roundtrip.js ton",
-    "e2e:ton:crash": "npm run build && node tools/e2e/dist/crash-recovery.js"
+    "e2e:ton:crash": "npm run build && node tools/e2e/dist/crash-recovery.js",
+    "e2e:federation": "npm run build && env $(grep -v '^#' .env.e2e | xargs) node tools/e2e/dist/federation.js",
+    "e2e:federation:live": "npm run build && node tools/e2e/dist/federation-live.js",
+    "fed:setup-authority": "env $(grep -v '^#' .env.e2e | xargs) node tools/federation-authority-setup.cjs"
   },
   "engines": {
     "node": ">=20"

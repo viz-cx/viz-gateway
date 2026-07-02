@@ -528,6 +528,13 @@ operator to carry a Solana pubkey and fails if one is missing.
 
 ## Known gaps to close during bring-up
 
+- **N-of-M federation (VIZ peg-out)** — ✅ PROVEN live 2026-07-02. A real 2-of-3 VIZ
+  peg-out completed through 3 independent signer processes over HTTP fan-out. `tester4`
+  active authority upgraded to 2-of-3 on VIZ mainnet (`tools/federation-authority-setup.cjs`);
+  topology + fault-matrix (under-threshold stall, process-kill isolation) proven via
+  `npm run e2e:federation`; live round-trip (solo TON peg-in → 2-of-3 VIZ release) proven
+  via `npm run e2e:federation:live`. Operator keys in `docs/federation-keys.md` (gitignored).
+  TON peg-in is still 1-of-1 on-chain (Phase B — see `docs/plan-nof-m-federation.md §Phase B`).
 - **`submitMintOrder`** — ✅ DONE + proven live on TON testnet 2026-07-01 (peg-in
   round-trips through the full stack).
 - **TON peg-out (detection + source validation)** — ✅ PROVEN end-to-end on testnet
