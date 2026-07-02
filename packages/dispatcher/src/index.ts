@@ -112,10 +112,18 @@ async function tick(
     const t = planTransition(rec, result, Date.now(), opts);
     await store.setStatus(rec.id, t.status, t.patch);
     if (t.status !== "QUEUED") state.alertedWedged.delete(rec.id); // recovered/advanced — re-arm
-    // Spawn FEE_SWEEP (on confirm) or REFUND (on window-exhaust) for a PEG_IN.
+    // Spawn FEE_SWEEP (on confirm) or REFUND (on window-exhaust) for a PEG_IN. Prefer the
+    // fee in the coordinator response, but on the recovery path that fee can be 0 (lost
+    // response, or rebuild failure for an already-executed action). In that case fall back
+    // to the fee the coordinator pinned on the row (store.setFee), so the FEE_SWEEP still
+    // fires and the withheld fee is not stranded as permanent surplus.
+    let feeMilliViz = result.feeMilliViz ?? 0n;
+    if (t.status === "CONFIRMED" && rec.direction === "PEG_IN" && feeMilliViz <= 0n) {
+      feeMilliViz = (await store.get(rec.id))?.feeMilliViz ?? 0n;
+    }
     const children = planChildren(rec, t.status, {
       feesGateAccount: opts.feesGateAccount,
-      feeMilliViz: result.feeMilliViz ?? 0n,
+      feeMilliViz,
     });
     for (const child of children) await store.enqueue(child);
     // A confirmed REFUND closes out its parent PEG_IN (REFUNDING -> REFUNDED).

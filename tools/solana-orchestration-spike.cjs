@@ -122,6 +122,25 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   await assert.rejects(routeApproval(ksA, action, { foo: "bar" }), /shape not recognized/);
   console.log("[orchestrate] TON-shaped proposal on a SOLANA action + unknown shape REJECTED OK");
 
+  // ---- Solana config pinning (PR#11 follow-up #5) -------------------------
+  // A signer that pins mint/multisig/nonceAccount to its OWN config rejects a
+  // coordinator that swaps any of them for an attacker-controlled account.
+  const ksPinned = new KeyedSigner("op-pin", "", "", FEES, opA.secretKey, DISABLED_SOURCE_VALIDATION, {
+    mint,
+    multisig,
+    nonceAccount,
+  });
+  await ksPinned.approveSolanaMint(action, proposal); // honest proposal matches config -> passes
+  for (const field of ["mint", "multisig", "nonceAccount"]) {
+    const tampered = { ...proposal, [field]: Keypair.generate().publicKey.toBase58() };
+    await assert.rejects(
+      ksPinned.approveSolanaMint(action, tampered),
+      new RegExp(`proposal\\.${field} .* != signer-configured ${field}`),
+      `tampered ${field} must be rejected`,
+    );
+  }
+  console.log("[pin] tampered mint/multisig/nonceAccount REJECTED; honest config accepted OK");
+
   console.log("\nRESULT: a Solana peg-in routes end-to-end through the real signer routing");
   console.log("and coordinator orchestration; chain tag committed, partials merge, broadcast.");
 })().catch((e) => {

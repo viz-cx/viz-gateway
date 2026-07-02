@@ -216,6 +216,44 @@ and the scalar signature verifies). **TON peg-out source re-validation is deferr
 peg-out not yet active; `sourceId` is a message hash with no clean toncenter-v2 fetch) — the
 validator warns and proceeds for that one path only.
 
+## PR #11 (F2) review follow-ups
+
+The F2 review flagged one critical bug (fixed *as* PR #11) plus five deferred items.
+Follow-up **①** (TON peg-in on-chain idempotency) was closed by PR #12
+([`plan-ton-peg-in-idempotency.md`](./plan-ton-peg-in-idempotency.md)). The remaining
+three hardening items are now closed here; **④** (external crypto audit) is the only
+open one and is not a code change.
+
+**② — recovery fee recompute returned 0 → FEE_SWEEP skipped (🟠 accounting drift) ✅.**
+When an already-executed PEG_IN took the orchestrator recovery path and the fee rebuild
+threw (or the coordinator response was lost), the fee reported to the dispatcher was `0`,
+so no `FEE_SWEEP` was spawned and the withheld fee stayed a permanent surplus (safe
+direction — over-backing — but the ledger drifts). Fixed by making the fee **durable
+before broadcast**: the coordinator pins it onto the row via the new `store.setFee`
+(an `Orchestrator` `persistFee` hook, called right after `buildProposal`), independent of
+the response reaching the dispatcher. `planTransition` no longer clobbers a pinned fee
+with `0`, and the dispatcher falls back to the pinned `rec.feeMilliViz` when the response
+omits it. Regression: `idempotent-delivery-spike.cjs` case 25 + `outbox-spike.cjs` `setFee`.
+
+**③ — SQLite `SUM(CAST(... AS INTEGER))` overflow (🟡 latent crash) ✅.** A running
+total past 2⁶³ makes SQLite fall back to a lossy REAL, and `BigInt("…e+18")` throws.
+`unsweptFeesMilliViz`/`capSumMilliViz` now fetch the rows and sum in JS with `BigInt`
+(no int64 ceiling — milli-VIZ is unbounded 2⁶⁴⁺). Regression: `outbox-spike.cjs` §6
+(two values summing past 2⁶³ add exactly).
+
+**④ — signer Solana account pinning (🟡 hardening) ✅.** `KeyedSigner.approveSolanaMint`
+now verifies `proposal.mint`/`multisig`/`nonceAccount` against the operator's OWN config
+(`SolanaPins`, wired from `cfg.solana` in `index.ts`), so a compromised coordinator can't
+point a mint at attacker-controlled accounts — the F2 "trust your own config" principle
+applied to the Solana write path. Skipped only when Solana is unconfigured (spikes).
+Regression: `solana-orchestration-spike.cjs` (tampered mint/multisig/nonceAccount rejected,
+honest config accepted).
+
+**⑤ — self-written ed25519 in `depositAddress.ts` → external crypto audit (🟡) — OPEN.**
+The additive-derivation code (`childPub = masterPub + tweak·G`, explicit-scalar signing)
+is hand-rolled crypto; it is offline-verified (`signer-f2-spike.cjs`) but a candidate for
+an external review, not a code fix.
+
 ## Remaining / follow-ups
 
 - Live on-chain mint targets: TON multisig-v2 `new_order`+`approve`; Solana mint +

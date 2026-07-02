@@ -58,7 +58,26 @@ export class Orchestrator {
     private readonly operators: string[],
     private readonly signers: SignerClient[],
     private readonly broadcaster: Broadcaster,
+    /**
+     * Persist the withheld PEG_IN fee onto the outbox row the moment it is known
+     * (before broadcast). This makes the fee durable independently of the result
+     * reaching the dispatcher: if the response is lost or an already-executed action
+     * later takes the recovery path (where the rebuild can fail -> fee 0), the
+     * dispatcher can still read the pinned fee and spawn the FEE_SWEEP. Optional so
+     * offline spikes need no store.
+     */
+    private readonly persistFee?: (actionId: string, feeMilliViz: bigint) => Promise<void>,
   ) {}
+
+  /** Pin a positive PEG_IN fee onto the row; best-effort (never blocks the action). */
+  private async pinFee(action: CanonicalAction, feeMilliViz: bigint): Promise<void> {
+    if (!this.persistFee || action.direction !== "PEG_IN" || feeMilliViz <= 0n) return;
+    try {
+      await this.persistFee(action.id, feeMilliViz);
+    } catch (err) {
+      console.warn(`[orchestrator] ${action.id} fee pin failed (non-fatal): ${String(err)}`);
+    }
+  }
 
   async process(action: CanonicalAction): Promise<OrchestrationResult> {
     // Idempotency: if the action already landed on-chain (e.g. the process crashed
@@ -74,6 +93,7 @@ export class Orchestrator {
       let feeMilliViz = 0n;
       try {
         ({ feeMilliViz } = await this.broadcaster.buildProposal(action));
+        await this.pinFee(action, feeMilliViz);
       } catch (err) {
         console.warn(`[orchestrator] ${action.id} executed but fee rebuild failed (using 0): ${String(err)}`);
       }
@@ -90,6 +110,9 @@ export class Orchestrator {
 
     const { proposal, feeMilliViz } = await this.broadcaster.buildProposal(action);
     const fee = feeMilliViz.toString();
+    // Pin the fee before broadcast so it survives a lost response / crash: recovery
+    // reads it back rather than stranding the withheld fee as un-swept surplus.
+    await this.pinFee(action, feeMilliViz);
     const set = new ApprovalSet(this.threshold, this.operators);
 
     for (const signer of this.signers) {

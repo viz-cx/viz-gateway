@@ -84,6 +84,18 @@ const { createStore, SqliteGatewayStore } = require("../packages/common/dist/sto
   assert.strictEqual(await store.unsweptFeesMilliViz(), 0n);
   console.log("[outbox] fee pinned at delivery + delete OK");
 
+  // 4b') setFee pins the withheld fee WITHOUT a status change (the coordinator calls
+  //      this before broadcast, so a lost response / recovery can still spawn the
+  //      FEE_SWEEP instead of stranding the fee as surplus — PR#11 follow-up #3).
+  await store.enqueue({ id: "trx3:0", direction: "PEG_IN", remoteChain: "TON", recipient: "erin", amountMilliViz: 8_000_000n, digest: "d4b", status: "BROADCAST" });
+  await store.setFee("trx3:0", 24_000n);
+  const pinned = await store.get("trx3:0");
+  assert.strictEqual(pinned.feeMilliViz, 24_000n, "setFee pins the fee");
+  assert.strictEqual(pinned.status, "BROADCAST", "setFee does not change status");
+  assert.strictEqual(await store.unsweptFeesMilliViz(), 24_000n, "pinned fee counts as unswept (BROADCAST is minted)");
+  await store.delete("trx3:0");
+  console.log("[outbox] setFee pins fee without status change OK");
+
   // 4c) stale() surfaces orphaned SIGNING rows so the dispatcher can requeue them
   //     (a crash between marking SIGNING and recording the transition).
   await store.enqueue({ id: "sig1", direction: "PEG_OUT", recipient: "dave", amountMilliViz: 1n, digest: "d5", status: "QUEUED" });
@@ -108,6 +120,24 @@ const { createStore, SqliteGatewayStore } = require("../packages/common/dist/sto
   assert.strictEqual(await store.capSumMilliViz(now + 1000, now + 2000), 0n, "entries outside the window are excluded");
   await store.close();
   console.log("[outbox] shared cap window survives restart OK");
+
+  // 6) overflow-safe sums (PR#11 follow-up #4): a running total past 2^63 makes
+  //    SQLite SUM(CAST(... AS INTEGER)) spill into a lossy REAL, and BigInt("…e+18")
+  //    throws. Summing in JS with BigInt has no such ceiling. Two milli-VIZ values
+  //    whose sum exceeds 2^63 (=9.22e18) must add EXACTLY, not crash.
+  store = new SqliteGatewayStore(dbPath); // reopen (section 5 closed it)
+  const BIG = 9_000_000_000_000_000_000n; // < 2^63 individually, > 2^63 summed
+  await store.enqueue({ id: "big1", direction: "PEG_IN", remoteChain: "TON", recipient: "z1", amountMilliViz: BIG, feeMilliViz: BIG, digest: "b1", status: "CONFIRMED" });
+  await store.enqueue({ id: "big2", direction: "PEG_IN", remoteChain: "TON", recipient: "z2", amountMilliViz: BIG, feeMilliViz: BIG, digest: "b2", status: "CONFIRMED" });
+  assert.strictEqual(await store.unsweptFeesMilliViz(), BIG * 2n, "unswept fees sum exactly past 2^63 (no REAL overflow)");
+  await store.delete("big1");
+  await store.delete("big2");
+  const capNow = Date.now();
+  await store.recordCap(BIG, capNow);
+  await store.recordCap(BIG, capNow);
+  assert.strictEqual(await store.capSumMilliViz(capNow - 1000, capNow + 1000), BIG * 2n, "cap window sums exactly past 2^63");
+  await store.close();
+  console.log("[outbox] overflow-safe BigInt sums OK");
 
   // memory: store also satisfies the interface.
   const mem = createStore("memory:");
