@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { ed25519 } from "@noble/curves/ed25519";
+import { BorshInstructionCoder, type Idl } from "@coral-xyz/anchor";
+import BN from "bn.js";
+import idlJson from "../../../contracts/solana/target/idl/gateway_deposit.json";
 
 /**
  * Deterministic per-recipient Solana deposit addresses for peg-out (Variant A),
@@ -181,13 +184,88 @@ function depositPubFromSeed(masterSeed: string, vizAccount: string): PublicKey {
   return new PublicKey(Buffer.from(child.toBytes()));
 }
 
-/** The deposit owner address (what the user sends wVIZ to). Stable per VIZ account. */
-export function depositAddress(masterSeed: string, vizAccount: string): string {
+// ============================================================================
+// PDA-based deposit derivation (replaces additive ed25519 above).
+//
+// Each VIZ account maps to a PROGRAM-DERIVED ADDRESS: PDA(["deposit", vizAccount], programId).
+// There is NO private key anywhere — funds arriving at the PDA are burned by the
+// burn-only gateway program. F2 verification is a pure PDA re-derivation with no secret.
+//
+// NOTE: depositAddress() and depositAta() are re-exported below with PDA semantics.
+// Callers that still pass (masterSeed, vizAccount) will compile (same string, string
+// signature) but will get wrong addresses until Tasks 4-7 update them.
+// ============================================================================
+
+const DEPOSIT_SEED = Buffer.from("deposit");
+const _pdaCoder = new BorshInstructionCoder(idlJson as unknown as Idl);
+
+/** Derive the PDA PublicKey for a VIZ account under the given gateway program. */
+export function depositPubkey(programId: string, vizAccount: string): PublicKey {
+  if (!vizAccount) throw new Error("vizAccount required");
+  const [pda] = PublicKey.findProgramAddressSync(
+    [DEPOSIT_SEED, Buffer.from(vizAccount, "utf8")],
+    new PublicKey(programId),
+  );
+  return pda;
+}
+
+/**
+ * Base58 PDA deposit address for a VIZ account.
+ * First arg is the gateway program ID (was: masterSeed). Tasks 4-7 update callers.
+ */
+export function depositAddress(programId: string, vizAccount: string): string {
+  return depositPubkey(programId, vizAccount).toBase58();
+}
+
+/**
+ * The wVIZ ATA of the PDA deposit address (what the scanner watches).
+ * First arg is the gateway program ID (was: masterSeed). Tasks 4-7 update callers.
+ */
+export function depositAta(programId: string, vizAccount: string, mint: string): string {
+  const owner = depositPubkey(programId, vizAccount);
+  return getAssociatedTokenAddressSync(new PublicKey(mint), owner, true, TOKEN_2022_PROGRAM_ID).toBase58();
+}
+
+/**
+ * Build the burn_deposit instruction for the gateway program.
+ * The instruction encodes the VIZ account name and amount, and references
+ * the PDA authority and its ATA.
+ */
+export function buildBurnDepositIx(args: {
+  programId: string;
+  vizAccount: string;
+  amount: bigint;
+  mint: string;
+}): TransactionInstruction {
+  const programId = new PublicKey(args.programId);
+  const authority = depositPubkey(args.programId, args.vizAccount);
+  const ata = new PublicKey(depositAta(args.programId, args.vizAccount, args.mint));
+  const data = _pdaCoder.encode("burn_deposit", {
+    viz_account: args.vizAccount,
+    amount: new BN(args.amount.toString()),
+  });
+  return new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: authority, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(args.mint), isSigner: false, isWritable: true },
+      { pubkey: ata, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
+}
+
+// Legacy additive-ed25519 helpers — still exported for callers not yet migrated (Tasks 4-7).
+// Will be deleted in Task 8.
+
+/** @deprecated Use depositAddress(programId, vizAccount) instead. */
+export function depositAddressLegacy(masterSeed: string, vizAccount: string): string {
   return depositPubFromSeed(masterSeed, vizAccount).toBase58();
 }
 
-/** The wVIZ ATA of the deposit address (what the scanner watches). */
-export function depositAta(masterSeed: string, vizAccount: string, mint: string): string {
+/** @deprecated Use depositAta(programId, vizAccount, mint) instead. */
+export function depositAtaLegacy(masterSeed: string, vizAccount: string, mint: string): string {
   const owner = depositPubFromSeed(masterSeed, vizAccount);
   return getAssociatedTokenAddressSync(new PublicKey(mint), owner, false, TOKEN_2022_PROGRAM_ID).toBase58();
 }

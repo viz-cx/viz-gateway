@@ -3,13 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
-  "scripts": { "build": "tsc -b" },
+  "scripts": {
+    "build": "tsc -b"
+  },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
     "@gateway/common": "0.1.0",
     "@gateway/log": "0.1.0",
     "@gateway/viz-watcher": "0.1.0",
     "@noble/curves": "^1.9.7",
-    "@solana/web3.js": "^1.98.0",
-    "@solana/spl-token": "^0.4.0"
+    "@solana/spl-token": "^0.4.0",
+    "@solana/web3.js": "^1.98.0"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.2.0"
   }
 }
