@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import { createStore, loadConfig } from "@gateway/common";
+import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { depositAddress, depositAta } from "./depositAddress";
+import { resolveDepositAddress } from "./lookupValidate";
 
 /**
  * Deposit-address lookup service (peg-out Variant A). Stateless derivation:
@@ -9,17 +11,19 @@ import { depositAddress, depositAta } from "./depositAddress";
  * it. Open/unauthenticated (release is bound to the derivation, so a third party
  * can only gift, never redirect). The response WARNS to send only wVIZ on Solana.
  *
- * NOTE: validating that `viz_account` actually exists on VIZ before issuing an
- * address (to avoid stuck funds to a typo) is a TODO — wire it to a VIZ node
- * `get_accounts` read. For now we apply a basic format check.
+ * The request decision (format pre-filter → on-chain existence gate) is the pure
+ * `resolveDepositAddress` in `lookupValidate.ts`. Confirming `viz_account` exists
+ * on VIZ before issuing means wVIZ can't be sent to a deposit address for a
+ * typo'd/non-existent account (peg-out never refunds → those funds would be
+ * stuck); a VIZ node outage propagates as a throw → fail closed (500), never
+ * issue unverified.
  */
-const VIZ_ACCOUNT_RE = /^[a-z][a-z0-9.-]{1,31}$/; // VIZ/Graphene account-name charset
-
 async function main(): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.solana.depositMasterSeed) throw new Error("SOLANA_DEPOSIT_MASTER_SEED is required for the lookup service");
   if (!cfg.solana.wvizMint) throw new Error("SOLANA_WVIZ_MINT is required");
   const store = createStore(cfg.storeUrl);
+  const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
   const [host, portStr] = cfg.solana.lookupListen.split(":");
   const port = Number.parseInt(portStr ?? "8095", 10);
 
@@ -33,20 +37,26 @@ async function main(): Promise<void> {
       json(404, { error: "not found" });
       return;
     }
-    const vizAccount = (url.searchParams.get("viz_account") ?? "").trim().toLowerCase();
-    if (!VIZ_ACCOUNT_RE.test(vizAccount)) {
-      json(400, { error: "invalid viz_account" });
-      return;
-    }
     void (async () => {
       try {
-        const address = depositAddress(cfg.solana.depositMasterSeed, vizAccount);
-        const ata = depositAta(cfg.solana.depositMasterSeed, vizAccount, cfg.solana.wvizMint);
-        await store.registerDepositAddress({ vizAccount, solAddress: address, wvizAta: ata });
+        const decision = await resolveDepositAddress(url.searchParams.get("viz_account"), {
+          accountExists: (name) => viz.accountExists(name),
+          depositAddress: (name) => depositAddress(cfg.solana.depositMasterSeed, name),
+          depositAta: (name) => depositAta(cfg.solana.depositMasterSeed, name, cfg.solana.wvizMint),
+        });
+        if (decision.status !== 200) {
+          json(decision.status, decision.body);
+          return;
+        }
+        await store.registerDepositAddress({
+          vizAccount: decision.vizAccount,
+          solAddress: decision.address,
+          wvizAta: decision.ata,
+        });
         json(200, {
-          viz_account: vizAccount,
-          address,
-          ata,
+          viz_account: decision.vizAccount,
+          address: decision.address,
+          ata: decision.ata,
           mint: cfg.solana.wvizMint,
           network: "solana",
           warning: "Send ONLY wVIZ (this mint) on Solana to this address. Other tokens/networks are lost.",
