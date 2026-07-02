@@ -267,5 +267,6 @@ export function depositAddressLegacy(masterSeed: string, vizAccount: string): st
 /** @deprecated Use depositAta(programId, vizAccount, mint) instead. */
 export function depositAtaLegacy(masterSeed: string, vizAccount: string, mint: string): string {
   const owner = depositPubFromSeed(masterSeed, vizAccount);
+  // false: additive ed25519 deposit keys are on-curve points, not PDAs
   return getAssociatedTokenAddressSync(new PublicKey(mint), owner, false, TOKEN_2022_PROGRAM_ID).toBase58();
 }

@@ -5,7 +5,7 @@
  *  [1] depositAddress(programId, vizAccount) == on-chain PDA(["deposit", viz], program)
  *  [2] distinct VIZ accounts -> distinct deposit addresses
  *  [3] buildBurnDepositIx returns an instruction targeting the right program
- *      and containing the PDA authority in its account keys
+ *      and containing both the PDA authority and its ATA in its account keys
  *
  * Run after build: node tools/deposit-pda-spike.cjs
  */
@@ -27,9 +27,15 @@ assert.equal(depositAddress(PROGRAM, "alice"), pda.toBase58(), "[1] PDA mismatch
 // [2] distinct accounts -> distinct addresses
 assert.notEqual(depositAddress(PROGRAM, "alice"), depositAddress(PROGRAM, "bob"), "[2]");
 
+// [2b] depositAta returns a valid Token-2022 ATA address (not the owner itself)
+const ata = depositAta(PROGRAM, "alice", MINT);
+new PublicKey(ata); // throws if invalid base58 or off-curve
+assert.notEqual(ata, depositAddress(PROGRAM, "alice"), "[2b] ATA should differ from PDA owner");
+
 // [3] burn ix targets the program, carries the PDA authority + its ATA
 const ix = buildBurnDepositIx({ programId: PROGRAM, vizAccount: "alice", amount: 400n, mint: MINT });
 assert.equal(ix.programId.toBase58(), PROGRAM, "[3] wrong program");
 assert.ok(ix.keys.some((k) => k.pubkey.toBase58() === pda.toBase58()), "[3] PDA authority missing");
+assert.ok(ix.keys.some((k) => k.pubkey.toBase58() === ata), "[3] deposit ATA missing from ix keys");
 
 console.log("deposit-pda-spike: all checks passed");
