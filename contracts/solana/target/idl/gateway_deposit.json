@@ -1,0 +1,10 @@
+{
+  "address": "MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1",
+  "metadata": {
+    "name": "gateway_deposit",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": []
+}
