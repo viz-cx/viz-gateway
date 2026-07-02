@@ -42,8 +42,11 @@ export interface RetryOpts {
  */
 export function planTransition(rec: OutboxRecord, result: DeliveryResult, now: number, opts: RetryOpts): Transition {
   if (result.broadcast) {
-    // Pin the withheld fee onto a PEG_IN row (undefined elsewhere -> column unchanged).
-    return { status: "CONFIRMED", patch: { txid: result.txid ?? null, lastError: null, feeMilliViz: result.feeMilliViz } };
+    // Pin the withheld fee onto a PEG_IN row, but only a POSITIVE one: on the recovery
+    // path the coordinator may report fee 0 (rebuild failed), which must not clobber a
+    // fee it already pinned via store.setFee. undefined -> COALESCE leaves the column.
+    const feeMilliViz = result.feeMilliViz && result.feeMilliViz > 0n ? result.feeMilliViz : undefined;
+    return { status: "CONFIRMED", patch: { txid: result.txid ?? null, lastError: null, feeMilliViz } };
   }
   const attempts = rec.attempts + 1;
   const error = result.error ?? "delivery failed";

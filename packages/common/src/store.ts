@@ -28,6 +28,14 @@ export interface GatewayStore {
   get(id: string): Promise<OutboxRecord | undefined>;
   /** Advance status (+ optional attempts/error/txid/nextAttemptAt/feeMilliViz). */
   setStatus(id: string, status: ActionStatus, patch?: StatusPatch): Promise<void>;
+  /**
+   * Persist ONLY the withheld PEG_IN fee (no status change). The coordinator calls
+   * this the moment it builds the proposal, so the fee is durable even if its
+   * response never reaches the dispatcher (lost/crash) or an already-executed action
+   * takes the recovery path — otherwise the FEE_SWEEP is skipped and the withheld
+   * fee strands as permanent surplus (accounting drift).
+   */
+  setFee(id: string, feeMilliViz: bigint): Promise<void>;
   /** Remove a row entirely (used to release an unfulfilled first-claim for retry). */
   delete(id: string): Promise<void>;
   /** Rows in any of `statuses` whose nextAttemptAt <= now (dispatcher work list). */
@@ -67,6 +75,11 @@ type Row = Record<string, unknown>;
 
 /** PEG_IN statuses at/after which the fee has been minted-as-surplus. */
 const MINTED_STATUSES: ActionStatus[] = ["BROADCAST", "CONFIRMED"];
+
+/** Sum a query's `v` column as BigInt (overflow-safe, unlike SQLite's int64 SUM). */
+function sumBigIntColumn(rows: Row[]): bigint {
+  return rows.reduce((acc, r) => acc + BigInt(String(r["v"])), 0n);
+}
 
 function rowToRecord(r: Row): OutboxRecord {
   const remote = r["remote_chain"] as string | null;
@@ -252,6 +265,12 @@ export class SqliteGatewayStore implements GatewayStore {
       );
   }
 
+  async setFee(id: string, feeMilliViz: bigint): Promise<void> {
+    this.db
+      .prepare("UPDATE action_outbox SET fee_milli_viz = ?, updated_at = ? WHERE id = ?")
+      .run(feeMilliViz.toString(), Date.now(), id);
+  }
+
   async delete(id: string): Promise<void> {
     this.db.prepare("DELETE FROM action_outbox WHERE id = ?").run(id);
   }
@@ -279,20 +298,17 @@ export class SqliteGatewayStore implements GatewayStore {
   }
 
   async unsweptFeesMilliViz(): Promise<bigint> {
+    // Sum in JS with BigInt, NOT SQLite SUM(CAST(... AS INTEGER)): a running total
+    // past 2^63 makes SQLite fall back to a REAL, and BigInt("…e+18") throws. Milli-VIZ
+    // amounts are unbounded 2^64-plus, so the SUM must live outside SQLite's int64.
     const ph = MINTED_STATUSES.map(() => "?").join(",");
     const minted = this.db
-      .prepare(
-        `SELECT COALESCE(SUM(CAST(fee_milli_viz AS INTEGER)), 0) AS s
-         FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})`,
-      )
-      .get(...MINTED_STATUSES) as Row;
+      .prepare(`SELECT fee_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})`)
+      .all(...MINTED_STATUSES) as Row[];
     const swept = this.db
-      .prepare(
-        `SELECT COALESCE(SUM(CAST(amount_milli_viz AS INTEGER)), 0) AS s
-         FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'`,
-      )
-      .get() as Row;
-    const v = BigInt(String(minted["s"])) - BigInt(String(swept["s"]));
+      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'`)
+      .all() as Row[];
+    const v = sumBigIntColumn(minted) - sumBigIntColumn(swept);
     return v > 0n ? v : 0n;
   }
 
@@ -303,12 +319,13 @@ export class SqliteGatewayStore implements GatewayStore {
   }
 
   async capSumMilliViz(sinceMs: number, now: number): Promise<bigint> {
-    // Prune expired entries, then sum the live window.
+    // Prune expired entries, then sum the live window in JS with BigInt (see
+    // unsweptFeesMilliViz: SQLite SUM overflows int64 into a lossy REAL).
     this.db.prepare("DELETE FROM cap_window WHERE ts < ?").run(sinceMs);
-    const r = this.db
-      .prepare("SELECT COALESCE(SUM(CAST(amount_milli_viz AS INTEGER)), 0) AS s FROM cap_window WHERE ts <= ?")
-      .get(now) as Row;
-    return BigInt(String(r["s"]));
+    const rows = this.db
+      .prepare("SELECT amount_milli_viz AS v FROM cap_window WHERE ts <= ?")
+      .all(now) as Row[];
+    return sumBigIntColumn(rows);
   }
 
   private setKey(key: string, value: string): void {
@@ -389,6 +406,13 @@ export class InMemoryGatewayStore implements GatewayStore {
     if (patch.feeMilliViz !== undefined) r.feeMilliViz = patch.feeMilliViz;
     if (patch.nextAttemptAt !== undefined) r.nextAttemptAt = patch.nextAttemptAt;
     r.updatedAt = Date.now();
+  }
+  async setFee(id: string, feeMilliViz: bigint): Promise<void> {
+    const r = this.rows.get(id);
+    if (r) {
+      r.feeMilliViz = feeMilliViz;
+      r.updatedAt = Date.now();
+    }
   }
   async delete(id: string): Promise<void> {
     this.rows.delete(id);

@@ -40,6 +40,19 @@ import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
  */
 export type SourceValidator = (action: CanonicalAction) => Promise<void>;
 
+/**
+ * The Solana accounts this operator trusts, read from its OWN config. Pinning these
+ * means a compromised coordinator cannot point the signer at an attacker-controlled
+ * mint / mint-authority multisig / durable-nonce account (same "trust your own
+ * config, not the wire" principle F2 applies to the source event). Optional: spikes
+ * omit it; the production signer (index.ts) always supplies it when Solana is wired.
+ */
+export interface SolanaPins {
+  mint: string;
+  multisig: string;
+  nonceAccount: string;
+}
+
 /** Explicit test-only sentinel: pass this to KeyedSigner to disable F2 source validation. */
 export const DISABLED_SOURCE_VALIDATION = Symbol("DISABLED_SOURCE_VALIDATION");
 
@@ -53,6 +66,7 @@ export class KeyedSigner implements Signer {
     private readonly fees: GatewayFeeConfig,
     private readonly solanaSecret: Uint8Array | null = null,
     validateSource?: SourceValidator | typeof DISABLED_SOURCE_VALIDATION,
+    private readonly solanaPins: SolanaPins | null = null,
   ) {
     if (validateSource === undefined) {
       // A forgotten validator must never degrade to "sign without a source check".
@@ -126,6 +140,22 @@ export class KeyedSigner implements Signer {
   async approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval> {
     if (action.direction !== "PEG_IN") throw new Error("approveSolanaMint expects a PEG_IN action");
     await this.assertSource(action);
+    // Pin the Solana accounts to this operator's own config: a compromised coordinator
+    // must not be able to redirect the mint to an attacker-controlled mint / authority
+    // multisig / nonce account. Skipped only when unconfigured (spikes).
+    if (this.solanaPins) {
+      const pins = this.solanaPins;
+      const mismatches: Array<[keyof SolanaPins, string]> = [
+        ["mint", proposal.mint],
+        ["multisig", proposal.multisig],
+        ["nonceAccount", proposal.nonceAccount],
+      ];
+      for (const [field, got] of mismatches) {
+        if (got !== pins[field]) {
+          throw new Error(`proposal.${field} (${got}) != signer-configured ${field} (${pins[field]}) for ${action.id}`);
+        }
+      }
+    }
     if (proposal.recipient !== action.recipient) {
       throw new Error(`proposal.recipient (${proposal.recipient}) != action.recipient (${action.recipient})`);
     }

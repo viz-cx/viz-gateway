@@ -622,6 +622,45 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     console.log("[24] TON crash-before-commit (addr persisted, order absent) -> re-broadcastable OK");
   }
 
+  // ── 25. Recovery fee durability (PR#11 follow-up #2) ─────────────────────────
+  // The coordinator pins the PEG_IN fee onto the row BEFORE broadcast, so a recovery
+  // that reports fee 0 (rebuild failed / response lost) still spawns the FEE_SWEEP
+  // instead of stranding the withheld fee as permanent surplus (accounting drift).
+  {
+    const store = new InMemoryGatewayStore();
+    const FEE = 22_000n;
+    const action = { direction: "PEG_IN", id: "rec1:0", remoteChain: "SOLANA", recipient: "9xR", amountMilliViz: 300_000n, digest: "recdrift" };
+    await store.enqueue({ id: action.id, direction: "PEG_IN", remoteChain: "SOLANA", recipient: "9xR",
+      sender: "alice", amountMilliViz: 300_000n, digest: "recdrift", status: "QUEUED" });
+    assert.strictEqual((await store.get(action.id)).feeMilliViz, 0n, "watcher enqueues fee 0");
+
+    const broadcaster = {
+      buildProposal: async () => ({ proposal: {}, feeMilliViz: FEE }),
+      broadcast: async () => "MINT_TX",
+      actionExecuted: async () => ({ executed: false }),
+    };
+    const approvingSigner = { operatorId: "op-1", approve: async () => ({ actionId: action.id, operatorId: "op-1", signature: "sig" }) };
+    const r = await new Orchestrator(1, ["op-1"], [approvingSigner], broadcaster, (id, fee) => store.setFee(id, fee)).process(action);
+    assert.strictEqual(r.broadcast, true, "broadcasts at 1-of-1");
+    assert.strictEqual((await store.get(action.id)).feeMilliViz, FEE, "coordinator pinned the fee on the row BEFORE broadcast");
+
+    // Dispatcher recovery-CONFIRMED where the coordinator response carries fee 0.
+    const t = planTransition(await store.get(action.id), { broadcast: true, txid: "MINT_TX", feeMilliViz: 0n }, Date.now(), { retryIntervalMs: 10000, windowMs: 180000 });
+    assert.strictEqual(t.status, "CONFIRMED");
+    assert.strictEqual(t.patch.feeMilliViz, undefined, "fee 0 must NOT clobber the pinned fee");
+    await store.setStatus(action.id, t.status, t.patch);
+
+    // Dispatcher fallback: result fee is 0, so read the fee pinned on the row.
+    const rec = await store.get(action.id);
+    let feeMilliViz = 0n; // == result.feeMilliViz on the recovery path
+    if (rec.direction === "PEG_IN" && feeMilliViz <= 0n) feeMilliViz = (await store.get(action.id)).feeMilliViz ?? 0n;
+    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", feeMilliViz });
+    assert.strictEqual(kids.length, 1, "FEE_SWEEP still spawned from the pinned fee");
+    assert.strictEqual(kids[0].direction, "FEE_SWEEP");
+    assert.strictEqual(kids[0].amountMilliViz, FEE, "FEE_SWEEP carries the pinned fee amount");
+    console.log("[25] recovery reads pinned fee -> FEE_SWEEP fires, no stranded surplus OK");
+  }
+
   console.log("\nRESULT: idempotent delivery: actionExecuted short-circuit prevents double-mint/release;");
   console.log("VIZ persists a deterministic txid before send and confirms by exact id (no scan window);");
   console.log("BROADCAST set pre-coordinator; parentId closes parent row without id-suffix fragility.");

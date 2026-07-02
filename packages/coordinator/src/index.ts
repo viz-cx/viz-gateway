@@ -78,6 +78,7 @@ async function main(): Promise<void> {
       cfg.federation.operators.map((o) => o.id),
       signers,
       broadcaster,
+      (id, feeMilliViz) => store.setFee(id, feeMilliViz),
     ).process(action);
   };
 

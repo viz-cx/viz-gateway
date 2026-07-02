@@ -86,6 +86,12 @@ async function main(): Promise<void> {
     feesGateAccount: cfg.feesGateAccount,
   };
 
+  // Pin the Solana accounts to this operator's own config so a compromised coordinator
+  // can't redirect a mint (only meaningful once Solana is wired: SOLANA_WVIZ_MINT set).
+  const solanaPins = cfg.solana.wvizMint
+    ? { mint: cfg.solana.wvizMint, multisig: cfg.solana.multisig, nonceAccount: cfg.solana.nonceAccount }
+    : null;
+
   const signer = new KeyedSigner(
     cfg.operatorId,
     cfg.viz.signingWif,
@@ -93,6 +99,7 @@ async function main(): Promise<void> {
     cfg.fees,
     cfg.solana.signerSecret,
     (action) => validateAction(action, validatorDeps),
+    solanaPins,
   );
   const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8090").split(":");
   const port = Number.parseInt(portStr ?? "8090", 10);
