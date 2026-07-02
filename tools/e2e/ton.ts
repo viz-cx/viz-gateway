@@ -1,10 +1,40 @@
 // tools/e2e/ton.ts — minimal TON client for the e2e harness (burn submit + wVIZ balance).
 import { TonClient, WalletContractV4, internal, Address, beginCell, toNano } from "@ton/ton";
 import { mnemonicToPrivateKey } from "@ton/crypto";
+import { Multisig } from "@gateway/contracts-ton";
 import type { E2eConfig } from "./config";
 
 function client(cfg: E2eConfig): TonClient {
   return new TonClient({ endpoint: cfg.ton.endpoint, apiKey: cfg.ton.apiKey });
+}
+
+/**
+ * Deterministic address of the NEXT multisig order (peg-in mint). Mirrors
+ * `TonHttpChain.nextOrderAddress`: the address is a pure function of
+ * (multisig, nextOrderSeqno), and the seqno only advances when an order is
+ * actually created — so it is a durable idempotency key and, across a crash,
+ * a reliable "was a second order created?" counter.
+ */
+export async function nextOrderInfo(cfg: E2eConfig): Promise<{ orderAddr: string; seqno: bigint }> {
+  const c = client(cfg);
+  const ms = c.open(Multisig.createFromAddress(Address.parse(cfg.ton.multisigAddress)));
+  const data = await ms.getMultisigData();
+  const orderAddr = await ms.getOrderAddress(data.nextOrderSeqno);
+  return { orderAddr: orderAddr.toString(), seqno: data.nextOrderSeqno };
+}
+
+/** Current nextOrderSeqno of the gateway multisig — the count of orders ever created. */
+export async function nextOrderSeqno(cfg: E2eConfig): Promise<bigint> {
+  return (await nextOrderInfo(cfg)).seqno;
+}
+
+/**
+ * True if a multisig order contract is deployed on-chain (i.e. a new_order landed).
+ * Same predicate as `TonHttpChain.orderExists` — existence, not the executed flag.
+ */
+export async function orderExists(cfg: E2eConfig, orderAddr: string): Promise<boolean> {
+  const state = await client(cfg).getContractState(Address.parse(orderAddr));
+  return state.state === "active";
 }
 
 /** Jetton wallet address of `owner` under the configured minter. */

@@ -6,5 +6,5 @@
     "outDir": "dist"
   },
   "include": ["*.ts"],
-  "references": [{ "path": "../../packages/common" }]
+  "references": [{ "path": "../../packages/common" }, { "path": "../../contracts/ton" }]
 }

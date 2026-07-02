@@ -17,6 +17,9 @@
 //   14. BROADCAST status in MINTED_STATUSES -> unsweptFeesMilliViz counts it.
 //   15. actionId="" (empty string) -> no memo instruction added (falsy).
 //   16. BROADCAST row surfaced by stale() for dispatcher recovery.
+//   17-20. REAL VizReleaseBroadcaster: persist-txid-before-send + confirm-by-id + drift.
+//   21-24. REAL TonMintBroadcaster: no-RPC happy path, persist-order-addr-before-send,
+//          orderExists short-circuit on recovery, re-broadcastable when order absent.
 //
 // Run (after `npm run build`): node tools/idempotent-delivery-spike.cjs
 const assert = require("node:assert");
@@ -29,7 +32,7 @@ const { planTransition, planChildren } = require("../packages/dispatcher/dist/po
 const { mintMessageB64 } = require("../packages/solana-watcher/dist/solanaSign.js");
 const { InMemoryGatewayStore, SqliteGatewayStore } = require("../packages/common/dist/store.js");
 const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
-const { VizReleaseBroadcaster } = require("../packages/coordinator/dist/adapters.js");
+const { VizReleaseBroadcaster, TonMintBroadcaster } = require("../packages/coordinator/dist/adapters.js");
 const { releaseTxId } = require("../packages/viz-watcher/dist/vizSign.js");
 const { mkdtempSync } = require("node:fs");
 const { tmpdir } = require("node:os");
@@ -530,6 +533,93 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     assert.strictEqual(id, "50a31d499a0846e96dd197d2d85df09b4ff25f36", "txid serialization drifted");
     assert.strictEqual(releaseTxId(p), id, "deterministic");
     console.log("[20] VIZ txid drift guard: pinned id stable for a fixed proposal OK");
+  }
+
+  // ── 21-24. REAL TonMintBroadcaster: persist-order-addr-before-send + orderExists ─
+  // A mock TON chain implementing only the methods the broadcaster uses. The next
+  // order address is deterministic (as in production, a pure function of the multisig
+  // + nextOrderSeqno); orderExists answers from a simulated on-chain set and counts its
+  // calls so we can prove the happy path (no persisted txid) does NO on-chain lookup.
+  function mockTonChain({ onchain = new Set(), nextAddr = "ORDER_ADDR_1", nextSeqno = "7" } = {}) {
+    let orderExistsCalls = 0;
+    const submitCalls = [];
+    return {
+      onchain,
+      submitCalls,
+      orderExistsCalls: () => orderExistsCalls,
+      nextOrderAddress: async () => ({ orderAddr: nextAddr, seqno: nextSeqno }),
+      orderExists: async (addr) => { orderExistsCalls++; return onchain.has(addr); },
+      submitMint: async (_p, _sigs) => { submitCalls.push(_sigs); return nextAddr; },
+    };
+  }
+
+  function enqueueTonPegIn(store, id) {
+    return store.enqueue({ id, direction: "PEG_IN", remoteChain: "TON",
+      recipient: "EQrecipient", sender: "alice", amountMilliViz: 100000n,
+      digest: "tondeadbeef", status: "QUEUED" });
+  }
+
+  // 21. Happy path: a fresh row has no txid -> actionExecuted returns false with ZERO
+  //     on-chain lookups. (This is the fix: the old stub always returned false, but it
+  //     ALSO never short-circuited a real recovery -> double-mint. Now false only when
+  //     nothing was persisted.)
+  {
+    const store = new InMemoryGatewayStore();
+    const action = { id: "ton1:0" };
+    await enqueueTonPegIn(store, action.id);
+    const chain = mockTonChain();
+    const b = new TonMintBroadcaster(chain, FEES, store);
+    const pre = await b.actionExecuted(action);
+    assert.strictEqual(pre.executed, false, "fresh TON row (no txid) -> not executed");
+    assert.strictEqual(chain.orderExistsCalls(), 0, "happy path does NO on-chain lookup");
+    console.log("[21] TON actionExecuted false + no RPC when no order address persisted OK");
+  }
+
+  // 22. broadcast persists the deterministic order address BEFORE submitMint sends, so a
+  //     crash mid-send leaves recovery pointing at the intended order.
+  {
+    const store = new InMemoryGatewayStore();
+    const action = { id: "ton2:0" };
+    await enqueueTonPegIn(store, action.id);
+    const chain = mockTonChain({ nextAddr: "ORDER_ADDR_2" });
+    let txidAtSend;
+    chain.submitMint = async () => { txidAtSend = (await store.get(action.id)).txid; return "ORDER_ADDR_2"; };
+    const b = new TonMintBroadcaster(chain, FEES, store);
+    const returned = await b.broadcast(action, { orderSeqno: "7" }, ["sigA"]);
+    assert.strictEqual(txidAtSend, "ORDER_ADDR_2", "order address persisted BEFORE submitMint");
+    assert.strictEqual((await store.get(action.id)).txid, "ORDER_ADDR_2", "txid == order address");
+    assert.strictEqual(returned, "ORDER_ADDR_2", "broadcast returns the order address");
+    console.log("[22] TON broadcast persists order address before send OK");
+  }
+
+  // 23. Recovery after the order landed: the row has a txid and the order EXISTS on-chain
+  //     -> actionExecuted short-circuits to executed:true (prevents the double-mint).
+  {
+    const store = new InMemoryGatewayStore();
+    const action = { id: "ton3:0" };
+    await enqueueTonPegIn(store, action.id);
+    const chain = mockTonChain({ onchain: new Set(["ORDER_ADDR_3"]), nextAddr: "ORDER_ADDR_3" });
+    const b = new TonMintBroadcaster(chain, FEES, store);
+    await b.broadcast(action, { orderSeqno: "7" }, ["sigA"]); // persists ORDER_ADDR_3
+    const rec = await b.actionExecuted(action);
+    assert.strictEqual(rec.executed, true, "persisted order addr + on-chain -> executed");
+    assert.strictEqual(rec.txid, "ORDER_ADDR_3", "short-circuit returns the order address");
+    console.log("[23] TON recovery short-circuits when the order exists on-chain OK");
+  }
+
+  // 24. Crash AFTER persisting the order address but BEFORE the new_order committed (send
+  //     failed): the row has a txid, but the order is NOT on chain -> actionExecuted returns
+  //     false so the dispatcher re-broadcasts. No double-mint, no stranding.
+  {
+    const store = new InMemoryGatewayStore();
+    const action = { id: "ton4:0" };
+    await enqueueTonPegIn(store, action.id);
+    const chain = mockTonChain({ onchain: new Set() }); // order never landed
+    const b = new TonMintBroadcaster(chain, FEES, store);
+    await store.setStatus(action.id, "BROADCAST", { txid: "ORDER_ADDR_1" });
+    const rec = await b.actionExecuted(action);
+    assert.strictEqual(rec.executed, false, "persisted addr but order absent -> re-broadcastable");
+    console.log("[24] TON crash-before-commit (addr persisted, order absent) -> re-broadcastable OK");
   }
 
   console.log("\nRESULT: idempotent delivery: actionExecuted short-circuit prevents double-mint/release;");

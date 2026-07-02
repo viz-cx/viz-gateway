@@ -188,8 +188,14 @@ row is wedged past `DISPATCHER_STALE_ALERT_MS` (default 1h): `REFUNDING` parents
 `createdAt` off the delivery list (a retrying row bumps `updated_at` every 10s, so it
 can't be aged by update time). Surfaces a degraded federation that can't sign.
 
-**#2 — idempotent delivery (🔴 double-mint/release): planned**, see
-[`plan-idempotent-delivery.md`](./plan-idempotent-delivery.md).
+**#2 — idempotent delivery (🔴 double-mint/release) ✅.** All three chains now close the
+BROADCAST-window double-mint/release gap via `Broadcaster.actionExecuted` + persist-before-send:
+VIZ (release-by-memo), Solana (mint memo carrying `action.id`), and TON — the last chain —
+via deterministic multisig order addresses (`orderExists`/`nextOrderAddress`), see
+[`plan-idempotent-delivery.md`](./plan-idempotent-delivery.md) and the TON follow-up
+[`plan-ton-peg-in-idempotency.md`](./plan-ton-peg-in-idempotency.md). TON proven live on
+testnet 2026-07-02 (`npm run e2e:ton:crash`): a SIGKILL after `new_order` lands recovers to
+`CONFIRMED` with `nextOrderSeqno` unchanged (no second order) and the recipient credited once.
 
 **F2 — signer independent source-event validation (🔴 theft vector) ✅.** The signer no
 longer trusts the coordinator-supplied `CanonicalAction`: before signing it re-reads the

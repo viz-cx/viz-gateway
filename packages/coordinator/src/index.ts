@@ -36,6 +36,7 @@ async function main(): Promise<void> {
           cfg.ton.finalityConfirmations,
         ),
         cfg.fees,
+        store,
       )
     : null;
   const solanaBroadcaster =
