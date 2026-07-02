@@ -44,12 +44,12 @@ async function main(): Promise<void> {
         },
       };
   // Fail fast: a signer wired for Solana peg-out cannot re-derive deposit addresses
-  // without the public master key, so refuse to start rather than reject every peg-out
-  // later with a cryptic key error.
-  if (cfg.solana.wvizMint && !cfg.solana.depositMasterPub) {
+  // without the deposit program ID, so refuse to start rather than reject every peg-out
+  // later with a cryptic error.
+  if (cfg.solana.wvizMint && !cfg.solana.depositProgramId) {
     throw new Error(
-      "DEPOSIT_MASTER_PUB is required when Solana peg-out is configured (SOLANA_WVIZ_MINT set); " +
-        "derive it once via masterPubFromSeed(SOLANA_DEPOSIT_MASTER_SEED).",
+      "SOLANA_DEPOSIT_PROGRAM_ID is required when Solana peg-out is configured (SOLANA_WVIZ_MINT set); " +
+        "it is the public burn-only deposit program ID used to re-derive deposit addresses.",
     );
   }
   // Read-only TON reader: getBurn bounded-scans the gateway jetton wallet on the operator's
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     solanaChain: solanaReader,
     tonChain: tonReader,
     store,
-    depositMasterPub: cfg.solana.depositMasterPub,
+    depositProgramId: cfg.solana.depositProgramId,
     // FEE_SWEEP/REFUND re-derivation: the operator's OWN fee config + fees.gate account,
     // never coordinator-fed, so a swept fee can only ever land at this operator's fees.gate.
     fees: cfg.fees,

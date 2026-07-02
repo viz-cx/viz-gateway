@@ -174,7 +174,7 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
    *
    * Fail-closed: returns null if the tx is unknown OR not yet final per the buffer
    * (the signer then refuses to sign). `from` is the burn AUTHORITY = the deposit
-   * owner address the signer re-derives from DEPOSIT_MASTER_PUB.
+   * owner address the signer re-derives as PDA from SOLANA_DEPOSIT_PROGRAM_ID.
    */
   async getBurn(sourceId: string): Promise<RemoteBurn | null> {
     const tx = await this.conn.getParsedTransaction(sourceId, {

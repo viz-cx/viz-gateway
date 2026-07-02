@@ -10,7 +10,7 @@ import {
   type VizChain,
   type VizDeposit,
 } from "@gateway/common";
-import { depositAddressFromMasterPub } from "@gateway/solana-watcher/dist/depositAddress";
+import { depositAddress } from "@gateway/solana-watcher/dist/depositAddress";
 
 /**
  * F2 — the signer's INDEPENDENT source-event validation.
@@ -51,8 +51,8 @@ export interface SourceValidatorDeps {
   tonChain: BurnReader;
   /** Shared deposit-address registry (peg-out routing identity). */
   store: Pick<GatewayStore, "depositAddressBy">;
-  /** Base58 DEPOSIT_MASTER_PUB — public derivation only, no spend authority. */
-  depositMasterPub: string;
+  /** Public program ID of the burn-only deposit program — used to re-derive deposit PDAs (F2). */
+  depositProgramId: string;
   /**
    * The operator's OWN fee configuration — used to independently re-derive the fee a
    * FEE_SWEEP is allowed to sweep. Must be the identical config every operator runs
@@ -249,21 +249,20 @@ async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps)
 }
 
 async function validateSolanaPegOut(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
-  if (!deps.depositMasterPub) {
-    throw new SourceMismatchError(`DEPOSIT_MASTER_PUB not configured; cannot validate Solana peg-out ${action.id}`);
+  if (!deps.depositProgramId) {
+    throw new SourceMismatchError(`SOLANA_DEPOSIT_PROGRAM_ID not configured; cannot validate Solana peg-out ${action.id}`);
   }
   const burn = await deps.solanaChain.getBurn(action.id);
   if (!burn) {
     throw new SourceMismatchError(`PEG_OUT burn ${action.id} not found or not yet finalized on Solana`);
   }
-  // The release target is implied by WHICH deposit address burned (no memo). Look it
-  // up, then re-derive the address from the VIZ account + public master key: a tampered
-  // registry row cannot redirect funds, because the binding is recomputed independently.
   const rec = await deps.store.depositAddressBy(burn.from);
   if (!rec) {
     throw new SourceMismatchError(`no registered deposit address for burn source ${burn.from} (${action.id})`);
   }
-  const expected = depositAddressFromMasterPub(deps.depositMasterPub, rec.vizAccount);
+  // Re-derive the deposit PDA from the VIZ account + public program ID. A tampered registry
+  // row cannot redirect the release: the binding is recomputed independently, trustlessly.
+  const expected = depositAddress(deps.depositProgramId, rec.vizAccount);
   if (expected !== burn.from) {
     throw new SourceMismatchError(
       `deposit-address binding mismatch for ${action.id}: derived ${expected} from "${rec.vizAccount}" != burn source ${burn.from}`,
