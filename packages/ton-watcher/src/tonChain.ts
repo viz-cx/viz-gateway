@@ -173,6 +173,36 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
   }
 
   /**
+   * Deterministic order address for the NEXT order this signer would create.
+   *
+   * TON multisig order addresses are a pure function of (multisig, orderSeqno),
+   * and `nextOrderSeqno` only advances when an order is actually created. So the
+   * next order address is a durable idempotency key we can persist BEFORE sending
+   * `sendNewOrder`: on crash recovery `orderExists()` tells us whether that exact
+   * order already landed, so we never propose a second (double-mint) order.
+   */
+  async nextOrderAddress(): Promise<{ orderAddr: string; seqno: string }> {
+    if (!this.multisigAddress) throw new Error("TON_MULTISIG_ADDRESS is required for nextOrderAddress");
+    const dataMultisig = this.client.open(Multisig.createFromAddress(Address.parse(this.multisigAddress)));
+    const data = await dataMultisig.getMultisigData();
+    const orderAddr = await dataMultisig.getOrderAddress(data.nextOrderSeqno);
+    return { orderAddr: orderAddr.toString(), seqno: data.nextOrderSeqno.toString() };
+  }
+
+  /**
+   * True if a multisig order at `orderAddr` is deployed on-chain (i.e. a new_order
+   * landed). This is the stronger, correct idempotency predicate: the order contract
+   * persists after it executes (its `executed` flag stays readable via get_order_data),
+   * so existence — not the executed flag — is what we must not duplicate. An order that
+   * exists but has not executed yet is still a commitment; re-broadcasting would create
+   * a SECOND order.
+   */
+  async orderExists(orderAddr: string): Promise<boolean> {
+    const state = await this.client.getContractState(Address.parse(orderAddr));
+    return state.state === "active";
+  }
+
+  /**
    * Submit a multisig-v2 new_order that mints `proposal.amountMilliViz` wVIZ
    * (= base units, 3 decimals) to `proposal.toAddress` via the standard governed
    * jetton minter. For a 1-of-1 setup, `approve_on_init=true` executes the mint

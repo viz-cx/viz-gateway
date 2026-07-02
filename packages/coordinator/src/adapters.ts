@@ -80,6 +80,7 @@ export class TonMintBroadcaster implements Broadcaster {
   constructor(
     private readonly chain: TonHttpChain,
     private readonly fees: GatewayFeeConfig,
+    private readonly store: IdempotencyStore,
   ) {}
 
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
@@ -87,12 +88,14 @@ export class TonMintBroadcaster implements Broadcaster {
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
     const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "TON"));
     if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
-    // The real orderHashHex must be the multisig-v2 order cell hash, built via
-    // the official wrapper. Until the contract is deployed we use the canonical
-    // action digest as a deterministic 32-byte stand-in so the ed25519 approval
-    // flow is exercisable; submitMintOrder still requires the wrapper to execute.
+    // orderSeqno is the real next multisig seqno (contract is deployed); it pins the
+    // deterministic order address used as the idempotency key in broadcast/actionExecuted.
+    // orderHashHex is still the canonical action digest as a 32-byte stand-in — the true
+    // order cell hash is built by the wrapper at submit time; the digest keeps the ed25519
+    // approval flow exercisable and stable per action.
+    const { seqno } = await this.chain.nextOrderAddress();
     const proposal: Proposal = {
-      orderSeqno: "0",
+      orderSeqno: seqno,
       toAddress: action.recipient,
       amountMilliViz: q.b.net.toString(),
       destProvisioned,
@@ -101,15 +104,34 @@ export class TonMintBroadcaster implements Broadcaster {
     return { proposal, feeMilliViz: q.b.fee };
   }
 
-  async broadcast(_action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
+  async broadcast(action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
+    // Persist-before-send: a TON order address is a pure function of
+    // (multisig, nextOrderSeqno), and nextOrderSeqno only advances when an order is
+    // actually created — so it is a durable idempotency key. We record it BEFORE
+    // sendNewOrder lands: on crash recovery actionExecuted() checks orderExists() and
+    // short-circuits instead of proposing a SECOND order (double-mint of real wVIZ).
+    //
+    // Residual window: this assumes a single-proposer gateway multisig (only this
+    // signer creates orders), so the seqno we reserve is the seqno we consume. If a
+    // DIFFERENT actor created order N between nextOrderAddress() and our send, we would
+    // persist an address that is not ours — impossible for the single-purpose gateway.
+    // Revisit for multi-proposer M-of-N by embedding action.id in the order payload
+    // (see docs/plan-ton-peg-in-idempotency.md §5).
+    const { orderAddr } = await this.chain.nextOrderAddress();
+    await this.store.setStatus(action.id, "BROADCAST", { txid: orderAddr });
     return this.chain.submitMint(proposal as never, signatures);
   }
 
-  async actionExecuted(_action: CanonicalAction): Promise<{ executed: boolean; txid?: string }> {
-    // TON live multisig-v2 order-status query is deferred until the contract is
-    // deployed (orderSeqno is still a stub "0"). Conservative: assume not executed
-    // so a crash recovery goes through the normal signing path.
-    return { executed: false };
+  async actionExecuted(action: CanonicalAction): Promise<{ executed: boolean; txid?: string }> {
+    const rec = await this.store.get(action.id);
+    // Persist-before-send invariant: a row with no txid never reached broadcast, so
+    // there is no order on-chain to find — return immediately, no RPC on the happy path.
+    if (!rec?.txid) return { executed: false };
+    // The order address was persisted before send. If that exact order exists on-chain
+    // the new_order committed (executed or not) and must NOT be re-proposed; if it never
+    // landed (send crashed before commit) it is safe to re-broadcast the identical order.
+    const exists = await this.chain.orderExists(rec.txid);
+    return exists ? { executed: true, txid: rec.txid } : { executed: false };
   }
 }
 

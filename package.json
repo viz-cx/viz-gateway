@@ -32,7 +32,8 @@
     "rotate": "node setup-viz/dist/rotate.js",
     "rotate:ton": "node contracts/ton/dist/rotateTon.js",
     "rotate:solana": "node contracts/solana/dist/rotateSolana.js",
-    "e2e:ton": "npm run build && node tools/e2e/dist/roundtrip.js ton"
+    "e2e:ton": "npm run build && node tools/e2e/dist/roundtrip.js ton",
+    "e2e:ton:crash": "npm run build && node tools/e2e/dist/crash-recovery.js"
   },
   "engines": {
     "node": ">=20"
