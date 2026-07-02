@@ -3,7 +3,6 @@ import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { Keypair } from "@solana/web3.js";
 import { SolanaChain } from "./solanaChain";
-import { masterPubFromSeed } from "./depositAddress";
 import { classifySeenRecovery, guardPegOut } from "./pegoutGuard";
 
 /**
@@ -24,8 +23,10 @@ import { classifySeenRecovery, guardPegOut } from "./pegoutGuard";
 async function main(): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.solana.wvizMint) throw new Error("SOLANA_WVIZ_MINT is required");
-  if (!cfg.solana.depositMasterSeed) throw new Error("SOLANA_DEPOSIT_MASTER_SEED is required");
   if (!cfg.solana.submitterSecret) throw new Error("SOLANA_SUBMITTER_SECRET is required (pays burn fees)");
+  if (!cfg.solana.depositProgramId) throw new Error("SOLANA_DEPOSIT_PROGRAM_ID is required");
+
+  const submitter = Keypair.fromSecretKey(cfg.solana.submitterSecret);
 
   const chain = new SolanaChain(
     cfg.solana.rpcUrl,
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
     cfg.solana.finalitySlots,
     { multisig: cfg.solana.multisig, nonceAccount: cfg.solana.nonceAccount, submitterSecret: cfg.solana.submitterSecret },
     { maxSignatures: cfg.solana.scanMaxSignatures, txDelayMs: cfg.solana.scanTxDelayMs },
+    cfg.solana.depositProgramId,
   );
   const store = createStore(cfg.storeUrl);
   // Same shared rolling-24h caps the watchers apply, so a large deposit-address
@@ -51,11 +53,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 
-  console.log(`[pegout-scanner] mint=${cfg.solana.wvizMint} batch=${cfg.solana.scanAddressBatch}`);
-  // Audit F-4: log the derived master pub so operators diff it against the DEPOSIT_MASTER_PUB
-  // published to signers — a mismatch means this sweeper cannot spend the addresses signers
-  // validate releases against (silent config drift across processes).
-  console.log(`[pegout-scanner] deposit master pub = ${masterPubFromSeed(cfg.solana.depositMasterSeed)} (must equal signers' DEPOSIT_MASTER_PUB)`);
+  console.log(`[pegout-scanner] mint=${cfg.solana.wvizMint} batch=${cfg.solana.scanAddressBatch} deposit program=${cfg.solana.depositProgramId}`);
 
   // A PEG_OUT row left in SEEN past this is a crash between burn and the QUEUED
   // hand-off. The scanner checkpoints the burn signature onto the row (txid) right
@@ -144,10 +142,12 @@ async function main(): Promise<void> {
           }
 
           try {
-            // Burn first (supply down -> over-backing window, the safe direction).
-            // TODO(Task 5): pass the real payer keypair from cfg.solana.submitterSecret.
-            const payer = Keypair.fromSecretKey(cfg.solana.submitterSecret);
-            const burnSig = await chain.burnFromDeposit({ vizAccount: dep.vizAccount, amount: t.amountBaseUnits, payer });
+            // Burn first (supply down -> over-backing window, the safe direction). The burn is
+            // permissionless and harmless: the program has no transfer path, so this cannot
+            // redirect funds. The submitter signs only the tx fee. burnFromDeposit returns
+            // optimistically after sendRawTransaction; confirmation is handled by the stale-SEEN
+            // recovery path above (signatureLanded) so a dropped tx is retried on next scan.
+            const burnSig = await chain.burnFromDeposit({ vizAccount: dep.vizAccount, amount: t.amountBaseUnits, payer: submitter });
             await breaker.record(action.amountMilliViz); // count only burns that actually happened
             // Checkpoint the burn signature (still SEEN) BEFORE the QUEUED hand-off, so a
             // crash in the gap is self-healing: stale-SEEN recovery checks whether it landed.

@@ -62,6 +62,7 @@ export interface GatewayConfig {
     submitterMinLamports: number; // reserve alert floor for the submitter SOL balance
     depositMasterSeed: string; // hot seed deriving per-VIZ-account peg-out deposit addresses (scanner/sweeper only)
     depositMasterPub: string; // PUBLIC master key (base58) for signer-side deposit-address re-derivation (F2)
+    depositProgramId: string; // on-chain gateway program that owns the PDA burn authority (peg-out scanner)
     lookupListen: string; // host:port for the deposit-address lookup service
   };
   coordinator: { url: string; listen: string; signerEndpoints: string[] };
@@ -239,6 +240,9 @@ export function loadConfig(): GatewayConfig {
       // (F2 peg-out source validation). Safe to publish; derive from the seed via
       // masterPubFromSeed(). Required on a signer that handles Solana peg-out.
       depositMasterPub: opt("DEPOSIT_MASTER_PUB", ""),
+      // On-chain gateway program that owns the PDA burn authority. The peg-out scanner
+      // passes this to SolanaChain so burnFromDeposit can issue the burn_deposit ix.
+      depositProgramId: opt("SOLANA_DEPOSIT_PROGRAM_ID", ""),
       lookupListen: opt("LOOKUP_LISTEN", "127.0.0.1:8095"),
     },
     coordinator: {
