@@ -3,20 +3,15 @@
 // Proves the core security fix: a compromised coordinator that hands an honest signer a
 // mutually-consistent (action, proposal) pair for a tampered/non-existent source event is
 // REJECTED, because the signer re-derives the action from its OWN chain view and asserts
-// byte-identical equality. Also proves the additive ed25519 split: the deposit address is
-// re-derivable from the PUBLIC master key alone, and the secret-side scalar still produces
-// signatures that verify (the sweeper's burn authority).
+// byte-identical equality. Also proves the PDA-based deposit binding: the deposit address
+// is re-derivable from the PUBLIC program ID alone, with no private key anywhere.
 //
 // Run (after `npm run build`): node tools/signer-f2-spike.cjs
-const assert = require("node:assert");
 const { canonicalPegIn, canonicalPegOut } = require("@gateway/common");
 const { validateAction, SourceMismatchError } = require("../packages/signer/dist/sourceValidator.js");
 const {
-  masterPubFromSeed,
-  depositAddressFromMasterPub,
-  deriveDepositSigner,
+  depositAddress,
 } = require("../packages/solana-watcher/dist/depositAddress.js");
-const { ed25519 } = require("@noble/curves/ed25519.js");
 
 let failures = 0;
 const ok = (msg) => console.log(`[PASS] ${msg}`);
@@ -38,10 +33,9 @@ async function expectReject(promise, label) {
 
 (async () => {
   // --- shared fixtures ----------------------------------------------------------
-  const SEED = "f2-spike-master-seed-not-for-prod";
-  const MPUB = masterPubFromSeed(SEED);
+  const FAKE_PROGRAM_ID = "GateWayDep1111111111111111111111111111111111"; // deterministic fake
   const VIZ_ACCT = "alice";
-  const ALICE_DEPOSIT = depositAddressFromMasterPub(MPUB, VIZ_ACCT);
+  const ALICE_DEPOSIT = depositAddress(FAKE_PROGRAM_ID, VIZ_ACCT);
   const SOL_RECIPIENT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"; // a base58 owner
   // A Solana-signature-shaped id (86-90 base58 chars) so PEG_OUT dispatch picks Solana.
   const SOL_SIG = "5".repeat(88);
@@ -63,12 +57,22 @@ async function expectReject(promise, label) {
   const solanaReturning = (burn) => ({ getBurn: async () => burn });
   const storeWith = (rec) => ({ depositAddressBy: async () => rec });
 
+  const FEES = {
+    floorMilliViz: 10_000n,
+    bps: 20,
+    activationSurchargeMilliViz: { SOLANA: 10_000n, TON: 10_000n },
+    mintGasFloorMilliViz: { SOLANA: 1_000n, TON: 1_000n },
+  };
+  const FEES_GATE = "fees.gate";
+
   const depsPegIn = (deposit) => ({
     vizChain: vizChainReturning(deposit),
     solanaChain: solanaReturning(null),
     tonChain: solanaReturning(null),
     store: storeWith(undefined),
-    depositMasterPub: MPUB,
+    depositProgramId: FAKE_PROGRAM_ID,
+    fees: FEES,
+    feesGateAccount: FEES_GATE,
   });
 
   // ============================ PEG_IN cases ====================================
@@ -117,7 +121,7 @@ async function expectReject(promise, label) {
   const trueBurn = {
     sourceId: SOL_SIG,
     height: 1234,
-    from: ALICE_DEPOSIT, // burn authority = alice's deposit address
+    from: ALICE_DEPOSIT, // burn authority = alice's PDA deposit address
     amountMilliViz: 500_000n,
     homeDestination: "",
   };
@@ -126,7 +130,9 @@ async function expectReject(promise, label) {
     solanaChain: solanaReturning(burn),
     tonChain: solanaReturning(null),
     store: storeWith(rec),
-    depositMasterPub: MPUB,
+    depositProgramId: FAKE_PROGRAM_ID,
+    fees: FEES,
+    feesGateAccount: FEES_GATE,
   });
   const aliceRec = { vizAccount: VIZ_ACCT, solAddress: ALICE_DEPOSIT, wvizAta: "ata", createdAt: 0, scanTime: 0, priority: 0 };
 
@@ -144,8 +150,8 @@ async function expectReject(promise, label) {
   }
 
   // 5b) Tampered registry binding: a registry row claims alice's deposit address belongs
-  //     to "bob"; the binding re-derivation from "bob" != alice's address -> rejected
-  //     (proves a poisoned registry cannot redirect funds).
+  //     to "bob"; the PDA re-derivation depositAddress(programId, "bob") != alice's address
+  //     -> rejected (proves a poisoned registry cannot redirect funds).
   {
     const action = canonicalPegOut({ ...trueBurn, homeDestination: "bob" });
     const poisoned = { ...aliceRec, vizAccount: "bob" };
@@ -182,31 +188,12 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: "not-a-known-shape" }, aliceRec)), "6d unknown-shape PEG_OUT refused (fail-closed)");
   }
 
-  // ===================== additive ed25519 key roundtrip =========================
-  // The whole peg-out arm rests on: a deposit address derived from the PUBLIC master
-  // key alone == the address derived from the secret scalar, AND the scalar can still
-  // sign (the sweeper's burn authority).
-  {
-    const pubSide = depositAddressFromMasterPub(MPUB, VIZ_ACCT);
-    const signer = deriveDepositSigner(SEED, VIZ_ACCT);
-    const secretSide = signer.publicKey.toBase58();
-    assert.strictEqual(pubSide, secretSide, "public-derived address must equal scalar-derived address");
-    ok("7a additive derivation: public-only address == scalar-derived address");
-
-    const msg = new Uint8Array(Buffer.from("burn skeleton bytes for alice's deposit"));
-    const sig = signer.signMessage(msg);
-    const pubBytes = signer.publicKey.toBytes();
-    assert.strictEqual(ed25519.verify(sig, msg, pubBytes), true, "scalar signature must verify");
-    assert.strictEqual(ed25519.verify(sig, new Uint8Array(Buffer.from("other")), pubBytes), false, "must reject wrong msg");
-    ok("7b additive derivation: scalar signature verifies under derived pubkey, rejects tamper");
-  }
-
   if (failures > 0) {
     console.error(`\nRESULT: ${failures} FAILED`);
     process.exit(1);
   }
   console.log("\nRESULT: F2 source validation rejects forged peg-in/peg-out actions;");
-  console.log("additive ed25519 split derives matching addresses and a valid burn signer.");
+  console.log("PDA-based deposit binding re-derives addresses trustlessly (no secret needed).");
 })().catch((e) => {
   console.error(e);
   process.exit(1);

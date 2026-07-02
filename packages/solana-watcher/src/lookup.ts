@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { createStore, loadConfig } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
-import { depositAddress, depositAta, masterPubFromSeed } from "./depositAddress";
+import { depositAddress, depositAta } from "./depositAddress";
 import { resolveDepositAddress } from "./lookupValidate";
 
 /**
@@ -20,12 +20,9 @@ import { resolveDepositAddress } from "./lookupValidate";
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  if (!cfg.solana.depositMasterSeed) throw new Error("SOLANA_DEPOSIT_MASTER_SEED is required for the lookup service");
+  if (!cfg.solana.depositProgramId) throw new Error("SOLANA_DEPOSIT_PROGRAM_ID is required for the lookup service");
   if (!cfg.solana.wvizMint) throw new Error("SOLANA_WVIZ_MINT is required");
-  // Audit F-4: seed↔pub consistency is otherwise unchecked. Log the derived master pub so
-  // operators diff it against the DEPOSIT_MASTER_PUB published to signers — a mismatch means
-  // signers validate against a different address than this service issues (funds unroutable).
-  console.log(`[lookup] deposit master pub = ${masterPubFromSeed(cfg.solana.depositMasterSeed)} (must equal signers' DEPOSIT_MASTER_PUB)`);
+  console.log(`[lookup] deposit program = ${cfg.solana.depositProgramId}`);
   const store = createStore(cfg.storeUrl);
   const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
   const [host, portStr] = cfg.solana.lookupListen.split(":");
@@ -45,8 +42,8 @@ async function main(): Promise<void> {
       try {
         const decision = await resolveDepositAddress(url.searchParams.get("viz_account"), {
           accountExists: (name) => viz.accountExists(name),
-          depositAddress: (name) => depositAddress(cfg.solana.depositMasterSeed, name),
-          depositAta: (name) => depositAta(cfg.solana.depositMasterSeed, name, cfg.solana.wvizMint),
+          depositAddress: (name) => depositAddress(cfg.solana.depositProgramId, name),
+          depositAta: (name) => depositAta(cfg.solana.depositProgramId, name, cfg.solana.wvizMint),
         });
         if (decision.status !== 200) {
           json(decision.status, decision.body);

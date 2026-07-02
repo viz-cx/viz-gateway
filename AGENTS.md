@@ -77,6 +77,38 @@ informational lag, not live exposure.
 - **Secrets**: never commit `.env` (only `.env.example`). The public federation manifest (`federation.json`,
   operator ids + pubkeys) is committable; per-operator keys are not.
 
+## Solana program (`contracts/solana`)
+
+The `contracts/solana/` directory contains both TypeScript deploy scripts (Token-2022 mint) and a
+native Rust/Anchor program (`programs/gateway-deposit`). The Anchor workspace is rooted at
+`contracts/solana/Anchor.toml`.
+
+**Toolchain versions (installed 2026-07-02):**
+| Tool | Version |
+|------|---------|
+| `rustc` (host, via rustup) | 1.96.1 |
+| `rustc` (pinned, via `rust-toolchain.toml`) | 1.89.0 — used for all `contracts/solana` builds |
+| `solana-cli` (Agave) | 3.1.10 |
+| `anchor-cli` (avm) | 1.1.2 |
+
+**Prerequisites:** Rust (`rustup`), Agave Solana CLI, and `avm` must be installed and on PATH.
+Add to your shell profile:
+```bash
+source "$HOME/.cargo/env"
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+```
+
+**Build & test commands:**
+```bash
+cd contracts/solana
+anchor build          # compiles the Anchor program; produces target/idl/gateway_deposit.json
+anchor test           # runs the Anchor test suite (litesvm-based)
+```
+
+**Security note:** `target/deploy/gateway_deposit-keypair.json` is the on-chain program keypair —
+treat it as a deploy secret. It is git-ignored via `contracts/solana/.gitignore`. **Never commit it.**
+The IDL (`target/idl/gateway_deposit.json`) IS committed (it is a build artifact needed by the TS client).
+
 ## Operator rotation (VIZ side, implemented)
 
 `npm run rotate -- propose|co-sign|broadcast viz`. A rotation is one VIZ `account_update` rewriting

@@ -89,12 +89,23 @@ function tonChainWith(txs) {
   return chain;
 }
 
+const FEES = {
+  floorMilliViz: 10_000n,
+  bps: 20,
+  activationSurchargeMilliViz: { SOLANA: 10_000n, TON: 10_000n },
+  mintGasFloorMilliViz: { SOLANA: 1_000n, TON: 1_000n },
+};
+const FEES_GATE = "fees.gate";
+const FAKE_PROGRAM_ID = "GateWayDep1111111111111111111111111111111111";
+
 const depsWith = (chain) => ({
   vizChain: { getDeposit: async () => null },
   solanaChain: { getBurn: async () => null },
   tonChain: chain,
   store: { depositAddressBy: async () => undefined },
-  depositMasterPub: "",
+  fees: FEES,
+  feesGateAccount: FEES_GATE,
+  depositProgramId: FAKE_PROGRAM_ID,
 });
 
 (async () => {

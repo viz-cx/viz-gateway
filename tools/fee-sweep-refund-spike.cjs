@@ -64,7 +64,6 @@ async function expectReject(promise, label) {
     solanaChain: { getBurn: async () => null },
     tonChain: { getBurn: async () => null },
     store: { depositAddressBy: async () => undefined },
-    depositMasterPub: "unused-for-internal-releases",
     fees,
     feesGateAccount: FEES_GATE,
   });

@@ -1,0 +1,5 @@
+.anchor
+target/deploy/*-keypair.json
+target/bpfel-unknown-unknown/
+test-ledger/
+node_modules/

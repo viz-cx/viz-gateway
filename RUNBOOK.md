@@ -183,27 +183,41 @@ security guarantee.
 > derived fee band `[base, base + activationSurcharge]`; a REFUND may only return the GROSS
 > deposit to its original sender. Both bind the child digest to the parent PEG_IN digest.
 
-For Solana **peg-out**, the signer re-derives the per-account deposit address to confirm
-the release target, using a **public** master key (no spend authority):
+For Solana **peg-out**, every signer independently re-derives the deposit address as a
+pure PDA — no secret required:
 
-- The single sweep service still holds the secret `SOLANA_DEPOSIT_MASTER_SEED`.
-- Every signer sets `DEPOSIT_MASTER_PUB` — derive it from the seed once and publish it:
+```bash
+node -e 'console.log(require("./packages/solana-watcher/dist/depositAddress.js").depositAddress(process.env.SOLANA_DEPOSIT_PROGRAM_ID, "alice"))'
+```
 
-  ```bash
-  node -e 'console.log(require("./packages/solana-watcher/dist/depositAddress.js").masterPubFromSeed(process.env.SOLANA_DEPOSIT_MASTER_SEED))'
-  ```
+Set `SOLANA_DEPOSIT_PROGRAM_ID` to the deployed gateway-deposit program ID
+(`MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1` on devnet/mainnet after deploy).
+No seed, no `DEPOSIT_MASTER_PUB`. F2 source validation is a pure PDA re-derivation:
+`depositAddress(programId, vizAccount)` must equal the burn source address, deterministically.
 
-> ⚠️ **Verify seed↔pub consistency (audit F-4).** The seed-holding services (lookup +
-> peg-out scanner) log `deposit master pub = <base58>` on boot. That value **must** equal
-> the `DEPOSIT_MASTER_PUB` you publish to signers — a mismatch means signers validate
-> releases against an address the sweeper cannot spend, so peg-out silently breaks. The
-> seed itself must be ≥32 chars of high entropy (`openssl rand -base64 32`); a shorter seed
-> is rejected at boot. See `docs/audit-ed25519-additive-derivation.md`.
+> The burn-only program holds no private key. All funds arriving at a PDA can only be
+> burned by the `burn_deposit` instruction — there is no transfer path. Upgrade authority
+> must be set to the M-of-N multisig (see `contracts/solana/PROVENANCE.md`).
 
-> ⚠️ **Breaking change (pre-launch):** deposit-address derivation switched from the old
-> HMAC scheme to **additive ed25519** (domain `viz-gateway:peg-out:v2`), so every deposit
-> address changes. On deploy of this change, **clear the `deposit_addresses` table**
-> (re-registered on next lookup) — no migration, this is pre-funds.
+### Cutover runbook: seed-based addresses → PDA addresses
+
+This cutover is required when migrating from the old additive-ed25519 scheme to PDA custody.
+Execute in order, with the gateway **paused** between steps 2 and 5.
+
+1. **Deploy** `gateway_deposit` to devnet then mainnet; verify the program ID matches
+   `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1`; set the upgrade authority to the M-of-N
+   multisig; record the program ID and provenance in `contracts/solana/PROVENANCE.md`.
+2. **Reconfigure** lookup, scanner, and all signers: set `SOLANA_DEPOSIT_PROGRAM_ID`;
+   remove `SOLANA_DEPOSIT_MASTER_SEED` and `DEPOSIT_MASTER_PUB` from every host.
+3. **Freeze issuance** of old additive deposit addresses: deploy the new lookup service
+   (which issues PDA addresses only and rejects new additive-scheme registrations).
+4. **Drain** any funds still sitting at old additive deposit ATAs: run a **final** pass of
+   the retiring seed-based sweeper to detect and release those peg-outs normally before
+   decommissioning it.
+5. **Clear** the `deposit_addresses` table; let PDA addresses be re-issued on demand
+   (the lookup service re-derives them deterministically from `programId` + VIZ account).
+6. **Destroy** `SOLANA_DEPOSIT_MASTER_SEED` from all secret stores (vaults, CI, operator
+   machines). This key has no further purpose once step 4 is complete.
 
 ## 6. Fund the TON gas
 
@@ -345,6 +359,49 @@ SOLANA_RPC_URL=http://127.0.0.1:8899 PROOF_DIR=$S \
 >   its SPL-Memo action-id marker.
 > - Public devnet faucet is rate-limited (per the rotation dry-run); a local
 >   `solana-test-validator` exercises identical program paths (Token-2022 + SPL multisig).
+
+## How peg-out burn works on Solana
+
+Each VIZ account is mapped to a **program-derived deposit address** (PDA) under the
+`gateway_deposit` program. Users send wVIZ directly to that PDA's ATA. The scanner
+calls `burn_deposit` to burn the tokens in-place; there is no transfer path.
+
+PDA derivation: `["deposit", utf8(vizAccount)]` under `programId`. Re-derivation is
+deterministic and requires no secret — every signer independently verifies the burn
+source is the correct PDA for the claimed VIZ account.
+
+Peg-out flow per deposit:
+
+1. `solana-watcher` detects a wVIZ balance at the deposit ATA for a known VIZ account.
+2. It posts the peg-out action to the coordinator (amount = ATA balance).
+3. Each signer independently re-derives `depositAddress(programId, vizAccount)` and
+   confirms it equals the reported burn source (F2 = pure PDA re-derivation, no secret).
+4. `SolanaChain.burnFromDeposit` calls `burn_deposit` on-chain, burning the tokens.
+5. The VIZ release is broadcast once `M` signers have approved.
+
+To re-run the peg-out proof against a fresh local cluster:
+
+```bash
+source ~/.cargo/env
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+solana-test-validator -r &
+sleep 5
+node tools/solana-pegout-proof.cjs
+kill %1
+```
+
+The script deploys `gateway_deposit`, creates a Token-2022 wVIZ mint, mints to the
+deposit PDA ATA, calls `burn_deposit`, and asserts balance and supply dropped by the
+burned amount.
+
+> **Verification record — PROVEN (local cluster, 2026-07-02).**
+> Agave `solana-test-validator` 3.1.10, RPC `http://127.0.0.1:8899`.
+> - [x] gateway-deposit program `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1` deployed from `.so`
+> - [x] wVIZ mint `2LTnfuwiLAJfChKWUKxPTjpZezBjJH4eo9MazkTxEA9E` (Token-2022, 3 dec)
+> - [x] deposit PDA for "alice": `GEo4u7eJaj8ZdZGtjwN1Vc2UaaiVJoafoiyMWM6wgKNm`
+> - [x] minted 5 000 000 to deposit ATA; burned 3 000 000 via `burn_deposit`
+> - [x] balance `5000000 → 2000000` (delta −3 000 000); supply identical
+> - [x] burn sig `5mShvpRPocWWfe14JYwC5hiK5YUN5xXeUth1CBm72bhUBUEiojV8ja7qTuFLZxzXcsYhgVTFT58qYqF4dvL7DUuU`
 
 ## 10. Verify & drills
 
