@@ -1,8 +1,8 @@
 import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
-import { createBurnInstruction, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import type { RemoteBurn, RemoteChain, SolanaMintProposal } from "@gateway/common";
 import { buildSignedMintTx, mintMessageB64 } from "./solanaSign";
-import type { DepositSigner } from "./depositAddress";
+import { buildBurnDepositIx } from "./depositAddress";
 
 /**
  * Solana remote-chain adapter (read paths live; mint write-path deferred).
@@ -35,6 +35,29 @@ export function pubkeyOf(secret: Uint8Array): string {
   return Keypair.fromSecretKey(secret).publicKey.toBase58();
 }
 
+/**
+ * Build an unsigned Transaction containing the single burn_deposit instruction.
+ * Pure (no RPC). Used by burnFromDeposit and by the deposit-pda-spike.cjs test.
+ */
+export function buildBurnTxForTest(args: {
+  programId: string;
+  mint: string;
+  vizAccount: string;
+  amount: bigint;
+  payer: PublicKey;
+}): Transaction {
+  const tx = new Transaction().add(
+    buildBurnDepositIx({
+      programId: args.programId,
+      vizAccount: args.vizAccount,
+      amount: args.amount,
+      mint: args.mint,
+    }),
+  );
+  tx.feePayer = args.payer;
+  return tx;
+}
+
 export class SolanaChain implements RemoteChain<SolanaMintProposal> {
   private readonly conn: Connection;
   private readonly mint: PublicKey;
@@ -49,6 +72,8 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     nonceAccount: string;
     submitterSecret: Uint8Array;
   } | null;
+  /** Gateway deposit program ID for PDA-based burn. Empty string = not configured. */
+  private readonly depositProgramId: string;
 
   constructor(
     rpcUrl: string,
@@ -57,6 +82,7 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     finalitySlots: number,
     writer: { multisig: string; nonceAccount: string; submitterSecret: Uint8Array } | null = null,
     scan: SolanaScanOpts = {},
+    depositProgramId = "",
   ) {
     this.conn = new Connection(rpcUrl, "finalized");
     this.mint = new PublicKey(mintAddress);
@@ -65,6 +91,7 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     this.maxSignatures = Math.max(1, scan.maxSignatures ?? 25);
     this.txDelayMs = Math.max(0, scan.txDelayMs ?? 0);
     this.writer = writer;
+    this.depositProgramId = depositProgramId;
   }
 
   async finalizedHeight(): Promise<number> {
@@ -90,33 +117,24 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
   }
 
   /**
-   * Burn wVIZ received on a peg-out deposit ATA (Variant A, E5). MUST run BEFORE
-   * the VIZ release so circulating supply drops first (over-backing window, safe);
-   * releasing before burning would briefly under-back and trip recon. The deposit
-   * address is the token-account owner (burn authority); the submitter pays fees.
-   *
-   * The deposit key is an ADDITIVELY-derived ed25519 scalar (F2), not a seed-based
-   * Keypair, so it signs via `deposit.signMessage` over the compiled message rather
-   * than `tx.sign(depositKeypair)`. The submitter (a normal Keypair) partial-signs
-   * the fee payer slot; the deposit signature is attached with addSignature.
+   * Burn wVIZ held in a peg-out deposit PDA's ATA via the gateway burn_deposit
+   * program instruction (Variant A, E5). MUST run BEFORE the VIZ release so
+   * circulating supply drops first (over-backing window, safe). The PDA is the
+   * burn authority; only the payer Keypair signs (fee only). No deposit scalar needed.
    */
-  async burnFromDeposit(deposit: DepositSigner, amountBaseUnits: bigint): Promise<string> {
-    if (!this.writer) throw new Error("SolanaChain has no writer config; cannot burn");
-    const submitter = Keypair.fromSecretKey(this.writer.submitterSecret);
-    const ata = getAssociatedTokenAddressSync(this.mint, deposit.publicKey, false, TOKEN_2022_PROGRAM_ID);
-    const ix = createBurnInstruction(ata, this.mint, deposit.publicKey, amountBaseUnits, [], TOKEN_2022_PROGRAM_ID);
-    const { blockhash } = await this.conn.getLatestBlockhash();
-    const tx = new Transaction();
-    tx.feePayer = submitter.publicKey;
+  async burnFromDeposit(args: { vizAccount: string; amount: bigint; payer: Keypair }): Promise<string> {
+    if (!this.depositProgramId) throw new Error("SolanaChain has no depositProgramId; cannot burn via program");
+    const tx = buildBurnTxForTest({
+      programId: this.depositProgramId,
+      mint: this.mint.toBase58(),
+      vizAccount: args.vizAccount,
+      amount: args.amount,
+      payer: args.payer.publicKey,
+    });
+    const { blockhash } = await this.conn.getLatestBlockhash("finalized");
     tx.recentBlockhash = blockhash;
-    tx.add(ix);
-    // Fee payer signs normally; the deposit owner signs its scalar over the message.
-    tx.partialSign(submitter);
-    const sig = deposit.signMessage(new Uint8Array(tx.serializeMessage()));
-    tx.addSignature(deposit.publicKey, Buffer.from(sig));
-    const txSig = await this.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-    await this.confirmSignature(txSig);
-    return txSig;
+    tx.sign(args.payer);
+    return this.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
   }
 
   async finalizedBurnsSince(_fromSlot: number, toSlot: number): Promise<RemoteBurn[]> {
