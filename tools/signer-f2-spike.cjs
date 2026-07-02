@@ -99,6 +99,17 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(action, depsPegIn(null)), "3b PEG_IN source not irreversible");
   }
 
+  // 3c) Mutated id, same source event: a compromised coordinator keeps the honest
+  //     digest (which binds "<trxId>:<opIndex>") but appends a trailing char to the id
+  //     ("...:0x"). A lenient opIndex parse used to resolve this to the REAL deposit and
+  //     pass every field check, forging a distinct outbox key / Solana memo -> a SECOND
+  //     mint for one deposit. Must now fail closed (strict parse + id equality).
+  {
+    const honest = canonicalPegIn(trueDeposit);
+    const forged = { ...honest, id: `${honest.id}x` }; // digest still binds the real id
+    await expectReject(validateAction(forged, depsPegIn(trueDeposit)), "3c mutated PEG_IN id (double-mint replay)");
+  }
+
   // =========================== PEG_OUT (Solana) =================================
 
   // The TRUE burn the operator's own Solana node would return (homeDestination filled
