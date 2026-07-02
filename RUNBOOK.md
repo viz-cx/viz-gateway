@@ -193,6 +193,13 @@ the release target, using a **public** master key (no spend authority):
   node -e 'console.log(require("./packages/solana-watcher/dist/depositAddress.js").masterPubFromSeed(process.env.SOLANA_DEPOSIT_MASTER_SEED))'
   ```
 
+> ⚠️ **Verify seed↔pub consistency (audit F-4).** The seed-holding services (lookup +
+> peg-out scanner) log `deposit master pub = <base58>` on boot. That value **must** equal
+> the `DEPOSIT_MASTER_PUB` you publish to signers — a mismatch means signers validate
+> releases against an address the sweeper cannot spend, so peg-out silently breaks. The
+> seed itself must be ≥32 chars of high entropy (`openssl rand -base64 32`); a shorter seed
+> is rejected at boot. See `docs/audit-ed25519-additive-derivation.md`.
+
 > ⚠️ **Breaking change (pre-launch):** deposit-address derivation switched from the old
 > HMAC scheme to **additive ed25519** (domain `viz-gateway:peg-out:v2`), so every deposit
 > address changes. On deploy of this change, **clear the `deposit_addresses` table**

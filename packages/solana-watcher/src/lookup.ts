@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { createStore, loadConfig } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
-import { depositAddress, depositAta } from "./depositAddress";
+import { depositAddress, depositAta, masterPubFromSeed } from "./depositAddress";
 import { resolveDepositAddress } from "./lookupValidate";
 
 /**
@@ -22,6 +22,10 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.solana.depositMasterSeed) throw new Error("SOLANA_DEPOSIT_MASTER_SEED is required for the lookup service");
   if (!cfg.solana.wvizMint) throw new Error("SOLANA_WVIZ_MINT is required");
+  // Audit F-4: seed↔pub consistency is otherwise unchecked. Log the derived master pub so
+  // operators diff it against the DEPOSIT_MASTER_PUB published to signers — a mismatch means
+  // signers validate against a different address than this service issues (funds unroutable).
+  console.log(`[lookup] deposit master pub = ${masterPubFromSeed(cfg.solana.depositMasterSeed)} (must equal signers' DEPOSIT_MASTER_PUB)`);
   const store = createStore(cfg.storeUrl);
   const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
   const [host, portStr] = cfg.solana.lookupListen.split(":");
