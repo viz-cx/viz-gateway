@@ -135,5 +135,12 @@ export type GatewayDeposit = {
         }
       ]
     }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "accountNameTooLong",
+      "msg": "viz_account must be ≤ 16 bytes (Graphene account name limit)"
+    }
   ]
 };

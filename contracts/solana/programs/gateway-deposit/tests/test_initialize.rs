@@ -178,6 +178,111 @@ fn burns_exactly_amount_from_deposit_ata() {
     assert_eq!(tok_after.amount, 600, "balance after burn should be 600");
 }
 
+// ──── test: 17-byte viz_account is rejected with AccountNameTooLong ──────────
+
+#[test]
+fn rejects_viz_account_longer_than_16_bytes() {
+    let mut svm = make_svm();
+
+    let so_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("target/deploy/gateway_deposit.so");
+    let so_bytes = std::fs::read(&so_path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {}", so_path.display(), e));
+    svm.add_program(GATEWAY_DEPOSIT_PROGRAM_ID, &so_bytes)
+        .unwrap();
+
+    let payer = Keypair::new();
+    svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+    // Create Token-2022 mint.
+    let mint_kp = Keypair::new();
+    let mint_rent = svm.minimum_balance_for_rent_exemption(spl_token_2022_interface::state::Mint::LEN);
+    let create_mint_acc_ix = solana_system_interface::instruction::create_account(
+        &payer.pubkey(),
+        &mint_kp.pubkey(),
+        mint_rent,
+        spl_token_2022_interface::state::Mint::LEN as u64,
+        &TOKEN_2022_PROGRAM_ID,
+    );
+    let init_mint_ix = initialize_mint2(
+        &TOKEN_2022_PROGRAM_ID,
+        &mint_kp.pubkey(),
+        &payer.pubkey(),
+        None,
+        3,
+    )
+    .unwrap();
+    let bh = svm.latest_blockhash();
+    svm.send_transaction(Transaction::new_signed_with_payer(
+        &[create_mint_acc_ix, init_mint_ix],
+        Some(&payer.pubkey()),
+        &[&payer, &mint_kp],
+        bh,
+    ))
+    .expect("create + init mint");
+
+    // 17-byte account name (one byte over the 16-byte Graphene limit).
+    let long_account = "twelve345678nine0"; // 17 chars
+    assert_eq!(long_account.len(), 17, "fixture must be exactly 17 bytes");
+
+    let (deposit_pda, _bump) = Pubkey::find_program_address(
+        &[b"deposit", long_account.as_bytes()],
+        &GATEWAY_DEPOSIT_PROGRAM_ID,
+    );
+    let ata_addr = get_associated_token_address_with_program_id(
+        &deposit_pda,
+        &mint_kp.pubkey(),
+        &TOKEN_2022_PROGRAM_ID,
+    );
+    // Create the ATA so the accounts exist — the guard fires before the burn CPI.
+    let create_ata_ix = create_associated_token_account_idempotent(
+        &payer.pubkey(),
+        &deposit_pda,
+        &mint_kp.pubkey(),
+        &TOKEN_2022_PROGRAM_ID,
+    );
+    let bh = svm.latest_blockhash();
+    svm.send_transaction(Transaction::new_signed_with_payer(
+        &[create_ata_ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        bh,
+    ))
+    .expect("create ATA");
+
+    let ix = Instruction {
+        program_id: GATEWAY_DEPOSIT_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new_readonly(deposit_pda, false),
+            AccountMeta::new(mint_kp.pubkey(), false),
+            AccountMeta::new(ata_addr, false),
+            AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+        ],
+        data: burn_deposit_data(long_account, 1),
+    };
+    let bh = svm.latest_blockhash();
+    let result = svm.send_transaction(Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        bh,
+    ));
+    assert!(
+        result.is_err(),
+        "burn_deposit with 17-byte viz_account must fail"
+    );
+    // Anchor custom errors are base 6000; AccountNameTooLong is variant 0 → error code 6000.
+    let err_str = format!("{:?}", result.unwrap_err());
+    assert!(
+        err_str.contains("6000"),
+        "expected error code 6000 (AccountNameTooLong), got: {err_str}"
+    );
+}
+
 // ──── test: IDL exposes exactly one instruction ───────────────────────────────
 
 #[test]

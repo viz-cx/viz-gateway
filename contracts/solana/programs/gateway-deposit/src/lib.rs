@@ -4,6 +4,12 @@ use anchor_spl::token_interface::{Mint, TokenAccount};
 
 declare_id!("MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1");
 
+#[error_code]
+pub enum GatewayError {
+    #[msg("viz_account must be ≤ 16 bytes (Graphene account name limit)")]
+    AccountNameTooLong,
+}
+
 #[program]
 pub mod gateway_deposit {
     use super::*;
@@ -13,6 +19,7 @@ pub mod gateway_deposit {
     /// path to transfer deposit tokens anywhere. Permissionless — burning cannot
     /// steal, and the value handoff (VIZ release) is M-of-N + F2-validated.
     pub fn burn_deposit(ctx: Context<BurnDeposit>, viz_account: String, amount: u64) -> Result<()> {
+        require!(viz_account.len() <= 16, GatewayError::AccountNameTooLong);
         let bump = ctx.bumps.deposit_authority;
         let seeds: &[&[u8]] = &[b"deposit", viz_account.as_bytes(), &[bump]];
         let signer: &[&[&[u8]]] = &[seeds];

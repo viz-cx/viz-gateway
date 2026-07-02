@@ -11,7 +11,6 @@
     "@gateway/common": "0.1.0",
     "@gateway/log": "0.1.0",
     "@gateway/viz-watcher": "0.1.0",
-    "@noble/curves": "^1.9.7",
     "@solana/spl-token": "^0.4.0",
     "@solana/web3.js": "^1.98.0"
   },
