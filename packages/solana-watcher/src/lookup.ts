@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { createStore, loadConfig } from "@gateway/common";
+import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { depositAddress, depositAta } from "./depositAddress";
 
 /**
@@ -9,9 +10,11 @@ import { depositAddress, depositAta } from "./depositAddress";
  * it. Open/unauthenticated (release is bound to the derivation, so a third party
  * can only gift, never redirect). The response WARNS to send only wVIZ on Solana.
  *
- * NOTE: validating that `viz_account` actually exists on VIZ before issuing an
- * address (to avoid stuck funds to a typo) is a TODO — wire it to a VIZ node
- * `get_accounts` read. For now we apply a basic format check.
+ * The format check is a cheap pre-filter; before issuing (and registering) an
+ * address we confirm `viz_account` actually exists on VIZ via a `get_accounts`
+ * read, so wVIZ can't be sent to a deposit address for a typo'd/non-existent
+ * account (peg-out never refunds → those funds would be stuck). VIZ node
+ * unreachable ⇒ fail closed (500), never issue unverified.
  */
 const VIZ_ACCOUNT_RE = /^[a-z][a-z0-9.-]{1,31}$/; // VIZ/Graphene account-name charset
 
@@ -20,6 +23,7 @@ async function main(): Promise<void> {
   if (!cfg.solana.depositMasterSeed) throw new Error("SOLANA_DEPOSIT_MASTER_SEED is required for the lookup service");
   if (!cfg.solana.wvizMint) throw new Error("SOLANA_WVIZ_MINT is required");
   const store = createStore(cfg.storeUrl);
+  const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
   const [host, portStr] = cfg.solana.lookupListen.split(":");
   const port = Number.parseInt(portStr ?? "8095", 10);
 
@@ -40,6 +44,10 @@ async function main(): Promise<void> {
     }
     void (async () => {
       try {
+        if (!(await viz.accountExists(vizAccount))) {
+          json(404, { error: "viz_account does not exist on VIZ" });
+          return;
+        }
         const address = depositAddress(cfg.solana.depositMasterSeed, vizAccount);
         const ata = depositAta(cfg.solana.depositMasterSeed, vizAccount, cfg.solana.wvizMint);
         await store.registerDepositAddress({ vizAccount, solAddress: address, wvizAta: ata });

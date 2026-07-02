@@ -134,8 +134,11 @@ account — the **address is the routing identity**, no memo needed.
 - **E2 — lookup service.** [`lookup.ts`](../packages/solana-watcher/src/lookup.ts):
   `GET /address?viz_account=alice → { address, ata, mint, warning }`. Stateless
   derivation; open/unauthenticated (release is bound to derivation → a third party can
-  only gift, never redirect). Warns to send only wVIZ on Solana. _TODO:_ validate the
-  VIZ account exists on-chain before issuing (currently a format check).
+  only gift, never redirect). Warns to send only wVIZ on Solana. Confirms the VIZ account
+  exists on-chain (`VizChain.accountExists`, a `get_accounts` read) before issuing +
+  registering — a typo'd/non-existent account is rejected 404 (peg-out never refunds, so
+  wVIZ sent there would be stuck); the regex is a cheap pre-filter and a VIZ node outage
+  fails closed (500, no unverified issue).
 - **E3 — registry.** `deposit_addresses` table + store methods (register / lookup by
   address-or-ATA / scan-rotation by `scan_time`). _Why:_ derivation is stateless but
   the scanner needs the finite set of issued addresses to watch.
@@ -258,8 +261,9 @@ an external review, not a code fix.
 
 - Live on-chain mint targets: TON multisig-v2 `new_order`+`approve`; Solana mint +
   burn validated on devnet.
-- Lookup: real VIZ-account existence check; same deposit-address model can extend to
-  TON later (TON has a comment field, so it's lower priority).
+- Lookup: real VIZ-account existence check ✅ (issuance gated on `VizChain.accountExists`).
+  Same deposit-address model can extend to TON later (TON has a comment field, so it's
+  lower priority).
 - E4/E5: the scanner now **claims first** (writes a `SEEN` outbox row keyed on the tx
   signature) before burning, and releases the claim (`store.delete`) if the burn fails,
   so a duplicate scan can't double-burn and a crash-after-burn leaves a visible `SEEN`
