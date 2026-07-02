@@ -7,7 +7,6 @@
 // is re-derivable from the PUBLIC program ID alone, with no private key anywhere.
 //
 // Run (after `npm run build`): node tools/signer-f2-spike.cjs
-const assert = require("node:assert");
 const { canonicalPegIn, canonicalPegOut } = require("@gateway/common");
 const { validateAction, SourceMismatchError } = require("../packages/signer/dist/sourceValidator.js");
 const {

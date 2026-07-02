@@ -94,7 +94,6 @@ const depsWith = (chain) => ({
   solanaChain: { getBurn: async () => null },
   tonChain: chain,
   store: { depositAddressBy: async () => undefined },
-  depositMasterPub: "",
 });
 
 (async () => {
