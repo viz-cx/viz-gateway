@@ -16,6 +16,18 @@ Rebuild: clone each repo at the pinned commit, `npm install --ignore-scripts`,
 - sha256   : `be6d1b18285ec8d94b831626805c1fb21a01b34b12b547f3175ceae1098ff159`
 - cell hash : `d3d14da9a627f0ec3533341829762af92b9540b21bf03665fac09c2b46eabbac`
 
+### order.code.boc — `Order` (multisig-v2 per-order contract)
+- Repo: https://github.com/ton-blockchain/multisig-contract-v2
+- Commit: `9a4b13df6345c9c4068ca725e434b40f9ea5ca28` (same as the multisig above)
+- Source: committed `build/Order.compiled.json` `.hex` at that commit
+- sha256   : `7783b8b1b4e1beec9e9f5727b1daf7bbeca6f6bcaf58e05e09c744cdb23107d1`
+- cell hash : `6305a8061c856c2ccf05dcb0df5815c71475870567cab5f049e340bcf59251f3`
+- NOTE: the multisig deploys each order with this code as a **library reference** (an
+  exotic cell holding only this hash — see the single type-2 cell inside
+  `multisig.code.boc`). The cell hash above IS that library hash; the TVM resolves it
+  from the masterchain library collection on-chain, and from `blockchain.libs` in the
+  `@ton/sandbox` proof (`tools/ton-onchain-approval-spike.cjs`).
+
 ### minter.code.boc — `JettonMinter` (standard governed, discoverable)
 - Repo: https://github.com/ton-blockchain/token-contract
 - Commit: `1182ad99413242f09925d50e70ccb7e0e09f94d4`

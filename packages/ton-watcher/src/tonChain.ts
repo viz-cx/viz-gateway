@@ -1,6 +1,7 @@
 import { Address, JettonMaster, TonClient, internal, SendMode, WalletContractV4, toNano } from "@ton/ton";
 import { beginCell } from "@ton/core";
-import type { Slice, Transaction } from "@ton/core";
+import type { Cell, Slice, Transaction } from "@ton/core";
+import type { TransferRequest } from "@gateway/contracts-ton";
 import type { RemoteBurn, RemoteChain, TonMintProposal } from "@gateway/common";
 import { Multisig } from "@gateway/contracts-ton";
 import { keyPairFromMnemonic } from "./tonSign";
@@ -65,6 +66,57 @@ export function parseJettonDeposit(
     if (tag === 0) comment = fp.loadStringTail(); // text comment
   }
   return { amountBaseUnits, sender, comment };
+}
+
+/**
+ * The mint action an operator's multisig executes for a PEG_IN: a standard
+ * governed-minter mint (OP=21) whose master_msg is the TEP-74 internal_transfer
+ * that credits the recipient. PURE function of (minter, recipient, base-unit
+ * amount) so every operator rebuilds the byte-identical order and can verify the
+ * order hash the proposer shares. This is the single source of truth for both the
+ * live write path (submitMint) and the sandbox proof
+ * (tools/ton-onchain-approval-spike.cjs) — they MUST NOT drift.
+ */
+export function buildMintTransfer(
+  minter: Address,
+  toAddr: Address,
+  amountBaseUnits: bigint,
+): TransferRequest {
+  const masterMsg = beginCell()
+    .storeUint(OP_INTERNAL_TRANSFER, 32)
+    .storeUint(0n, 64) // query_id
+    .storeCoins(amountBaseUnits) // jetton amount (base units = milli-VIZ)
+    .storeAddress(minter) // from = minter
+    .storeAddress(toAddr) // response_destination
+    .storeCoins(0n) // forward_ton_amount
+    .storeBit(false) // no forward payload
+    .endCell();
+  const mintBody = beginCell()
+    .storeUint(OP_MINT, 32)
+    .storeUint(0n, 64) // query_id
+    .storeAddress(toAddr) // to_address
+    .storeCoins(toNano("0.05")) // ton_amount forwarded with the mint for wallet creation/fees
+    .storeRef(masterMsg)
+    .endCell();
+  return {
+    type: "transfer",
+    sendMode: SendMode.PAY_GAS_SEPARATELY,
+    message: internal({ to: minter, value: toNano("0.1"), body: mintBody }),
+  };
+}
+
+/**
+ * The packed multisig-v2 order cell for a mint + its 32-byte hash. The hash is the
+ * value operators independently recompute and compare before approving (Phase B:
+ * docs/plan-ton-onchain-approval.md).
+ */
+export function mintOrderCell(
+  minter: Address,
+  toAddr: Address,
+  amountBaseUnits: bigint,
+): { cell: Cell; hashHex: string } {
+  const cell = Multisig.packOrder([buildMintTransfer(minter, toAddr, amountBaseUnits)]);
+  return { cell, hashHex: cell.hash().toString("hex") };
 }
 
 export class TonHttpChain implements RemoteChain<TonMintProposal> {
@@ -224,32 +276,9 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     const toAddr = Address.parse(proposal.toAddress);
     const amountBaseUnits = BigInt(proposal.amountMilliViz);
 
-    // Build the standard governed-minter mint body (OP=21).
-    // master_msg: the jetton wallet internal_transfer (TEP-74 op 0x178d4519).
-    const masterMsg = beginCell()
-      .storeUint(OP_INTERNAL_TRANSFER, 32)
-      .storeUint(0n, 64) // query_id
-      .storeCoins(amountBaseUnits) // jetton amount (base units = milli-VIZ)
-      .storeAddress(this.minter) // from = minter
-      .storeAddress(toAddr) // response_destination
-      .storeCoins(0n) // forward_ton_amount
-      .storeBit(false) // no forward payload
-      .endCell();
-
-    const mintBody = beginCell()
-      .storeUint(OP_MINT, 32)
-      .storeUint(0n, 64) // query_id
-      .storeAddress(toAddr) // to_address
-      .storeCoins(toNano("0.05")) // ton_amount forwarded with the mint for wallet creation/fees
-      .storeRef(masterMsg)
-      .endCell();
-
-    // Build the multisig TransferRequest: send the mint message from the multisig to the minter.
-    const mintTransfer = {
-      type: "transfer" as const,
-      sendMode: SendMode.PAY_GAS_SEPARATELY,
-      message: internal({ to: this.minter, value: toNano("0.1"), body: mintBody }),
-    };
+    // Build the multisig TransferRequest (mint from the multisig to the minter) via the
+    // shared PURE builder so the live path and the sandbox proof never drift.
+    const mintTransfer = buildMintTransfer(this.minter, toAddr, amountBaseUnits);
 
     // Fetch the current multisig state for sendNewOrder validation.
     const dataMultisig = c.open(Multisig.createFromAddress(multisigAddr));
