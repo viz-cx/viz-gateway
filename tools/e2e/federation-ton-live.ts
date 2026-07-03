@@ -34,12 +34,16 @@ import { launchStack, launchFederationStack, type FederationStack, type Launched
 import { submitLock, vizBalanceMilliViz } from "./viz";
 import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists } from "./ton";
 
-const FIND_ROW_TIMEOUT_MS = 3 * 60_000;
-const ORDER_LANDS_TIMEOUT_MS = 5 * 60_000;
-const MINT_SETTLE_TIMEOUT_MS = 4 * 60_000;
-const RECOVERY_TIMEOUT_MS = 4 * 60_000;
-const UNDER_THRESHOLD_WAIT_MS = 3 * 60_000; // long enough that a mint WOULD have landed
-const POLL_MS = 4_000;
+// Live testnet end-to-end mint latency (VIZ irreversibility lag + 3 SEQUENTIAL
+// on-chain TON approvals + toncenter 504 retries) routinely exceeds 4 min, so the
+// settle/recovery windows are generous. A too-tight window fails a mint that is
+// in fact landing correctly (observed: net credited at ~5 min).
+const FIND_ROW_TIMEOUT_MS = 4 * 60_000;
+const ORDER_LANDS_TIMEOUT_MS = 8 * 60_000;
+const MINT_SETTLE_TIMEOUT_MS = 10 * 60_000;
+const RECOVERY_TIMEOUT_MS = 10 * 60_000;
+const UNDER_THRESHOLD_WAIT_MS = 5 * 60_000; // > max positive-mint latency, so a mint WOULD have landed
+const POLL_MS = 5_000;
 
 const WATCHERS = ["viz-watcher", "ton-watcher", "dispatcher"] as const;
 
@@ -127,7 +131,10 @@ async function proveThresholdMint(
   tonOwner: string,
 ): Promise<void> {
   console.log(`\n[fed-ton] Criterion 1: threshold mint (3 independent on-chain approvals)`);
-  const gross = uniqueGrossMilliViz(20_000n, `${cfg.runId}-mint`);
+  // Base must clear TON's dynamic peg-in floor (base fee + mint-gas floor ≈ 21_000
+  // mVIZ). uniqueGrossMilliViz adds only 0–999 jitter, so 20_000n always landed
+  // below the floor and the coordinator refunded before any approval.
+  const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-mint`);
   const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
   const { seqno: seqnoBefore } = await nextOrderInfo(cfg);
@@ -166,7 +173,7 @@ async function proveUnderThreshold(
 ): Promise<void> {
   const toKill = n - threshold + 1; // kill enough that the remaining live set < threshold
   console.log(`\n[fed-ton] Criterion 2: under-threshold (kill ${toKill} of ${n} signers → no mint)`);
-  const gross = uniqueGrossMilliViz(20_000n, `${cfg.runId}-under`);
+  const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-under`);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
 
   await withStack(signerSpecs, coordinatorEnv, watcherEnv, `${logDir}-c2`, async (fed) => {
@@ -209,7 +216,7 @@ async function proveCrashWindow(
   console.log(`\n[fed-ton] Criterion 3: crash-window single-mint (no double-mint)`);
   // Fast orphan recovery so the relaunched stack requeues within seconds.
   const fastWatcherEnv = { ...watcherEnv, DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS: "8000", DISPATCHER_INTERVAL_MS: "3000" };
-  const gross = uniqueGrossMilliViz(20_000n, `${cfg.runId}-crash`);
+  const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-crash`);
   const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
   const { orderAddr: predicted, seqno: seqnoBefore } = await nextOrderInfo(cfg);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
