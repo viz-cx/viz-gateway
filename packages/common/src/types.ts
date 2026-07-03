@@ -95,18 +95,32 @@ export interface VizReleaseProposal {
 }
 
 /**
- * A TON mint approval proposal. In multisig-v2, signers approve an *order*; the
- * bytes they sign are the order cell hash. The proposer builds the order via the
- * official wrapper and distributes `orderHashHex`; each operator validates the
- * order's parameters against the canonical action, then ed25519-signs the hash.
+ * A TON mint approval proposal (Phase B: multisig-v2 ON-CHAIN approvals).
+ *
+ * Unlike VIZ/Solana, TON multisig-v2 has NO off-chain signature aggregation: an
+ * approval is an on-chain `Order.approve` message sent from the operator's OWN
+ * wallet. So the coordinator (keyless) only DESCRIBES the order here; each
+ * operator's signer performs the on-chain effect (propose or approve) itself.
+ *
+ * `orderAddr` is the deterministic order address f(multisig, nextOrderSeqno) — a
+ * durable idempotency key: it is persisted before any operator proposes, so a
+ * re-drive after a crash targets the SAME order (existence check → no second mint).
+ * `orderHashHex` is the REAL packed order cell hash; every operator rebuilds the
+ * mint order from (minter, toAddress, net) and asserts it matches before acting,
+ * binding the on-chain effect to the recipient/amount it independently validated.
+ * `proposerOperatorId` is the single operator the coordinator designates to send
+ * `new_order` (single-proposer seqno ordering); the rest send `approve`.
  */
 export interface TonMintProposal {
-  orderSeqno: string;
+  orderSeqno: string; // multisig nextOrderSeqno at build time ("" if reused on recovery)
+  orderAddr: string; // deterministic order address f(multisig, orderSeqno) — the idempotency key
   toAddress: string; // recipient TON address
   amountMilliViz: string; // = NET (gross − fee); the amount actually minted
   /** Pinned by the proposer: was the destination jetton-wallet already provisioned? */
   destProvisioned: boolean;
-  orderHashHex: string; // exact 32-byte order hash operators sign (hex)
+  orderHashHex: string; // exact 32-byte packed order cell hash operators rebuild + verify (hex)
+  actionId: string; // canonical action id (idempotency / traceability)
+  proposerOperatorId: string; // the operator designated to send new_order; others approve
 }
 
 /**

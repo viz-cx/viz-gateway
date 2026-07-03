@@ -7,6 +7,7 @@ import {
   type GatewayFeeConfig,
   type GatewayStore,
   type SolanaMintProposal,
+  type TonMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
@@ -75,12 +76,28 @@ export class VizReleaseBroadcaster implements Broadcaster {
   }
 }
 
-/** PEG_IN: build a TON mint proposal (NET + pinned provisioning) and submit the order. */
+/** Max time the keyless coordinator waits for the on-chain order to self-execute. */
+const TON_EXECUTE_POLL_MAX_MS = 90_000;
+const TON_EXECUTE_POLL_INTERVAL_MS = 3_000;
+
+/**
+ * PEG_IN (TON): DESCRIBE the mint order for the operators to approve on-chain.
+ *
+ * Phase B trust model: the coordinator is keyless on TON. It does NOT send
+ * `new_order` or hold a signer key — it only builds the order proposal (real cell
+ * hash + deterministic address) and pins the idempotency key. Each operator's
+ * signer performs the actual on-chain propose/approve from its own wallet
+ * (KeyedSigner.approveTonMint → TonApprover). `broadcast` therefore does not
+ * submit anything; it confirms the order self-executed once threshold approvals
+ * landed. See docs/plan-ton-onchain-approval.md.
+ */
 export class TonMintBroadcaster implements Broadcaster {
   constructor(
     private readonly chain: TonHttpChain,
     private readonly fees: GatewayFeeConfig,
     private readonly store: IdempotencyStore,
+    /** Operator designated to send `new_order` (single-proposer seqno ordering). */
+    private readonly proposerOperatorId: string,
   ) {}
 
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
@@ -88,50 +105,73 @@ export class TonMintBroadcaster implements Broadcaster {
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
     const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "TON"));
     if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
-    // orderSeqno is the real next multisig seqno (contract is deployed); it pins the
-    // deterministic order address used as the idempotency key in broadcast/actionExecuted.
-    // orderHashHex is still the canonical action digest as a 32-byte stand-in — the true
-    // order cell hash is built by the wrapper at submit time; the digest keeps the ed25519
-    // approval flow exercisable and stable per action.
-    const { seqno } = await this.chain.nextOrderAddress();
+    const net = q.b.net;
+    // The REAL packed mint-order cell hash (seqno-independent): every operator rebuilds
+    // it from the canonical action and asserts a match before acting, binding each
+    // on-chain approval to this exact recipient + amount.
+    const orderHashHex = this.chain.orderHashFor(action.recipient, net);
+
+    // Idempotency key = the deterministic order address f(multisig, nextOrderSeqno).
+    // REUSE a previously pinned address so a re-drive targets the SAME order (the
+    // proposer's own existence check then prevents a second mint); otherwise reserve the
+    // current next address and persist it BEFORE any operator proposes. Persisting here —
+    // ahead of the approval loop — is what closes the crash-after-propose double-mint
+    // window: recovery reads back this exact address instead of recomputing it against an
+    // advanced seqno. Only pins on first build (no persisted txid) so the recovery/fee
+    // path never regresses a CONFIRMED row's status.
+    const rec = await this.store.get(action.id);
+    let orderAddr: string;
+    let orderSeqno = "";
+    if (rec?.txid) {
+      orderAddr = rec.txid;
+    } else {
+      ({ orderAddr, seqno: orderSeqno } = await this.chain.nextOrderAddress());
+      await this.store.setStatus(action.id, "BROADCAST", { txid: orderAddr });
+    }
+
     const proposal: Proposal = {
-      orderSeqno: seqno,
+      orderSeqno,
+      orderAddr,
       toAddress: action.recipient,
-      amountMilliViz: q.b.net.toString(),
+      amountMilliViz: net.toString(),
       destProvisioned,
-      orderHashHex: action.digest,
+      orderHashHex,
+      actionId: action.id,
+      proposerOperatorId: this.proposerOperatorId,
     };
     return { proposal, feeMilliViz: q.b.fee };
   }
 
-  async broadcast(action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
-    // Persist-before-send: a TON order address is a pure function of
-    // (multisig, nextOrderSeqno), and nextOrderSeqno only advances when an order is
-    // actually created — so it is a durable idempotency key. We record it BEFORE
-    // sendNewOrder lands: on crash recovery actionExecuted() checks orderExists() and
-    // short-circuits instead of proposing a SECOND order (double-mint of real wVIZ).
-    //
-    // Residual window: this assumes a single-proposer gateway multisig (only this
-    // signer creates orders), so the seqno we reserve is the seqno we consume. If a
-    // DIFFERENT actor created order N between nextOrderAddress() and our send, we would
-    // persist an address that is not ours — impossible for the single-purpose gateway.
-    // Revisit for multi-proposer M-of-N by embedding action.id in the order payload
-    // (see docs/plan-ton-peg-in-idempotency.md §5).
-    const { orderAddr } = await this.chain.nextOrderAddress();
-    await this.store.setStatus(action.id, "BROADCAST", { txid: orderAddr });
-    return this.chain.submitMint(proposal as never, signatures);
+  async broadcast(action: CanonicalAction, proposal: Proposal, _signatures: string[]): Promise<string> {
+    // Nothing to submit: the order was created + approved on-chain by the operators
+    // themselves (keyless coordinator). The order self-executes the instant approvals
+    // reach threshold — which is exactly when the orchestrator's approval loop returned —
+    // so confirm the order executed and return its address as the txid. `_signatures`
+    // are the operators' on-chain approval receipts, carried only for the audit trail.
+    const orderAddr = (proposal as TonMintProposal).orderAddr;
+    const deadline = Date.now() + TON_EXECUTE_POLL_MAX_MS;
+    for (;;) {
+      if (await this.chain.orderExecuted(orderAddr)) return orderAddr;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `TON order ${orderAddr} for ${action.id} not executed within ${TON_EXECUTE_POLL_MAX_MS}ms (approvals below threshold?)`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, TON_EXECUTE_POLL_INTERVAL_MS));
+    }
   }
 
   async actionExecuted(action: CanonicalAction): Promise<{ executed: boolean; txid?: string }> {
     const rec = await this.store.get(action.id);
-    // Persist-before-send invariant: a row with no txid never reached broadcast, so
-    // there is no order on-chain to find — return immediately, no RPC on the happy path.
+    // Persist-before-approve invariant: a row with no txid was never even proposed, so
+    // there is no order on-chain — return immediately, no RPC on the happy path.
     if (!rec?.txid) return { executed: false };
-    // The order address was persisted before send. If that exact order exists on-chain
-    // the new_order committed (executed or not) and must NOT be re-proposed; if it never
-    // landed (send crashed before commit) it is safe to re-broadcast the identical order.
-    const exists = await this.chain.orderExists(rec.txid);
-    return exists ? { executed: true, txid: rec.txid } : { executed: false };
+    // Keyed on EXECUTED, not mere existence: an order that exists but is still under
+    // threshold must keep collecting approvals (not be treated as done). The
+    // no-second-order guard is the operator-side proposer's own existence check, so a
+    // re-drive of an unexecuted order is idempotent (proposer no-ops, approvers fill in).
+    const executed = await this.chain.orderExecuted(rec.txid);
+    return executed ? { executed: true, txid: rec.txid } : { executed: false };
   }
 }
 

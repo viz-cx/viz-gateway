@@ -12,6 +12,9 @@ data/
 tools/e2e/dist/
 tools/e2e/logs/
 logs/
-# Compiled contract bytecode — reproducible build artifacts; provenance tracked
-# in contracts/ton/boc/PROVENANCE.md
-contracts/ton/boc/*.boc
+# Compiled contract bytecode — reproducible build artifacts; provenance + hashes
+# tracked in contracts/ton/boc/PROVENANCE.md. Code cells (*.code.boc) are committed
+# so the offline proofs (npm run verify) run in CI; deployment-specific data cells
+# (*.data.boc) stay ignored.
+contracts/ton/boc/*.data.boc
+docs/federation-keys.md

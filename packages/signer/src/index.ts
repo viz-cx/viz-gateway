@@ -10,6 +10,7 @@ import {
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { TonApprover } from "@gateway/ton-watcher/dist/tonApprove";
 import { KeyedSigner } from "./keyedSigner";
 import { routeApproval } from "./routeApproval";
 import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
@@ -62,8 +63,7 @@ async function main(): Promise<void> {
         cfg.ton.apiKey,
         cfg.ton.jettonMinterAddress,
         cfg.ton.gatewayJettonWallet,
-        "",
-        "",
+        "", // multisigAddress (read-only reader; order reads not needed here)
         cfg.ton.finalityConfirmations,
         cfg.ton.scanMaxTransactions,
       )
@@ -92,6 +92,20 @@ async function main(): Promise<void> {
     ? { mint: cfg.solana.wvizMint, multisig: cfg.solana.multisig, nonceAccount: cfg.solana.nonceAccount }
     : null;
 
+  // TON on-chain approver (Phase B): performs this operator's propose/approve from its
+  // OWN wallet + node. Wired only when TON is fully configured on this operator; a TON
+  // PEG_IN without it is refused (KeyedSigner throws) rather than silently unauthorized.
+  const tonApprover =
+    cfg.ton.jettonMinterAddress && cfg.ton.multisigAddress && cfg.ton.signerMnemonic
+      ? new TonApprover(
+          cfg.ton.endpoint,
+          cfg.ton.apiKey,
+          cfg.ton.jettonMinterAddress,
+          cfg.ton.multisigAddress,
+          cfg.ton.signerMnemonic,
+        )
+      : null;
+
   const signer = new KeyedSigner(
     cfg.operatorId,
     cfg.viz.signingWif,
@@ -100,6 +114,7 @@ async function main(): Promise<void> {
     cfg.solana.signerSecret,
     (action) => validateAction(action, validatorDeps),
     solanaPins,
+    tonApprover,
   );
   const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8090").split(":");
   const port = Number.parseInt(portStr ?? "8090", 10);

@@ -80,8 +80,7 @@ function tonChainWith(txs) {
     "", // apiKey
     MINTER,
     GATEWAY_WALLET,
-    "", // multisigAddress (write path, unused)
-    "", // signerMnemonic (write path, unused)
+    "", // multisigAddress (order reads unused in this peg-out F2 read-path test)
     1, // finalityConfirmations -> ~10s buffer
     20, // scanMaxTransactions
   );
