@@ -1,8 +1,9 @@
 # Compiled BOC provenance
 
-The `.boc` binaries in this directory are **gitignored** (reproducible build
-artifacts). This file pins the exact sources + hashes so anyone can rebuild
-byte-identical code cells and verify what was deployed.
+The code cells (`*.code.boc`) are **committed** so the offline proofs
+(`npm run verify`) run in CI; they are reproducible build artifacts pinned by the
+sha256 + cell hashes below, so anyone can rebuild byte-identical cells and verify
+what was deployed. Deployment-specific data cells (`*.data.boc`) stay gitignored.
 
 Rebuild: clone each repo at the pinned commit, `npm install --ignore-scripts`,
 `npx blueprint build --all`, then take `build/<Contract>.compiled.json` `.hex`
