@@ -36,6 +36,7 @@
     "e2e:ton:crash": "npm run build && node tools/e2e/dist/crash-recovery.js",
     "e2e:federation": "npm run build && env $(grep -v '^#' .env.e2e | xargs) node tools/e2e/dist/federation.js",
     "e2e:federation:live": "npm run build && node tools/e2e/dist/federation-live.js",
+    "e2e:federation:ton:live": "npm run build && node tools/e2e/dist/federation-ton-live.js",
     "fed:setup-authority": "env $(grep -v '^#' .env.e2e | xargs) node tools/federation-authority-setup.cjs"
   },
   "engines": {
