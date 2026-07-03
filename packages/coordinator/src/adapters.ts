@@ -29,7 +29,12 @@ export class HttpSignerClient implements SignerClient {
       body: JSON.stringify({ action: actionToWire(action), proposal }),
     });
     if (res.status === 423) throw new Error(`signer ${this.endpoint} is paused`);
-    if (!res.ok) throw new Error(`signer ${this.endpoint} -> HTTP ${res.status}`);
+    if (!res.ok) {
+      // Surface the signer's error body (the /approve handler returns {error}) so a
+      // rejected approval is diagnosable — a bare status code hides *why* it refused.
+      const detail = await res.text().catch(() => "");
+      throw new Error(`signer ${this.endpoint} -> HTTP ${res.status}${detail ? `: ${detail}` : ""}`);
+    }
     return (await res.json()) as Approval;
   }
 }

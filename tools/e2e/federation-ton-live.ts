@@ -44,7 +44,30 @@ const ORDER_LANDS_TIMEOUT_MS = 8 * 60_000;
 const MINT_SETTLE_TIMEOUT_MS = 10 * 60_000;
 const RECOVERY_TIMEOUT_MS = 10 * 60_000;
 const UNDER_THRESHOLD_WAIT_MS = 5 * 60_000; // > max positive-mint latency, so a mint WOULD have landed
+// Criterion 2 uses a SHORT delivery window (well under UNDER_THRESHOLD_WAIT_MS) so its
+// under-threshold peg-in exhausts the window and goes REFUNDING — a terminal state —
+// *within* the criterion. Otherwise the row stays QUEUED and, once criterion 3
+// relaunches all signers, its half-approved order completes and mints late (observed:
+// c2 minted during c3, doubling c3's delta). The wide DISPATCHER_WINDOW_MS that keeps
+// c1/c3 from refunding a legitimately-landing mint is exactly what caused that, so c2
+// opts out of it.
+const UNDER_THRESHOLD_WINDOW_MS = 2 * 60_000;
 const POLL_MS = 5_000;
+// The dispatcher REFUNDS a PEG_IN whose delivery window elapses before threshold
+// is met (packages/dispatcher/src/policy.ts). Its default is 3 min — shorter than
+// the ~5-min live TON mint (3 sequential on-chain approvals + toncenter retries),
+// so a correctly-landing mint would be refunded mid-flight. Widen it past the
+// observed mint latency so the dispatcher rides out transient 504s instead.
+const DISPATCHER_WINDOW_MS = 8 * 60_000;
+// Per-step on-chain wait for the TON approver (order deploy / vote reflect). The 60s
+// default is too tight for testnet; three sequential steps at this ceiling stay
+// within DISPATCHER_WINDOW_MS on the happy path (each step typically ~30-90s).
+const TON_APPROVE_MAX_WAIT_MS = 150_000;
+// TON (nano) the proposer attaches per order. The mint action needs ~0.1 TON + gas;
+// 0.3 TON covers it with margin while keeping the proposer's per-order drain low
+// (surplus flows to the multisig, not back to the proposer), so a lightly-funded
+// proposer can still cover the whole suite. Overrides the 1 TON default.
+const TON_ORDER_VALUE_NANO = 300_000_000;
 
 const WATCHERS = ["viz-watcher", "ton-watcher", "dispatcher"] as const;
 
@@ -71,6 +94,12 @@ async function main() {
     ...baseEnv,
     COORDINATOR_LISTEN: "127.0.0.1:8080",
     COORDINATOR_URL: "http://127.0.0.1:8080",
+    // Each signer's TonApprover waits for its proposed order / approval to land
+    // on-chain. Testnet inclusion + toncenter view lag exceed the 60s default
+    // (observed: order did not appear within 60s), so widen it for the live run.
+    TON_APPROVE_MAX_WAIT_MS: String(TON_APPROVE_MAX_WAIT_MS),
+    // Lower per-order deployment value so a lightly-funded proposer covers the suite.
+    TON_ORDER_VALUE_NANO: String(TON_ORDER_VALUE_NANO),
   });
   delete coordinatorEnv["TON_SIGNER_MNEMONIC"];
 
@@ -79,6 +108,8 @@ async function main() {
     FEDERATION_N: String(fedCfg.n),
     FEDERATION_THRESHOLD: String(fedCfg.threshold),
     COORDINATOR_URL: "http://127.0.0.1:8080",
+    // Don't refund a mint that is still legitimately collecting on-chain approvals.
+    DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),
   };
 
   const tonOwner = cfg.ton.burnOwner; // wVIZ mint recipient
@@ -180,7 +211,10 @@ async function proveUnderThreshold(
   const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-under`);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
 
-  await withStack(signerSpecs, coordinatorEnv, watcherEnv, `${logDir}-c2`, async (fed) => {
+  // Short window so the under-threshold peg-in refunds (terminal) before criterion 3.
+  const c2WatcherEnv = { ...watcherEnv, DISPATCHER_WINDOW_MS: String(UNDER_THRESHOLD_WINDOW_MS) };
+
+  await withStack(signerSpecs, coordinatorEnv, c2WatcherEnv, `${logDir}-c2`, async (fed) => {
     // Keep the proposer (index 0) alive so it CAN create the order, but starve the
     // approvals below threshold: kill the last `toKill` signers.
     for (let i = fed.signers.length - 1; i >= fed.signers.length - toKill; i--) {

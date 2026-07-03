@@ -29,11 +29,13 @@ const SEQNO_TIMEOUT_MS = 4 * 60_000;
 const REJECTION_HOLD_MS = 90_000; // how long a rejected approve is held to NOT count
 const POLL_MS = 5_000;
 
-// The proposer sends TWO new_orders (rotation + test), each attaching toNano("1")
-// to fund the order contract, so it needs meaningful headroom; approvers/dropped
-// only send a single ~0.1 TON approve.
-const NEW_ORDER_VALUE = toNano("1");
-const MIN_PROPOSER_BALANCE = toNano("2.5");
+// The proposer sends TWO new_orders (rotation + test), each attaching this to fund
+// the order contract (surplus flows to the multisig, not back to the proposer). The
+// update/mint actions need ~0.1 TON + gas; 0.3 keeps the proposer's drain low so a
+// lightly-funded proposer covers the ceremony. Approvers/dropped only send a single
+// ~0.1 TON approve. Matches TON_ORDER_VALUE_NANO in federation-ton-live.ts.
+const NEW_ORDER_VALUE = toNano("0.3");
+const MIN_PROPOSER_BALANCE = toNano("1");
 const MIN_SIGNER_BALANCE = toNano("0.3");
 
 interface Op {

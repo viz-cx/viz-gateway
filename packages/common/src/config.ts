@@ -45,6 +45,9 @@ export interface GatewayConfig {
     signerMnemonic: string;
     finalityConfirmations: number;
     scanMaxTransactions: number; // txs fetched per peg-out scan (RPC rate-limit tuning)
+    approveMaxWaitMs: number; // max wait for a proposed order / approval to land on-chain
+    approvePollIntervalMs: number; // poll cadence while waiting for the above
+    orderValueNano: number; // TON (nano) the proposer attaches to new_order
   };
   solana: {
     rpcUrl: string;
@@ -212,6 +215,16 @@ export function loadConfig(): GatewayConfig {
       signerMnemonic: opt("TON_SIGNER_MNEMONIC", ""),
       finalityConfirmations: int("TON_FINALITY_CONFIRMATIONS", 1),
       scanMaxTransactions: int("TON_MAX_TRANSACTIONS", 20),
+      // The proposer sends new_order then waits for the Order contract to deploy; an
+      // approver waits for its vote to reflect. Testnet inclusion + toncenter view lag
+      // can exceed the 60s default, so this is tunable for live runs.
+      approveMaxWaitMs: int("TON_APPROVE_MAX_WAIT_MS", 60000),
+      approvePollIntervalMs: int("TON_APPROVE_POLL_INTERVAL_MS", 3000),
+      // TON (nano) the proposer attaches to a new_order. Funds the Order contract:
+      // deploy gas + the mint action's own value (~0.1) + margin; surplus flows to the
+      // multisig on execution, not back to the proposer. 1 TON default is conservative;
+      // lower it to reduce proposer drain when funding is tight (each order costs ~this).
+      orderValueNano: int("TON_ORDER_VALUE_NANO", 1_000_000_000),
     },
     solana: {
       rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),

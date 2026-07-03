@@ -335,6 +335,38 @@ approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
 Exit criteria: threshold mint by independent wallets ✔, under-threshold no-mint ✔,
 crash-window single-mint ✔, rotation rejects old signers ✔.
 
+### Verification record (2026-07-04) — criteria 1-3 PROVEN live
+
+Run `e2e-1783094535761-49bmor` on TON testnet, driver `npm run
+e2e:federation:ton:live` (with `.env.e2e` sourced + `E2E_FRESH_STORE=1`). Real
+3-of-5, keyless coordinator, each operator approving from its OWN wallet.
+
+- **Multisig (3-of-5):** `EQCuW98IIpl9tbqnd5c4mGDf1BJahHutqAHoGEPhcR5swo_7`
+- **wVIZ jetton minter (admin = multisig):** `EQDCepBYzTOL9SmbM5OpBqyd0VU1VL6JQaJUWZzJXx36VW7o`
+- **Signers:** op-1 proposer `EQDyPBoV…` (funded ~2 TON), op-2 `EQBUJb4e…`, op-3
+  `EQBK27uc…`; op-4/op-5 valid signers but intentionally unfunded (abstain).
+- **① Threshold mint:** peg-in lock `f893ed54…`, order
+  `EQDKXNgi-gdhBwXToU4_6mAlv9Ni2CJxDLsqN8v6k6755OyR`, 3/3 approvals → wVIZ **+15367**,
+  multisig order seqno 5→6. ✔
+- **② Under-threshold:** peg-in lock `8797401e…` with 3 of 5 signers down; order
+  never reached 3 approvals → **refunded** (delivery window exhausted), wVIZ
+  unchanged. ✔
+- **③ Crash-window:** peg-in lock `0e113cb6…`, order
+  `EQCUqDo76hItWHMacEDDv0f5JfB6CSOz3UAjpv1-xHdm3OvW`; stack crashed after the order
+  landed, relaunched → recovery completed the SAME order (no second `new_order`),
+  wVIZ **+15090 once**, seqno stable at 8 (no double-mint). ✔
+- **④ Rotation:** DEFERRED — destructive (permanently rotates 3-of-5 → 3-of-4);
+  run separately via `FED_ROTATION_MODE=live` after re-funding the proposer, then
+  re-deploy a fresh 3-of-5 to re-prove 1-3 (step 0-1).
+
+Fixes this run made the live path work (all on `fix/9b-ton-live-driver`): the
+proposer needs ~1 TON/order (`TON_ORDER_VALUE_NANO`, lowered to 0.3 TON for the
+run); the TonApprover order-wait was 60s (too tight for testnet →
+`TON_APPROVE_MAX_WAIT_MS`, 150s); the dispatcher refunded landing mints at its 3-min
+window (`DISPATCHER_WINDOW_MS`, 8 min for c1/c3; a short window for c2 so its
+under-threshold peg-in refunds terminally before c3); and the coordinator now
+surfaces signer error bodies (was a bare HTTP status).
+
 ## How peg-in mint works on Solana
 
 wVIZ on Solana is an SPL Token-2022 mint (3 decimals) whose mint+freeze
