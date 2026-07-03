@@ -327,7 +327,10 @@ approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
    SAME order. Supply increases by `net` exactly once (no double-mint).
 7. **Rotation proof:** rotate the multisig signer set (drop an old operator); the
    dropped operator's `approve` is rejected on-chain (err 106 `unauthorized_sign`),
-   while the new set reaches threshold.
+   while the new set reaches threshold. Automated in the driver (`tools/e2e/ton-rotation.ts`),
+   opt-in via `FED_ROTATION_MODE=live` and run **last** — it PERMANENTLY rotates the
+   multisig (3-of-5 → 3-of-4), so re-running the suite needs a fresh 3-of-5 deploy
+   (step 0-1). Left unset, criterion 4 is skipped and criteria 1-3 still prove out.
 
 Exit criteria: threshold mint by independent wallets ✔, under-threshold no-mint ✔,
 crash-window single-mint ✔, rotation rejects old signers ✔.

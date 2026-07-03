@@ -61,7 +61,7 @@ And one hard human prereq:
   `FED_OP<i>_TON_MNEMONIC` gives each signer a `TonApprover` configured with its
   own wallet (verify via signer startup log — TON approver wired).
 
-### Task 2 — Live driver: `tools/e2e/federation-ton-live.ts` (code) — ⚠ criteria 1-3 DONE, criterion 4 gated
+### Task 2 — Live driver: `tools/e2e/federation-ton-live.ts` (code) — ✅ criteria 1-4 implemented
 Model it on `federation-live.ts` but drive a **TON peg-in** through the keyless
 coordinator + 5 signers. Config: `FED_N=5`, `FED_THRESHOLD=3`. Coordinator runs
 with NO `TON_SIGNER_MNEMONIC` (keyless); it designates the **first** federation
@@ -83,10 +83,17 @@ delta via `tools/e2e/ton.ts` helpers (`tonWvizBalance`) + `deltas.ts`:
    (no 2nd `new_order`); remaining approvals complete the SAME order. Assert supply
    +`net` exactly once (no double-mint). (Reuse the crash-recovery pattern in
    `tools/e2e/crash-recovery.ts`.)
-4. **Rotation (step 7):** rotate the multisig signer set (drop an old operator);
-   the dropped operator's `approve` is rejected on-chain (err 106
-   `unauthorized_sign`), the new set reaches threshold. (May reuse
-   `contracts/ton/src/rotateTon.ts` / `tonRotation.ts`.)
+4. **Rotation (step 7):** ✅ implemented in `tools/e2e/ton-rotation.ts`
+   (`proveRotationLive`). Opt-in via `FED_ROTATION_MODE=live` (default = SKIP, so
+   criteria 1-3 still prove out). It drives the full ceremony directly against the
+   deployed multisig: proposer (op-1) proposes dropping the highest-indexed operator,
+   the retained set approves to threshold → multisig adopts the new set; then a fresh
+   order is opened under the rotated set, the dropped operator's `approve` is asserted
+   NOT to count (approvals-invariant hold + best-effort on-chain exit-code 106
+   `unauthorized_sign`), and the retained set still reaches threshold + executes.
+   **SAFETY:** PERMANENTLY rotates the multisig (3-of-5 → 3-of-4), so it runs last;
+   re-running the suite needs a fresh 3-of-5 deploy (step 0-1). Reuses
+   `tonRotation.buildUpdateAction`/`sameSignerSet` + the `Multisig`/`Order` wrappers.
 
 - Add npm target `e2e:federation:ton:live` in `package.json` (mirror
   `e2e:federation:live`: `npm run build && node tools/e2e/dist/federation-ton-live.js`).

@@ -33,6 +33,7 @@ import { pollUntil } from "./poll";
 import { launchStack, launchFederationStack, type FederationStack, type LaunchedStack } from "./stack";
 import { submitLock, vizBalanceMilliViz } from "./viz";
 import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists } from "./ton";
+import { proveRotationLive } from "./ton-rotation";
 
 // Live testnet end-to-end mint latency (VIZ irreversibility lag + 3 SEQUENTIAL
 // on-chain TON approvals + toncenter 504 retries) routinely exceeds 4 min, so the
@@ -93,10 +94,13 @@ async function main() {
     await proveThresholdMint(cfg, fees, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner);
     await proveUnderThreshold(cfg, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner, fedCfg.n, fedCfg.threshold);
     await proveCrashWindow(cfg, fees, store, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner);
-    await proveRotation(cfg);
+    const rotated = await proveRotation(cfg, fedCfg);
 
     console.log(`\n[fed-ton] ✓ §9b LIVE 3-of-5 PROOF COMPLETE`);
-    console.log(`[fed-ton]   threshold mint ✓  under-threshold no-mint ✓  crash-window single-mint ✓  rotation ✓`);
+    console.log(
+      `[fed-ton]   threshold mint ✓  under-threshold no-mint ✓  crash-window single-mint ✓  ` +
+        (rotated ? "rotation ✓" : "rotation ⇢ SKIPPED (set FED_ROTATION_MODE=live to run it)"),
+    );
   } finally {
     await store.close();
   }
@@ -285,29 +289,31 @@ async function proveCrashWindow(
 
 // ── Criterion 4: rotation rejects old signers ───────────────────────────────
 // A live multisig signer-set rotation (update_multisig_params via the order
-// contract) is a full on-chain ceremony. It is driven out-of-band by the
-// operators (see contracts/ton/src/rotateTon.ts + RUNBOOK §9b step 7), then this
-// step verifies the dropped operator's approve is rejected on-chain (err 106
-// unauthorized_sign) while the new set reaches threshold.
+// contract) drives the deployed multisig from its current set to one with an
+// operator dropped, then proves the dropped operator's on-chain `approve` is
+// rejected (err 106 unauthorized_sign) while the retained set still reaches
+// threshold. The full ceremony is automated in ./ton-rotation (proveRotationLive).
 //
-// Until that ceremony is wired into this harness, the step is gated: set
-// FED_ROTATION_MODE=live once the rotation tx has been executed to run the
-// dropped-signer rejection assertion.
-async function proveRotation(cfg: ReturnType<typeof loadE2eConfig>): Promise<void> {
+// SAFETY: this PERMANENTLY rotates the deployed multisig (3-of-5 -> 3-of-4), so it
+// is opt-in via FED_ROTATION_MODE=live and runs last. When unset, it is SKIPPED
+// (criteria 1-3 still prove out); re-running after a rotation needs a fresh 3-of-5
+// deploy (RUNBOOK §9b step 0-1). Returns true iff the rotation proof actually ran.
+async function proveRotation(
+  cfg: ReturnType<typeof loadE2eConfig>,
+  fedCfg: ReturnType<typeof loadFederationConfig>,
+): Promise<boolean> {
   console.log(`\n[fed-ton] Criterion 4: rotation rejects old signers`);
-  const mode = process.env.FED_ROTATION_MODE;
-  if (mode !== "live") {
-    throw new Error(
-      "Criterion 4 (rotation) not yet automated in this harness. Run the multisig " +
-        "rotation ceremony (contracts/ton/src/rotateTon.ts, RUNBOOK §9b step 7), then " +
-        "re-run with FED_ROTATION_MODE=live to assert the dropped operator's approve " +
-        `is rejected (err 106) against ${cfg.ton.multisigAddress}.`,
+  if (process.env.FED_ROTATION_MODE !== "live") {
+    console.log(
+      `[fed-ton]   ⇢ SKIPPED. This criterion PERMANENTLY rotates ${cfg.ton.multisigAddress} ` +
+        `(drops one operator). Set FED_ROTATION_MODE=live to run it (last), then re-deploy a ` +
+        `fresh ${fedCfg.threshold}-of-${fedCfg.n} to re-run the suite (RUNBOOK §9b step 0-1).`,
     );
+    return false;
   }
-  // TODO(§9b step 7): submit a peg-in, have the DROPPED operator attempt an approve,
-  // assert the on-chain exit code is 106 (unauthorized_sign), and that the retained
-  // 3-of-5 set still reaches threshold. Requires the rotated signer set in env.
-  throw new Error("FED_ROTATION_MODE=live path not implemented — see TODO in proveRotation");
+  const operators = fedCfg.operators.map((o) => ({ id: o.id, tonMnemonic: o.tonMnemonic! }));
+  await proveRotationLive(cfg, operators);
+  return true;
 }
 
 /** Newest active PEG_IN/TON row minting to `owner`, created at/after `since`. */
