@@ -277,6 +277,18 @@ under-rated.
   liveness SPOFs respectively (no HA yet); neither enables theft.
 - **Keys in signer process memory** (scaffold) — production intends HSM/KMS
   (`keyedSigner.ts` comment); the raw secret handling is in scope to review as-is.
+- **`bigint-buffer@1.1.5` buffer overflow (GHSA-3gc7-fjrx-p6mg, high, no fix):** pulled
+  transitively via `@solana/spl-token → @solana/buffer-layout-utils`. The package is
+  unmaintained and `1.1.5` is the latest; there is no patched version to bump to. The
+  overflow is in `toBigIntLE()` on malformed buffers — in this gateway it only decodes
+  u64 amounts from on-chain account data and values we construct, not attacker-supplied
+  network payloads, so it is not reachable via an untrusted input path. Accepted risk;
+  the eventual fix is the `@solana/web3.js` v1 → v2 (`@solana/kit`) migration, which
+  drops `bigint-buffer` entirely. `npm audit` surfaces this as 3 high entries that all
+  collapse to this one root.
+- **Dependabot ws/form-data alerts were false positives** — the lockfile has held
+  `ws@8.21.0` (≥5.2.5) and `form-data@4.0.6` (patched) since the viz-js-lib pin; both
+  alerts were dismissed as not-present. `npm audit` is clean for both.
 
 ---
 
