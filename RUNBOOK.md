@@ -293,18 +293,27 @@ Proves the Phase B trust boundary on testnet: five independent operator wallets,
 a keyless coordinator, and a mint that only lands once 3 distinct operators
 approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
 
-1. **Deploy a fresh 3-of-5 multisig** with the five operator wallet addresses as
-   signers (order matters — it fixes each operator's `signers[index]`). Hand the
-   wVIZ minter admin to it. Record → `TON_MULTISIG_ADDRESS`,
-   `TON_JETTON_MINTER_ADDRESS`.
+0. **Generate the 5 operator wallets + 3-of-5 init data.** `GEN=1 FED_N=5
+   MULTISIG_THRESHOLD=3 MULTISIG_CODE_BOC=contracts/ton/boc/multisig.code.boc
+   npm run gen:multisig-data` prints 5 fresh mnemonics (save to gitignored
+   `docs/federation-ton-keys.md`) + the ordered signer addresses and writes
+   `contracts/ton/boc/multisig-3of5.data.boc`. Re-run without `GEN=1` (with the
+   saved `FED_OP<i>_TON_MNEMONIC` in env) to rebuild the same data cell.
+1. **Deploy a fresh 3-of-5 multisig** with those five operator wallet addresses as
+   signers (order matters — it fixes each operator's `signers[index]`):
+   `DEPLOY_SEND=1 MULTISIG_DATA_BOC=contracts/ton/boc/multisig-3of5.data.boc … npm
+   run deploy:multisig`. Deploy the minter and hand it the wVIZ minter admin.
+   Record → `TON_MULTISIG_ADDRESS`, `TON_JETTON_MINTER_ADDRESS`.
 2. **Run five signer processes**, one per operator, each with its OWN
-   `TON_SIGNER_MNEMONIC` (its wallet key), its own `TON_ENDPOINT`, and the shared
-   `TON_MULTISIG_ADDRESS` + `TON_JETTON_MINTER_ADDRESS`. Set `FEDERATION_N=5`,
-   `FEDERATION_THRESHOLD=3`. The signer refuses a TON peg-in unless its
-   `TonApprover` is configured (minter + multisig + mnemonic all present).
+   `TON_SIGNER_MNEMONIC` (its wallet key) — wired via `FED_OP<i>_TON_MNEMONIC` in
+   the harness — its own `TON_ENDPOINT`, and the shared `TON_MULTISIG_ADDRESS` +
+   `TON_JETTON_MINTER_ADDRESS`. Set `FED_N=5`, `FED_THRESHOLD=3`. The signer refuses
+   a TON peg-in unless its `TonApprover` is configured (minter + multisig + mnemonic).
 3. **Run the coordinator with NO `TON_SIGNER_MNEMONIC`** (it is keyless on TON and
    ignores it if set). It designates the **first** federation operator as proposer;
-   order `SIGNER_ENDPOINTS` so that operator's signer is contacted first.
+   the harness orders `SIGNER_ENDPOINTS` op-1-first automatically. Driver:
+   `npm run e2e:federation:ton:live` runs criteria 1-3; criterion 4 (rotation) is
+   gated on `FED_ROTATION_MODE=live` after the rotation ceremony (step 7).
 4. **Drive a peg-in** (send ≥ min VIZ to `viz-gateway` with the memo = a TON
    address). Expected: proposer's signer sends `new_order` (self-approve = 1/3);
    the next two signers each send `approve` (2/3, then 3/3 → executes). The

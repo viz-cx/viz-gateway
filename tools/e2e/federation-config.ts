@@ -7,6 +7,9 @@
 //   FED_OP<i>_ID       — operator id for signer i (1-indexed, e.g. FED_OP1_ID=op-1)
 //   FED_OP<i>_WIF      — VIZ signing WIF for signer i
 //   FED_OP<i>_SOLANA_SECRET  — (optional) Solana signer secret for signer i
+//   FED_OP<i>_TON_MNEMONIC   — (optional) this operator's OWN TON wallet mnemonic;
+//                              each signer approves TON peg-ins from its own wallet
+//                              (overrides the shared base-env TON_SIGNER_MNEMONIC).
 //
 // Shared env vars consumed from the calling environment (same as launchStack):
 //   VIZ_NODE_URL, VIZ_GATEWAY_ACCOUNT, STORE_URL, COORDINATOR_LISTEN, COORDINATOR_URL
@@ -22,6 +25,7 @@ export interface FederationConfig {
     id: string;
     wif: string;
     solanaSecret?: string;
+    tonMnemonic?: string;
   }>;
 }
 
@@ -53,7 +57,8 @@ export function loadFederationConfig(env: NodeJS.ProcessEnv): FederationConfig {
     const id = req(env, `FED_OP${i}_ID`);
     const wif = req(env, `FED_OP${i}_WIF`);
     const solanaSecret = opt(env, `FED_OP${i}_SOLANA_SECRET`);
-    operators.push({ id, wif, solanaSecret });
+    const tonMnemonic = opt(env, `FED_OP${i}_TON_MNEMONIC`);
+    operators.push({ id, wif, solanaSecret, tonMnemonic });
   }
 
   return { n, threshold, basePort, operators };
@@ -74,6 +79,9 @@ export function buildFederationRunEnv(
       SIGNER_LISTEN: `127.0.0.1:${port}`,
     };
     if (op.solanaSecret) env["SOLANA_SIGNER_SECRET"] = op.solanaSecret;
+    // Each operator approves TON peg-ins from its OWN wallet: override the shared
+    // base-env TON_SIGNER_MNEMONIC so all N signers don't collapse to one wallet.
+    if (op.tonMnemonic) env["TON_SIGNER_MNEMONIC"] = op.tonMnemonic;
     return { operatorId: op.id, port, env };
   });
 

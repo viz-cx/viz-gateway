@@ -25,6 +25,7 @@
     "start:lookup": "node packages/solana-watcher/dist/lookup.js",
     "start:pegout-scanner": "node packages/solana-watcher/dist/pegoutScanner.js",
     "deploy:solana": "node contracts/solana/dist/deployMint.js",
+    "gen:multisig-data": "node contracts/ton/dist/genMultisigData.js",
     "deploy:multisig": "node contracts/ton/dist/deployMultisig.js",
     "deploy:minter": "node contracts/ton/dist/deployJettonMinter.js",
     "set-minter-admin": "node contracts/ton/dist/setMinterAdmin.js",
@@ -36,6 +37,7 @@
     "e2e:ton:crash": "npm run build && node tools/e2e/dist/crash-recovery.js",
     "e2e:federation": "npm run build && env $(grep -v '^#' .env.e2e | xargs) node tools/e2e/dist/federation.js",
     "e2e:federation:live": "npm run build && node tools/e2e/dist/federation-live.js",
+    "e2e:federation:ton:live": "npm run build && node tools/e2e/dist/federation-ton-live.js",
     "fed:setup-authority": "env $(grep -v '^#' .env.e2e | xargs) node tools/federation-authority-setup.cjs"
   },
   "engines": {
