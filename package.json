@@ -25,6 +25,7 @@
     "start:lookup": "node packages/solana-watcher/dist/lookup.js",
     "start:pegout-scanner": "node packages/solana-watcher/dist/pegoutScanner.js",
     "deploy:solana": "node contracts/solana/dist/deployMint.js",
+    "gen:multisig-data": "node contracts/ton/dist/genMultisigData.js",
     "deploy:multisig": "node contracts/ton/dist/deployMultisig.js",
     "deploy:minter": "node contracts/ton/dist/deployJettonMinter.js",
     "set-minter-admin": "node contracts/ton/dist/setMinterAdmin.js",

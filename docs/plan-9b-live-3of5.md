@@ -1,6 +1,8 @@
 # Plan — §9b LIVE 3-of-5 TON peg-in proof (real on-chain M-of-N)
 
-**Status:** NOT STARTED (authored 2026-07-03). Resume in a fresh session.
+**Status:** Tasks 1-3 DONE + criteria 1-3 of Task 2 implemented (2026-07-03,
+branch `feat/9b-live-3of5`). Remaining: fund wallets (Task 4, human) + criterion 4
+rotation automation. Build + verify green; e2e tsconfig typechecks.
 **Milestone:** last "prove it live" item on the Phase B federation track.
 **Predecessor:** Phase B code MERGED (PR #19, `main` @ `df5b5cc`) — coordinator
 keyless on TON, operators approve on-chain from their own wallets, offline 3-of-5
@@ -44,7 +46,7 @@ And one hard human prereq:
 
 ## Work breakdown
 
-### Task 1 — Harness: per-operator TON mnemonic (code)
+### Task 1 — Harness: per-operator TON mnemonic (code) — ✅ DONE
 - `tools/e2e/federation-config.ts`:
   - Add `tonMnemonic?: string` to the `operators[]` shape and read
     `FED_OP<i>_TON_MNEMONIC` (via `opt()`) in `loadFederationConfig`.
@@ -59,7 +61,7 @@ And one hard human prereq:
   `FED_OP<i>_TON_MNEMONIC` gives each signer a `TonApprover` configured with its
   own wallet (verify via signer startup log — TON approver wired).
 
-### Task 2 — Live driver: `tools/e2e/federation-ton-live.ts` (code)
+### Task 2 — Live driver: `tools/e2e/federation-ton-live.ts` (code) — ⚠ criteria 1-3 DONE, criterion 4 gated
 Model it on `federation-live.ts` but drive a **TON peg-in** through the keyless
 coordinator + 5 signers. Config: `FED_N=5`, `FED_THRESHOLD=3`. Coordinator runs
 with NO `TON_SIGNER_MNEMONIC` (keyless); it designates the **first** federation
@@ -91,7 +93,7 @@ delta via `tools/e2e/ton.ts` helpers (`tonWvizBalance`) + `deltas.ts`:
 - **Acceptance:** all 4 sub-proofs pass live on testnet; log a clear PASS banner
   per criterion.
 
-### Task 3 — 3-of-5 multisig data BOC (tooling / operational)
+### Task 3 — 3-of-5 multisig data BOC (tooling / operational) — ✅ DONE (`npm run gen:multisig-data`)
 - Generate the 5 operator TON wallets (24-word mnemonics + v4 addresses). Store
   secrets in a **gitignored** `docs/federation-ton-keys.md` (mirror
   `docs/federation-keys.md`). Record the 5 addresses (order matters — fixes each
