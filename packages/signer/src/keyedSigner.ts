@@ -10,7 +10,7 @@ import type {
 import { baseFee, pegInFeePolicyFor } from "@gateway/common";
 import { milliToViz } from "@gateway/viz-watcher/dist/vizChain";
 import { signRelease } from "@gateway/viz-watcher/dist/vizSign";
-import { keyPairFromMnemonic, signMintApproval } from "@gateway/ton-watcher/dist/tonSign";
+import { encodeReceipt, type TonApprovalClient } from "@gateway/ton-watcher/dist/tonApprove";
 import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
 
 /**
@@ -62,11 +62,23 @@ export class KeyedSigner implements Signer {
   constructor(
     public readonly operatorId: string,
     private readonly vizWif: string,
-    private readonly tonMnemonic: string,
+    /**
+     * RETAINED for constructor-arg stability, no longer used for signing. TON mints
+     * are authorized by on-chain multisig approvals: the operator's mnemonic lives in
+     * (and is used only by) the injected `tonApprover`, never here. See approveTonMint.
+     */
+    private readonly _tonMnemonic: string,
     private readonly fees: GatewayFeeConfig,
     private readonly solanaSecret: Uint8Array | null = null,
     validateSource?: SourceValidator | typeof DISABLED_SOURCE_VALIDATION,
     private readonly solanaPins: SolanaPins | null = null,
+    /**
+     * TON on-chain approval client (Phase B). PEG_IN TON approvals are on-chain
+     * effects (multisig-v2 `new_order`/`approve`) sent from THIS operator's own
+     * wallet, not off-chain signatures — so the signer delegates the effect here.
+     * Null when TON is not wired on this operator (then a TON PEG_IN is refused).
+     */
+    private readonly tonApprover: TonApprovalClient | null = null,
   ) {
     if (validateSource === undefined) {
       // A forgotten validator must never degrade to "sign without a source check".
@@ -131,10 +143,14 @@ export class KeyedSigner implements Signer {
     // proposal.amountMilliViz is NET; re-derive base fee from gross, accept the
     // pinned destProvisioned flag for the activation surcharge.
     this.assertNet(action, "TON", proposal.destProvisioned, proposal.amountMilliViz);
-    if (!this.tonMnemonic) throw new Error("TON signer mnemonic not set; refusing to sign");
-    const { secretKey } = await keyPairFromMnemonic(this.tonMnemonic);
-    const signature = signMintApproval(proposal, secretKey);
-    return { actionId: action.id, operatorId: this.operatorId, signature };
+    if (!this.tonApprover) throw new Error("TON approver not configured on this signer; refusing to approve");
+    // On-chain effect: propose (if this operator is the designated proposer and the
+    // order is absent) or approve, from THIS operator's own wallet. The approver
+    // re-derives the order cell and asserts its hash matches proposal.orderHashHex,
+    // binding the on-chain action to the recipient/amount validated above.
+    const isProposer = proposal.proposerOperatorId === this.operatorId;
+    const receipt = await this.tonApprover.approveMint(proposal, isProposer);
+    return { actionId: action.id, operatorId: this.operatorId, signature: encodeReceipt(receipt) };
   }
 
   async approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval> {

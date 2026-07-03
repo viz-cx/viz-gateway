@@ -2,8 +2,11 @@
 //   VIZ: two operators independently sign a release proposal; their partial
 //        signatures must equal the set produced by one party signing with both
 //        keys (=> they merge), and a tampered proposal must be rejected.
-//   TON: an operator's ed25519 mint approval must verify, and a tampered order
-//        hash must fail verification.
+//   TON (Phase B): a TON mint approval is an ON-CHAIN effect, not an off-chain
+//        signature. This spike proves the signer's glue: it validates net +
+//        recipient, computes isProposer from proposerOperatorId, delegates the
+//        on-chain effect to the injected TonApprover, and encodes the receipt.
+//        The real contract state machine is proven in ton-onchain-approval-spike.
 //
 // Run: node tools/writepaths-spike.cjs
 const assert = require("node:assert");
@@ -19,9 +22,7 @@ const FEES = {
 };
 const { milliToViz } = require("../packages/viz-watcher/dist/vizChain.js");
 const { buildReleaseTx } = require("../packages/viz-watcher/dist/vizSign.js");
-const { signMintApproval, verifyMintApproval, keyPairFromMnemonic } = require("../packages/ton-watcher/dist/tonSign.js");
 const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
-const { mnemonicNew } = require("@ton/crypto");
 
 (async () => {
   // ---- VIZ release path ----------------------------------------------------
@@ -63,11 +64,7 @@ const { mnemonicNew } = require("@ton/crypto");
   await assert.rejects(opA.signVizRelease(action, { ...proposal, to: "mallory" }), /recipient/);
   console.log("[viz] tampered proposals (wrong amount / recipient) REJECTED OK");
 
-  // ---- TON mint approval path ---------------------------------------------
-  const words = await mnemonicNew();
-  const mnemonic = words.join(" ");
-  const { publicKey } = await keyPairFromMnemonic(mnemonic);
-
+  // ---- TON mint approval path (Phase B: on-chain, delegated to TonApprover) ---
   const pegIn = canonicalPegIn({
     trxId: "t1",
     opIndex: 0,
@@ -84,26 +81,47 @@ const { mnemonicNew } = require("@ton/crypto");
   assert.ok(qTon.ok, "expected a valid TON quote");
   const mintProposal = {
     orderSeqno: "1",
+    orderAddr: "EQorder_addr",
     toAddress: pegIn.recipient, // "EQrecipient_addr"
     amountMilliViz: qTon.b.net.toString(),
     destProvisioned: true,
     orderHashHex,
+    actionId: pegIn.id,
+    proposerOperatorId: "op-1",
   };
 
-  const opTon = new KeyedSigner("op-1", "", mnemonic, FEES, null, DISABLED_SOURCE_VALIDATION);
+  // Inject a fake on-chain approver: the signer must validate net+recipient, compute
+  // isProposer from proposerOperatorId, delegate the effect, and encode the receipt.
+  let seenIsProposer = null;
+  const fakeApprover = {
+    approveMint: async (p, isProposer) => {
+      seenIsProposer = isProposer;
+      assert.strictEqual(p.orderHashHex, orderHashHex, "approver receives the pinned order hash");
+      return { orderAddr: p.orderAddr, myIdx: 0, role: "propose" };
+    },
+  };
+  const opTon = new KeyedSigner("op-1", "", "", FEES, null, DISABLED_SOURCE_VALIDATION, null, fakeApprover);
   const tonAppr = await opTon.approveTonMint(pegIn, mintProposal);
-  assert.ok(verifyMintApproval(mintProposal, tonAppr.signature, publicKey), "ed25519 approval failed to verify");
-  console.log("[ton] ed25519 mint approval verifies against the operator pubkey OK");
+  assert.strictEqual(seenIsProposer, true, "op-1 is the designated proposer");
+  assert.ok(tonAppr.signature.startsWith("ton:EQorder_addr:0:propose"), "on-chain receipt encoded into approval");
+  assert.strictEqual(tonAppr.operatorId, "op-1");
+  console.log("[ton] signer validates + delegates on-chain approval as PROPOSER, encodes receipt OK");
 
-  // tampered order hash must fail verification
-  const tampered = { ...mintProposal, orderHashHex: createHash("sha256").update("mint-order-2").digest("hex") };
-  assert.strictEqual(verifyMintApproval(tampered, tonAppr.signature, publicKey), false);
-  // net mismatch must be rejected by the signer
+  // a non-proposer operator must compute isProposer=false
+  const opTon2 = new KeyedSigner("op-2", "", "", FEES, null, DISABLED_SOURCE_VALIDATION, null, fakeApprover);
+  await opTon2.approveTonMint(pegIn, mintProposal);
+  assert.strictEqual(seenIsProposer, false, "op-2 is not the designated proposer -> approve, not propose");
+
+  // net mismatch must be rejected BEFORE any on-chain effect
   await assert.rejects(opTon.approveTonMint(pegIn, { ...mintProposal, amountMilliViz: "1" }), /net/);
-  console.log("[ton] tampered order hash fails verify; amount mismatch REJECTED OK");
+  // a signer with NO approver configured must refuse (never silently unauthorized)
+  const opNoTon = new KeyedSigner("op-1", "", "", FEES, null, DISABLED_SOURCE_VALIDATION);
+  await assert.rejects(opNoTon.approveTonMint(pegIn, mintProposal), /approver not configured/);
+  console.log("[ton] non-proposer role + net mismatch + missing-approver all handled OK");
 
-  console.log("\nRESULT: VIZ release signing+merge and TON mint approval signing both work");
-  console.log("through the real signer. Broadcast/order-execution need live contracts.");
+  console.log("\nRESULT: VIZ release signing+merge works; TON mint approval delegates the");
+  console.log("on-chain effect through the real signer. Order execution is proven in");
+  console.log("ton-onchain-approval-spike.cjs against the real vendored contracts.");
 })().catch((e) => {
   console.error(e);
   process.exit(1);

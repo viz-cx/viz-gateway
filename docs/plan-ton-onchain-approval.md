@@ -1,6 +1,12 @@
 # Phase B — TON on-chain M-of-N approval routing (design)
 
-**Status:** in progress. Authored 2026-07-03 against `main` = `551912a`.
+**Status:** IMPLEMENTED 2026-07-03. Trust-boundary wiring done: the coordinator is
+keyless on TON; operators propose/approve on-chain from their own wallets; the
+offline 3-of-5 sandbox proof is green in `npm run verify`. What remains is the
+LIVE 3-of-5 testnet proof (operational — see RUNBOOK §9b) and the deferred
+`action.id`-in-order idempotency embed (belt-and-suspenders; the single-designated-
+proposer + persist-before-propose guard covers the crash window today).
+Authored 2026-07-03 against `main` = `551912a`.
 **Parent plan:** `docs/plan-nof-m-federation.md` §Phase B (this doc resolves its open
 design decisions and is the implementation spec).
 
@@ -119,7 +125,7 @@ proposer sends) is retained and now paired with the `action.id`-in-order scan.
 | `packages/coordinator/src/adapters.ts` | `TonMintBroadcaster.buildProposal` builds the real order cell + hash + embeds actionId; `broadcast` = poll-until-executed (no key). `HttpSignerClient` unchanged (receipt rides in `signature`). |
 | `packages/coordinator/src/index.ts` | **Remove `signerMnemonic` from the coordinator's `TonHttpChain`.** Coordinator becomes truly keyless on TON. |
 | `packages/common/src/types.ts` | `TonMintProposal`: add `orderAddr`, `actionId`; `orderHashHex` becomes the real order cell hash. |
-| `packages/common/src/config.ts` | Signer config gains `TON_MULTISIG_ADDRESS` + `TON_IS_PROPOSER` (or derive proposer from federation order). Coordinator no longer reads `TON_SIGNER_MNEMONIC`. |
+| `packages/common/src/config.ts` | No new keys needed. **Implemented:** proposer = `federation.operators[0].id` (the coordinator pins it in `proposal.proposerOperatorId`; each signer computes `isProposer = proposerOperatorId === operatorId`). `TON_MULTISIG_ADDRESS`/`TON_SIGNER_MNEMONIC` already existed. Coordinator no longer *reads* `TON_SIGNER_MNEMONIC` (keyless). |
 
 ## Proof plan
 

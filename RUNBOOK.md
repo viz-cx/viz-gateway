@@ -18,9 +18,15 @@ The two chains authorize disbursements *differently*, and the code reflects this
   at threshold the order executes the mint. For **1-of-1** this collapses to a
   single `new_order` with `approve_on_init=true` from your signer wallet.
 
-Consequence: `TonHttpChain.submitMintOrder` is the integration point that must
-create/approve that on-chain order via the official Multisig wrapper — it is the
-one piece still to wire (see step 9). Everything else runs today.
+Consequence (Phase B, DONE): the coordinator is **keyless on TON**. It only
+describes the mint order (`TonMintBroadcaster.buildProposal` → real order-cell
+hash + deterministic order address); each operator's signer performs the actual
+on-chain propose/approve **from its own wallet** (`KeyedSigner.approveTonMint` →
+`TonApprover`, `packages/ton-watcher/src/tonApprove.ts`). `broadcast` submits
+nothing — it polls `orderExecuted`. This is what makes TON a genuine M-of-N: the
+component that builds the order cannot itself move funds. Proven offline against
+the real vendored contracts by `tools/ton-onchain-approval-spike.cjs` (3-of-5, in
+`npm run verify`); live 3-of-5 testnet checklist in §9b.
 
 > For the automated end-to-end round-trip harness, see [docs/e2e.md](docs/e2e.md).
 
@@ -272,12 +278,50 @@ Send **≥ 2,000 VIZ** to `viz-gateway` with the memo set to your **TON address*
 Expected: `viz-watcher` detects the deposit after irreversibility (~14 blocks),
 applies the fee/min, and POSTs the peg-in action to the coordinator.
 
-`submitMint` (`packages/ton-watcher/src/tonChain.ts`) sends the `new_order` to the
-multisig that mints `net` wVIZ to the user, with `approve_on_init=true` (1-of-1
-executes immediately). **PROVEN end-to-end on TON testnet 2026-07-01**: a live
-peg-in through the full stack (viz-watcher → coordinator → signer → `submitMint`)
-minted `net` wVIZ to the recipient. The fee-split mint (fee → treasury) is still a
-gap (see below).
+The peg-in mint is authorized by **on-chain multisig approvals** (Phase B): the
+designated proposer's signer sends `new_order` (`approve_on_init=true`) and each
+other operator's signer sends `approve` from its own wallet; at threshold the
+order executes and mints `net` wVIZ to the user. For **1-of-1** this collapses to
+a single `new_order` — **PROVEN end-to-end on TON testnet 2026-07-01**. The
+multi-operator on-chain routing is proven offline (3-of-5) by
+`tools/ton-onchain-approval-spike.cjs`; live 3-of-5 checklist in §9b. The fee-split
+mint (fee → treasury) is still a gap (see below).
+
+## 9b. Live 3-of-5 TON peg-in proof (real M-of-N, on-chain approvals)
+
+Proves the Phase B trust boundary on testnet: five independent operator wallets,
+a keyless coordinator, and a mint that only lands once 3 distinct operators
+approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
+
+1. **Deploy a fresh 3-of-5 multisig** with the five operator wallet addresses as
+   signers (order matters — it fixes each operator's `signers[index]`). Hand the
+   wVIZ minter admin to it. Record → `TON_MULTISIG_ADDRESS`,
+   `TON_JETTON_MINTER_ADDRESS`.
+2. **Run five signer processes**, one per operator, each with its OWN
+   `TON_SIGNER_MNEMONIC` (its wallet key), its own `TON_ENDPOINT`, and the shared
+   `TON_MULTISIG_ADDRESS` + `TON_JETTON_MINTER_ADDRESS`. Set `FEDERATION_N=5`,
+   `FEDERATION_THRESHOLD=3`. The signer refuses a TON peg-in unless its
+   `TonApprover` is configured (minter + multisig + mnemonic all present).
+3. **Run the coordinator with NO `TON_SIGNER_MNEMONIC`** (it is keyless on TON and
+   ignores it if set). It designates the **first** federation operator as proposer;
+   order `SIGNER_ENDPOINTS` so that operator's signer is contacted first.
+4. **Drive a peg-in** (send ≥ min VIZ to `viz-gateway` with the memo = a TON
+   address). Expected: proposer's signer sends `new_order` (self-approve = 1/3);
+   the next two signers each send `approve` (2/3, then 3/3 → executes). The
+   coordinator's `broadcast` polls `orderExecuted` and returns the order address.
+   Confirm wVIZ supply increased by exactly `net`.
+5. **Under-threshold proof:** stop 3 of the 5 signers, drive another peg-in;
+   only ≤2 approvals land, the order never executes, and no wVIZ is minted.
+6. **Crash-window re-proof:** kill the coordinator mid-approval (after `new_order`,
+   before threshold), restart, re-drive. The proposer's signer finds its order
+   already exists (no second `new_order`); the remaining approvals complete the
+   SAME order. Supply increases by `net` exactly once (no double-mint).
+7. **Rotation proof:** rotate the multisig signer set (drop an old operator); the
+   dropped operator's `approve` is rejected on-chain (err 106 `unauthorized_sign`),
+   while the new set reaches threshold.
+
+Exit criteria: threshold mint by independent wallets ✔, under-threshold no-mint ✔,
+crash-window single-mint ✔, rotation rejects old signers ✔.
 
 ## How peg-in mint works on Solana
 
@@ -534,9 +578,12 @@ operator to carry a Solana pubkey and fails if one is missing.
   topology + fault-matrix (under-threshold stall, process-kill isolation) proven via
   `npm run e2e:federation`; live round-trip (solo TON peg-in → 2-of-3 VIZ release) proven
   via `npm run e2e:federation:live`. Operator keys in `docs/federation-keys.md` (gitignored).
-  TON peg-in is still 1-of-1 on-chain (Phase B — see `docs/plan-nof-m-federation.md §Phase B`).
-- **`submitMintOrder`** — ✅ DONE + proven live on TON testnet 2026-07-01 (peg-in
-  round-trips through the full stack).
+- **TON on-chain M-of-N approval routing (Phase B)** — ✅ WIRED + offline-proven
+  3-of-5. Coordinator is keyless on TON; operators propose/approve from their own
+  wallets (`TonApprover`); `broadcast` polls `orderExecuted`. Proven against the real
+  vendored contracts in `tools/ton-onchain-approval-spike.cjs` (`npm run verify`).
+  Live 3-of-5 testnet proof: checklist in §9b (deferred operational step). 1-of-1
+  peg-in round-trip proven live on TON testnet 2026-07-01.
 - **TON peg-out (detection + source validation)** — ✅ PROVEN end-to-end on testnet
   2026-07-01. Required fixing burn detection to parse `internal_transfer` (the real inbound
   message at the gateway jetton wallet) plus `TonHttpChain.getBurn` + the TON branch in

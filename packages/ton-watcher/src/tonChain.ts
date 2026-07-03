@@ -1,14 +1,20 @@
-import { Address, JettonMaster, TonClient, internal, SendMode, WalletContractV4, toNano } from "@ton/ton";
+import { Address, JettonMaster, TonClient, internal, SendMode, toNano } from "@ton/ton";
 import { beginCell } from "@ton/core";
 import type { Cell, Slice, Transaction } from "@ton/core";
 import type { TransferRequest } from "@gateway/contracts-ton";
 import type { RemoteBurn, RemoteChain, TonMintProposal } from "@gateway/common";
-import { Multisig } from "@gateway/contracts-ton";
-import { keyPairFromMnemonic } from "./tonSign";
+import { Multisig, Order } from "@gateway/contracts-ton";
 
 /**
- * Live TON chain adapter. Read path: finalized burns, jetton balances.
- * Write path: submit the multisig-v2 new_order that mints wVIZ (peg-in).
+ * Live TON chain adapter — READ-ONLY (Phase B). It follows finalized burns,
+ * reads jetton balances/supply, and reads multisig order state (existence,
+ * executed, seqno) for the coordinator's keyless poll-until-executed broadcast.
+ *
+ * It holds NO key and never sends a message. The peg-in mint is authorized by
+ * on-chain multisig-v2 approvals sent from each operator's OWN wallet in their
+ * signer process (packages/ton-watcher/src/tonApprove.ts, driven by KeyedSigner).
+ * This is what makes TON a genuine M-of-N: the coordinator that constructs the
+ * order proposal cannot itself move funds. See docs/plan-ton-onchain-approval.md.
  *
  * Peg-out model: user sends wVIZ to the gateway's Jetton wallet with a text
  * comment = their VIZ account. The gateway jetton wallet RECEIVES a TEP-74
@@ -31,8 +37,6 @@ const OP_TRANSFER_NOTIFICATION = 0x7362d09c;
 // Standard governed-minter op codes (ton-blockchain/token-contract).
 const OP_MINT = 21;
 const OP_INTERNAL_TRANSFER = 0x178d4519;
-// TTL for a new multisig order (1 hour should cover any signing latency).
-const ORDER_TTL_SEC = 3600;
 
 /**
  * Parse an inbound jetton message at the gateway's OWN jetton wallet into
@@ -124,7 +128,6 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
   private readonly minter: Address;
   private readonly gatewayWallet: Address | null;
   private readonly multisigAddress: string;
-  private readonly signerMnemonic: string;
   private readonly finalityBufferSec: number;
   private readonly maxTransactions: number;
 
@@ -134,7 +137,6 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     minterAddress: string,
     gatewayJettonWallet: string,
     multisigAddress: string,
-    signerMnemonic: string,
     finalityConfirmations: number,
     maxTransactions = 20,
   ) {
@@ -142,7 +144,6 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     this.minter = Address.parse(minterAddress);
     this.gatewayWallet = gatewayJettonWallet ? Address.parse(gatewayJettonWallet) : null;
     this.multisigAddress = multisigAddress;
-    this.signerMnemonic = signerMnemonic;
     // ~5s per masterchain block; convert the confirmation count to a time buffer.
     this.finalityBufferSec = Math.max(6, finalityConfirmations * 5 + 5);
     this.maxTransactions = Math.max(1, maxTransactions);
@@ -255,64 +256,59 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
   }
 
   /**
-   * Submit a multisig-v2 new_order that mints `proposal.amountMilliViz` wVIZ
-   * (= base units, 3 decimals) to `proposal.toAddress` via the standard governed
-   * jetton minter. For a 1-of-1 setup, `approve_on_init=true` executes the mint
-   * in the same transaction. For M-of-N, remaining signers must send on-chain
-   * `approve` messages to the returned order address.
-   *
-   * Off-chain ed25519 signatures in `_mintAuth` are NOT used here (TON uses
-   * on-chain approvals, not off-chain sigs). They are collected by the signer
-   * service for audit purposes and future M-of-N on-chain approval routing.
-   *
-   * Returns the multisig order address (hex string) for status tracking.
+   * The packed mint-order cell hash operators independently rebuild + compare
+   * before approving. Seqno-INDEPENDENT (depends only on minter + recipient + net),
+   * so the coordinator can pin it in the proposal and every operator recomputes the
+   * exact same value from the canonical action. This binds each on-chain approval to
+   * the recipient/amount the operator validated. Uses THIS chain's pinned minter.
    */
-  async submitMint(proposal: TonMintProposal, _mintAuth: string[]): Promise<string> {
-    if (!this.multisigAddress) throw new Error("TON_MULTISIG_ADDRESS is required for submitMint");
-    if (!this.signerMnemonic) throw new Error("TON_SIGNER_MNEMONIC is required for submitMint");
+  orderHashFor(toAddress: string, amountBaseUnits: bigint): string {
+    return mintOrderCell(this.minter, Address.parse(toAddress), amountBaseUnits).hashHex;
+  }
 
-    const c = this.client;
-    const multisigAddr = Address.parse(this.multisigAddress);
-    const toAddr = Address.parse(proposal.toAddress);
-    const amountBaseUnits = BigInt(proposal.amountMilliViz);
+  /**
+   * Read a multisig order's state: whether it is inited (a new_order landed),
+   * executed (threshold reached → the mint fired), and its approval count. Returns
+   * `{ inited:false }` if the order contract is not deployed yet. This is the read
+   * the coordinator's keyless broadcast polls to confirm the mint executed, and the
+   * operator-side approver uses to decide propose-vs-approve.
+   */
+  async orderData(
+    orderAddr: string,
+  ): Promise<{ inited: boolean; executed: boolean; approvalsNum: number; threshold: number }> {
+    const addr = Address.parse(orderAddr);
+    const state = await this.client.getContractState(addr);
+    if (state.state !== "active") return { inited: false, executed: false, approvalsNum: 0, threshold: 0 };
+    const od = await this.client.open(Order.createFromAddress(addr)).getOrderData();
+    return {
+      inited: Boolean(od.inited),
+      executed: Boolean(od.executed),
+      approvalsNum: Number(od.approvals_num ?? 0),
+      threshold: Number(od.threshold ?? 0),
+    };
+  }
 
-    // Build the multisig TransferRequest (mint from the multisig to the minter) via the
-    // shared PURE builder so the live path and the sandbox proof never drift.
-    const mintTransfer = buildMintTransfer(this.minter, toAddr, amountBaseUnits);
+  /**
+   * True once the order at `orderAddr` has EXECUTED (threshold approvals reached and
+   * the mint fired). This — not mere existence — is the coordinator's "mint landed"
+   * predicate: an order that exists but is under threshold must keep collecting
+   * approvals, not be treated as done. (Existence is the *no-second-order* guard,
+   * enforced by the operator-side proposer via orderExists.)
+   */
+  async orderExecuted(orderAddr: string): Promise<boolean> {
+    return (await this.orderData(orderAddr)).executed;
+  }
 
-    // Fetch the current multisig state for sendNewOrder validation.
-    const dataMultisig = c.open(Multisig.createFromAddress(multisigAddr));
-    const data = await dataMultisig.getMultisigData();
-
-    const { secretKey, publicKey } = await keyPairFromMnemonic(this.signerMnemonic);
-    const signerWallet = WalletContractV4.create({ workchain: 0, publicKey: Buffer.from(publicKey) });
-
-    const myIdx = data.signers.findIndex((s) => s.equals(signerWallet.address));
-    if (myIdx < 0) {
-      throw new Error(
-        `TON signer wallet ${signerWallet.address.toString()} not found in multisig signers`,
-      );
-    }
-
-    const orderAddr = await dataMultisig.getOrderAddress(data.nextOrderSeqno);
-
-    // Re-open with synthesised config so sendNewOrder's signer-index validation passes.
-    const multisigWithConfig = new Multisig(multisigAddr, undefined, {
-      threshold: Number(data.threshold),
-      signers: data.signers,
-      proposers: data.proposers,
-      allowArbitrarySeqno: false,
-    });
-    const openedMultisig = c.open(multisigWithConfig);
-    const openedWallet = c.open(signerWallet);
-    const sender = openedWallet.sender(Buffer.from(secretKey));
-
-    const expiration = Math.floor(Date.now() / 1000) + ORDER_TTL_SEC;
-    // approve_on_init=true: in a 1-of-1 setup the proposer self-approves and the
-    // order executes immediately. For M-of-N the remaining signers must call
-    // order.sendApprove() on-chain; that routing is deferred.
-    await openedMultisig.sendNewOrder(sender, [mintTransfer], expiration, toNano("1"), myIdx, true);
-
-    return orderAddr.toString();
+  /**
+   * RETIRED (Phase B): the coordinator is keyless on TON and never sends a message.
+   * The mint is authorized by on-chain multisig approvals from each operator's own
+   * wallet (KeyedSigner.approveTonMint → tonApprove.ts). Kept only to satisfy the
+   * RemoteChain interface; calling it is a wiring bug (a would-be keyed coordinator).
+   */
+  async submitMint(_proposal: TonMintProposal, _mintAuth: string[]): Promise<string> {
+    throw new Error(
+      "TonHttpChain.submitMint is retired: TON mints are authorized by on-chain operator approvals " +
+        "(TonMintBroadcaster polls orderExecuted; operators propose/approve from their own wallets).",
+    );
   }
 }
