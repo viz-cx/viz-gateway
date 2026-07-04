@@ -81,6 +81,21 @@ async function main() {
     throw new Error("every operator needs its OWN FED_OP<i>_TON_MNEMONIC for the live TON proof");
   }
 
+  // Rotation-only: criteria 1-3 already proven+recorded on this multisig (RUNBOOK
+  // §9b), so prove ONLY the destructive criterion 4 directly against the deployed
+  // multisig — no federation stack, no VIZ preflight, no re-mints. Still gated on
+  // FED_ROTATION_MODE=live inside proveRotation (unset → SKIPPED, exits non-fatally).
+  if (process.env.FED_ROTATION_ONLY === "1") {
+    console.log(`[fed-ton] run=${cfg.runId} ROTATION-ONLY (criteria 1-3 skipped; already proven)`);
+    const rotated = await proveRotation(cfg, fedCfg);
+    console.log(
+      rotated
+        ? `\n[fed-ton] ✓ §9b criterion 4 (rotation rejects old signers) PROVEN`
+        : `[fed-ton]   set FED_ROTATION_MODE=live to run it`,
+    );
+    return;
+  }
+
   const baseEnv = buildRunEnv(cfg);
   Object.assign(process.env, baseEnv);
   const fees = loadConfig().fees;

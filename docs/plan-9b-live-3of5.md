@@ -1,8 +1,8 @@
 # Plan — §9b LIVE 3-of-5 TON peg-in proof (real on-chain M-of-N)
 
-**Status:** Tasks 1-3 DONE + criteria 1-3 of Task 2 implemented (2026-07-03,
-branch `feat/9b-live-3of5`). Remaining: fund wallets (Task 4, human) + criterion 4
-rotation automation. Build + verify green; e2e tsconfig typechecks.
+**Status:** ✅ COMPLETE — all 4 §9b criteria PROVEN live on TON testnet
+(criteria 1-3 on 2026-07-04, criterion 4 rotation on 2026-07-05). Build + verify
+green. See RUNBOOK §9b verification record.
 **Milestone:** last "prove it live" item on the Phase B federation track.
 **Predecessor:** Phase B code MERGED (PR #19, `main` @ `df5b5cc`) — coordinator
 keyless on TON, operators approve on-chain from their own wallets, offline 3-of-5
@@ -122,18 +122,24 @@ Prereq: fund the 5 operator wallets + the deployer wallet (faucet). Then, per
    (hand the wVIZ minter admin to the fresh 3-of-5 multisig).
 4. Fill `.env.e2e`: `E2E_TON_MULTISIG_ADDRESS`, `E2E_TON_JETTON_MINTER_ADDRESS`,
    `FED_N=5`, `FED_THRESHOLD=3`, `FED_OP{1..5}_ID/WIF/TON_MNEMONIC`.
-5. `npm run e2e:federation:ton:live` → run the 4 criteria.
+5. `npm run e2e:federation:ton:live` → run criteria 1-3 (+ criterion 4 if
+   `FED_ROTATION_MODE=live`). To prove ONLY criterion 4 against an
+   already-proven multisig (skips the stack, VIZ preflight, and re-mints), run
+   `FED_ROTATION_ONLY=1 FED_ROTATION_MODE=live npm run e2e:federation:ton:live`
+   (needs threshold+1 funded operators — the dropped one must send the rejected approve).
 
 ---
 
-## Exit criteria (from RUNBOOK §9b)
-- [ ] threshold mint by independent wallets ✔
-- [ ] under-threshold no-mint ✔
-- [ ] crash-window single-mint ✔
-- [ ] rotation rejects old signers ✔
+## Exit criteria (from RUNBOOK §9b) — ✅ ALL PROVEN LIVE
+- [x] threshold mint by independent wallets ✔ (2026-07-04, run `…49bmor`)
+- [x] under-threshold no-mint ✔ (2026-07-04)
+- [x] crash-window single-mint ✔ (2026-07-04)
+- [x] rotation rejects old signers ✔ (2026-07-05, run `…flwrzw`, standalone via
+  `FED_ROTATION_ONLY=1 FED_ROTATION_MODE=live`; exit 106 `unauthorized_sign`
+  confirmed on-chain; multisig now permanently 3-of-4)
 
-On completion: update `RUNBOOK.md` §9b with the proof record (addresses, tx
-hashes, run id), flip the SUMMARY open task, and write a memory note.
+DONE: proof record in `RUNBOOK.md` §9b (addresses, order addrs, run ids); this
+checklist flipped; SUMMARY + memory updated.
 
 ---
 

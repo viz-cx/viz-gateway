@@ -331,11 +331,15 @@ approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
    opt-in via `FED_ROTATION_MODE=live` and run **last** — it PERMANENTLY rotates the
    multisig (3-of-5 → 3-of-4), so re-running the suite needs a fresh 3-of-5 deploy
    (step 0-1). Left unset, criterion 4 is skipped and criteria 1-3 still prove out.
+   To prove ONLY criterion 4 against an already-proven multisig (skip the stack,
+   VIZ preflight, and re-mints), add `FED_ROTATION_ONLY=1`. Criterion 4 needs
+   **threshold+1** funded operators — the dropped operator must itself send the
+   `approve` that gets rejected on-chain.
 
 Exit criteria: threshold mint by independent wallets ✔, under-threshold no-mint ✔,
 crash-window single-mint ✔, rotation rejects old signers ✔.
 
-### Verification record (2026-07-04) — criteria 1-3 PROVEN live
+### Verification record (2026-07-04 / 2026-07-05) — ALL 4 criteria PROVEN live
 
 Run `e2e-1783094535761-49bmor` on TON testnet, driver `npm run
 e2e:federation:ton:live` (with `.env.e2e` sourced + `E2E_FRESH_STORE=1`). Real
@@ -355,9 +359,16 @@ e2e:federation:ton:live` (with `.env.e2e` sourced + `E2E_FRESH_STORE=1`). Real
   `EQCUqDo76hItWHMacEDDv0f5JfB6CSOz3UAjpv1-xHdm3OvW`; stack crashed after the order
   landed, relaunched → recovery completed the SAME order (no second `new_order`),
   wVIZ **+15090 once**, seqno stable at 8 (no double-mint). ✔
-- **④ Rotation:** DEFERRED — destructive (permanently rotates 3-of-5 → 3-of-4);
-  run separately via `FED_ROTATION_MODE=live` after re-funding the proposer, then
-  re-deploy a fresh 3-of-5 to re-prove 1-3 (step 0-1).
+- **④ Rotation (2026-07-05, run `e2e-1783180883396-flwrzw`, standalone via
+  `FED_ROTATION_ONLY=1 FED_ROTATION_MODE=live`):** after funding op-4 to 2 TON,
+  op-2 (proposer) proposed dropping op-4; op-1 + op-3 approved → multisig adopted
+  the rotated **3-of-4** set (op-4 removed). Rotation order
+  `EQD3xXJ5PFG2uY6sRLgSc3viwFAUv4DStib0ru15vDxH6zJn`. On a fresh test order
+  `EQCnOKiqjPHgFF0HDqqaKhYa3RBGJzjKVW6JQGGf6NxQb4ad` the dropped op-4's `approve`
+  was **rejected on-chain — exit 106 `unauthorized_sign` confirmed** (approvals held
+  at 1, never counted); the retained 3-of-4 (op-2 + op-1 + op-3) then reached
+  threshold and executed. ✔ **NOTE:** the multisig above is now permanently
+  **3-of-4** — re-running criteria 1-3 needs a fresh 3-of-5 deploy (step 0-1).
 
 Fixes this run made the live path work (all on `fix/9b-ton-live-driver`): the
 proposer needs ~1 TON/order (`TON_ORDER_VALUE_NANO`, lowered to 0.3 TON for the
