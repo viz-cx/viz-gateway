@@ -53,6 +53,8 @@ export interface TonApproverOpts {
   pollIntervalMs?: number;
   /** Max time to wait for the proposer's order to appear / an approval to reflect (ms). */
   maxWaitMs?: number;
+  /** TON (nano) the proposer attaches to new_order to fund the Order contract. */
+  orderValueNano?: bigint;
 }
 
 export class TonApprover implements TonApprovalClient {
@@ -61,6 +63,7 @@ export class TonApprover implements TonApprovalClient {
   private readonly multisigAddr: Address;
   private readonly pollIntervalMs: number;
   private readonly maxWaitMs: number;
+  private readonly orderValueNano: bigint;
 
   constructor(
     endpoint: string,
@@ -78,6 +81,7 @@ export class TonApprover implements TonApprovalClient {
     this.multisigAddr = Address.parse(multisigAddress);
     this.pollIntervalMs = opts.pollIntervalMs ?? 3000;
     this.maxWaitMs = opts.maxWaitMs ?? 60000;
+    this.orderValueNano = opts.orderValueNano ?? toNano("1");
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -145,7 +149,7 @@ export class TonApprover implements TonApprovalClient {
         // approve_on_init=true → the proposer's own approval counts immediately.
         await this.client
           .open(withConfig)
-          .sendNewOrder(sender, [mintTransfer], expiration, toNano("1"), myIdx, true);
+          .sendNewOrder(sender, [mintTransfer], expiration, this.orderValueNano, myIdx, true);
         await this.waitForOrderInited(orderAddr, proposal.actionId);
         return { orderAddr: proposal.orderAddr, myIdx, role: "propose" };
       }

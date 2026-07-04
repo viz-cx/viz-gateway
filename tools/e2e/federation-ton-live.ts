@@ -33,13 +33,41 @@ import { pollUntil } from "./poll";
 import { launchStack, launchFederationStack, type FederationStack, type LaunchedStack } from "./stack";
 import { submitLock, vizBalanceMilliViz } from "./viz";
 import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists } from "./ton";
+import { proveRotationLive } from "./ton-rotation";
 
-const FIND_ROW_TIMEOUT_MS = 3 * 60_000;
-const ORDER_LANDS_TIMEOUT_MS = 5 * 60_000;
-const MINT_SETTLE_TIMEOUT_MS = 4 * 60_000;
-const RECOVERY_TIMEOUT_MS = 4 * 60_000;
-const UNDER_THRESHOLD_WAIT_MS = 3 * 60_000; // long enough that a mint WOULD have landed
-const POLL_MS = 4_000;
+// Live testnet end-to-end mint latency (VIZ irreversibility lag + 3 SEQUENTIAL
+// on-chain TON approvals + toncenter 504 retries) routinely exceeds 4 min, so the
+// settle/recovery windows are generous. A too-tight window fails a mint that is
+// in fact landing correctly (observed: net credited at ~5 min).
+const FIND_ROW_TIMEOUT_MS = 4 * 60_000;
+const ORDER_LANDS_TIMEOUT_MS = 8 * 60_000;
+const MINT_SETTLE_TIMEOUT_MS = 10 * 60_000;
+const RECOVERY_TIMEOUT_MS = 10 * 60_000;
+const UNDER_THRESHOLD_WAIT_MS = 5 * 60_000; // > max positive-mint latency, so a mint WOULD have landed
+// Criterion 2 uses a SHORT delivery window (well under UNDER_THRESHOLD_WAIT_MS) so its
+// under-threshold peg-in exhausts the window and goes REFUNDING — a terminal state —
+// *within* the criterion. Otherwise the row stays QUEUED and, once criterion 3
+// relaunches all signers, its half-approved order completes and mints late (observed:
+// c2 minted during c3, doubling c3's delta). The wide DISPATCHER_WINDOW_MS that keeps
+// c1/c3 from refunding a legitimately-landing mint is exactly what caused that, so c2
+// opts out of it.
+const UNDER_THRESHOLD_WINDOW_MS = 2 * 60_000;
+const POLL_MS = 5_000;
+// The dispatcher REFUNDS a PEG_IN whose delivery window elapses before threshold
+// is met (packages/dispatcher/src/policy.ts). Its default is 3 min — shorter than
+// the ~5-min live TON mint (3 sequential on-chain approvals + toncenter retries),
+// so a correctly-landing mint would be refunded mid-flight. Widen it past the
+// observed mint latency so the dispatcher rides out transient 504s instead.
+const DISPATCHER_WINDOW_MS = 8 * 60_000;
+// Per-step on-chain wait for the TON approver (order deploy / vote reflect). The 60s
+// default is too tight for testnet; three sequential steps at this ceiling stay
+// within DISPATCHER_WINDOW_MS on the happy path (each step typically ~30-90s).
+const TON_APPROVE_MAX_WAIT_MS = 150_000;
+// TON (nano) the proposer attaches per order. The mint action needs ~0.1 TON + gas;
+// 0.3 TON covers it with margin while keeping the proposer's per-order drain low
+// (surplus flows to the multisig, not back to the proposer), so a lightly-funded
+// proposer can still cover the whole suite. Overrides the 1 TON default.
+const TON_ORDER_VALUE_NANO = 300_000_000;
 
 const WATCHERS = ["viz-watcher", "ton-watcher", "dispatcher"] as const;
 
@@ -66,6 +94,12 @@ async function main() {
     ...baseEnv,
     COORDINATOR_LISTEN: "127.0.0.1:8080",
     COORDINATOR_URL: "http://127.0.0.1:8080",
+    // Each signer's TonApprover waits for its proposed order / approval to land
+    // on-chain. Testnet inclusion + toncenter view lag exceed the 60s default
+    // (observed: order did not appear within 60s), so widen it for the live run.
+    TON_APPROVE_MAX_WAIT_MS: String(TON_APPROVE_MAX_WAIT_MS),
+    // Lower per-order deployment value so a lightly-funded proposer covers the suite.
+    TON_ORDER_VALUE_NANO: String(TON_ORDER_VALUE_NANO),
   });
   delete coordinatorEnv["TON_SIGNER_MNEMONIC"];
 
@@ -74,6 +108,8 @@ async function main() {
     FEDERATION_N: String(fedCfg.n),
     FEDERATION_THRESHOLD: String(fedCfg.threshold),
     COORDINATOR_URL: "http://127.0.0.1:8080",
+    // Don't refund a mint that is still legitimately collecting on-chain approvals.
+    DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),
   };
 
   const tonOwner = cfg.ton.burnOwner; // wVIZ mint recipient
@@ -89,10 +125,13 @@ async function main() {
     await proveThresholdMint(cfg, fees, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner);
     await proveUnderThreshold(cfg, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner, fedCfg.n, fedCfg.threshold);
     await proveCrashWindow(cfg, fees, store, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner);
-    await proveRotation(cfg);
+    const rotated = await proveRotation(cfg, fedCfg);
 
     console.log(`\n[fed-ton] ✓ §9b LIVE 3-of-5 PROOF COMPLETE`);
-    console.log(`[fed-ton]   threshold mint ✓  under-threshold no-mint ✓  crash-window single-mint ✓  rotation ✓`);
+    console.log(
+      `[fed-ton]   threshold mint ✓  under-threshold no-mint ✓  crash-window single-mint ✓  ` +
+        (rotated ? "rotation ✓" : "rotation ⇢ SKIPPED (set FED_ROTATION_MODE=live to run it)"),
+    );
   } finally {
     await store.close();
   }
@@ -127,7 +166,10 @@ async function proveThresholdMint(
   tonOwner: string,
 ): Promise<void> {
   console.log(`\n[fed-ton] Criterion 1: threshold mint (3 independent on-chain approvals)`);
-  const gross = uniqueGrossMilliViz(20_000n, `${cfg.runId}-mint`);
+  // Base must clear TON's dynamic peg-in floor (base fee + mint-gas floor ≈ 21_000
+  // mVIZ). uniqueGrossMilliViz adds only 0–999 jitter, so 20_000n always landed
+  // below the floor and the coordinator refunded before any approval.
+  const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-mint`);
   const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
   const { seqno: seqnoBefore } = await nextOrderInfo(cfg);
@@ -166,10 +208,13 @@ async function proveUnderThreshold(
 ): Promise<void> {
   const toKill = n - threshold + 1; // kill enough that the remaining live set < threshold
   console.log(`\n[fed-ton] Criterion 2: under-threshold (kill ${toKill} of ${n} signers → no mint)`);
-  const gross = uniqueGrossMilliViz(20_000n, `${cfg.runId}-under`);
+  const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-under`);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
 
-  await withStack(signerSpecs, coordinatorEnv, watcherEnv, `${logDir}-c2`, async (fed) => {
+  // Short window so the under-threshold peg-in refunds (terminal) before criterion 3.
+  const c2WatcherEnv = { ...watcherEnv, DISPATCHER_WINDOW_MS: String(UNDER_THRESHOLD_WINDOW_MS) };
+
+  await withStack(signerSpecs, coordinatorEnv, c2WatcherEnv, `${logDir}-c2`, async (fed) => {
     // Keep the proposer (index 0) alive so it CAN create the order, but starve the
     // approvals below threshold: kill the last `toKill` signers.
     for (let i = fed.signers.length - 1; i >= fed.signers.length - toKill; i--) {
@@ -209,7 +254,7 @@ async function proveCrashWindow(
   console.log(`\n[fed-ton] Criterion 3: crash-window single-mint (no double-mint)`);
   // Fast orphan recovery so the relaunched stack requeues within seconds.
   const fastWatcherEnv = { ...watcherEnv, DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS: "8000", DISPATCHER_INTERVAL_MS: "3000" };
-  const gross = uniqueGrossMilliViz(20_000n, `${cfg.runId}-crash`);
+  const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-crash`);
   const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
   const { orderAddr: predicted, seqno: seqnoBefore } = await nextOrderInfo(cfg);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
@@ -278,29 +323,31 @@ async function proveCrashWindow(
 
 // ── Criterion 4: rotation rejects old signers ───────────────────────────────
 // A live multisig signer-set rotation (update_multisig_params via the order
-// contract) is a full on-chain ceremony. It is driven out-of-band by the
-// operators (see contracts/ton/src/rotateTon.ts + RUNBOOK §9b step 7), then this
-// step verifies the dropped operator's approve is rejected on-chain (err 106
-// unauthorized_sign) while the new set reaches threshold.
+// contract) drives the deployed multisig from its current set to one with an
+// operator dropped, then proves the dropped operator's on-chain `approve` is
+// rejected (err 106 unauthorized_sign) while the retained set still reaches
+// threshold. The full ceremony is automated in ./ton-rotation (proveRotationLive).
 //
-// Until that ceremony is wired into this harness, the step is gated: set
-// FED_ROTATION_MODE=live once the rotation tx has been executed to run the
-// dropped-signer rejection assertion.
-async function proveRotation(cfg: ReturnType<typeof loadE2eConfig>): Promise<void> {
+// SAFETY: this PERMANENTLY rotates the deployed multisig (3-of-5 -> 3-of-4), so it
+// is opt-in via FED_ROTATION_MODE=live and runs last. When unset, it is SKIPPED
+// (criteria 1-3 still prove out); re-running after a rotation needs a fresh 3-of-5
+// deploy (RUNBOOK §9b step 0-1). Returns true iff the rotation proof actually ran.
+async function proveRotation(
+  cfg: ReturnType<typeof loadE2eConfig>,
+  fedCfg: ReturnType<typeof loadFederationConfig>,
+): Promise<boolean> {
   console.log(`\n[fed-ton] Criterion 4: rotation rejects old signers`);
-  const mode = process.env.FED_ROTATION_MODE;
-  if (mode !== "live") {
-    throw new Error(
-      "Criterion 4 (rotation) not yet automated in this harness. Run the multisig " +
-        "rotation ceremony (contracts/ton/src/rotateTon.ts, RUNBOOK §9b step 7), then " +
-        "re-run with FED_ROTATION_MODE=live to assert the dropped operator's approve " +
-        `is rejected (err 106) against ${cfg.ton.multisigAddress}.`,
+  if (process.env.FED_ROTATION_MODE !== "live") {
+    console.log(
+      `[fed-ton]   ⇢ SKIPPED. This criterion PERMANENTLY rotates ${cfg.ton.multisigAddress} ` +
+        `(drops one operator). Set FED_ROTATION_MODE=live to run it (last), then re-deploy a ` +
+        `fresh ${fedCfg.threshold}-of-${fedCfg.n} to re-run the suite (RUNBOOK §9b step 0-1).`,
     );
+    return false;
   }
-  // TODO(§9b step 7): submit a peg-in, have the DROPPED operator attempt an approve,
-  // assert the on-chain exit code is 106 (unauthorized_sign), and that the retained
-  // 3-of-5 set still reaches threshold. Requires the rotated signer set in env.
-  throw new Error("FED_ROTATION_MODE=live path not implemented — see TODO in proveRotation");
+  const operators = fedCfg.operators.map((o) => ({ id: o.id, tonMnemonic: o.tonMnemonic! }));
+  await proveRotationLive(cfg, operators);
+  return true;
 }
 
 /** Newest active PEG_IN/TON row minting to `owner`, created at/after `since`. */

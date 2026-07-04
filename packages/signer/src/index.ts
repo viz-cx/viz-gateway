@@ -103,6 +103,11 @@ async function main(): Promise<void> {
           cfg.ton.jettonMinterAddress,
           cfg.ton.multisigAddress,
           cfg.ton.signerMnemonic,
+          {
+            maxWaitMs: cfg.ton.approveMaxWaitMs,
+            pollIntervalMs: cfg.ton.approvePollIntervalMs,
+            orderValueNano: BigInt(cfg.ton.orderValueNano),
+          },
         )
       : null;
 
