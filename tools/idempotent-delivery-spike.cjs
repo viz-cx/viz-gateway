@@ -25,7 +25,12 @@
 const assert = require("node:assert");
 const { Keypair } = require("@solana/web3.js");
 const viz = require("viz-js-lib");
-const { canonicalPegOut } = require("@gateway/common");
+const { canonicalPegOut, baseFee, pegInFeePolicyFor } = require("@gateway/common");
+
+// The dispatcher (VG-04) derives the FEE_SWEEP amount from the row's immutable gross,
+// NOT the coordinator-pinned fee. Mirror that here (FEES is defined just below) so the
+// spike checks the same independently-derived value.
+const sweepAmountFor = (rec) => baseFee(rec.amountMilliViz, pegInFeePolicyFor(FEES, rec.remoteChain ?? "SOLANA"));
 const { milliToViz } = require("../packages/viz-watcher/dist/vizChain.js");
 const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js");
 const { planTransition, planChildren } = require("../packages/dispatcher/dist/policy.js");
@@ -184,7 +189,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
 
     // Spawn REFUND child (planChildren now sets parentId)
     const updatedRec = await store.get(pegInId);
-    const children = planChildren(updatedRec, "REFUNDING", { feesGateAccount: "fees.gate", feeMilliViz: 0n });
+    const children = planChildren(updatedRec, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n });
     assert.strictEqual(children.length, 1);
     assert.strictEqual(children[0].direction, "REFUND");
     assert.strictEqual(children[0].parentId, pegInId, "REFUND child carries parentId");
@@ -277,10 +282,10 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "BROADCAST", attempts: 0, lastError: null, txid: null,
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(fakeRec, "CONFIRMED", { feesGateAccount: "fees.gate", feeMilliViz: FEE });
+    const kids = planChildren(fakeRec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: sweepAmountFor(fakeRec) });
     assert.strictEqual(kids.length, 1);
     assert.strictEqual(kids[0].direction, "FEE_SWEEP");
-    console.log("[8] short-circuit returns feeMilliViz -> FEE_SWEEP child spawnable OK");
+    console.log("[8] short-circuit recovery -> FEE_SWEEP child spawnable OK");
   }
 
   // ── 9. broadcast=true with no txid -> CONFIRMED with txid=null ──────────────
@@ -307,7 +312,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "CONFIRMED", attempts: 1, lastError: null, txid: "MINT_TX",
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", feeMilliViz: 30000n });
+    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: sweepAmountFor(rec) });
     assert.strictEqual(kids.length, 1);
     assert.strictEqual(kids[0].direction, "FEE_SWEEP");
     assert.strictEqual(kids[0].parentId, "t11:0", "FEE_SWEEP child carries parentId");
@@ -324,14 +329,15 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "REFUNDING", attempts: 3, lastError: null, txid: null,
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(rec, "REFUNDING", { feesGateAccount: "fees.gate", feeMilliViz: 0n });
+    const kids = planChildren(rec, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n });
     assert.strictEqual(kids.length, 0, "no REFUND child when sender is null");
     console.log("[11] PEG_IN REFUNDING with sender=null -> no REFUND child OK");
   }
 
-  // ── 12. PEG_IN CONFIRMED with fee=0n -> no FEE_SWEEP child ───────────────────
-  // Zero-fee (e.g. a dust amount that qualified with exactly the floor) should not
-  // spawn an empty FEE_SWEEP.
+  // ── 12. PEG_IN CONFIRMED with a zero sweep amount -> no FEE_SWEEP child ───────
+  // Defensive guard: the dispatcher never emits a zero-value release. In practice the
+  // derived `base` is always >= the floor (> 0), so this only fires if the amount could
+  // not be derived; the guard keeps a bogus empty FEE_SWEEP from ever being enqueued.
   {
     const rec = {
       id: "t13:0", direction: "PEG_IN", recipient: "9xR", sender: "alice",
@@ -339,9 +345,9 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "CONFIRMED", attempts: 1, lastError: null, txid: "TX",
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", feeMilliViz: 0n });
-    assert.strictEqual(kids.length, 0, "no FEE_SWEEP when fee is 0");
-    console.log("[12] PEG_IN CONFIRMED with fee=0n -> no FEE_SWEEP child OK");
+    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n });
+    assert.strictEqual(kids.length, 0, "no FEE_SWEEP when sweep amount is 0");
+    console.log("[12] PEG_IN CONFIRMED with zero sweep amount -> no FEE_SWEEP child OK");
   }
 
   // ── 13. Legacy parentId fallback: parentId=null + id suffix -> closes parent ─
@@ -630,10 +636,11 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     console.log("[24] TON under-threshold order (addr persisted, not executed) -> re-drivable OK");
   }
 
-  // ── 25. Recovery fee durability (PR#11 follow-up #2) ─────────────────────────
-  // The coordinator pins the PEG_IN fee onto the row BEFORE broadcast, so a recovery
-  // that reports fee 0 (rebuild failed / response lost) still spawns the FEE_SWEEP
-  // instead of stranding the withheld fee as permanent surplus (accounting drift).
+  // ── 25. Recovery fee durability (PR#11 follow-up #2 + VG-04) ─────────────────
+  // The coordinator still pins the PEG_IN fee (base + activation) onto the row BEFORE
+  // broadcast for recon accounting. VG-04: the dispatcher derives the FEE_SWEEP amount
+  // (= base) from the row's immutable gross, so even a recovery that reports fee 0 spawns
+  // the sweep for the correct base — no dependence on the pinned fee, no stranded base.
   {
     const store = new InMemoryGatewayStore();
     const FEE = 22_000n;
@@ -658,15 +665,16 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     assert.strictEqual(t.patch.feeMilliViz, undefined, "fee 0 must NOT clobber the pinned fee");
     await store.setStatus(action.id, t.status, t.patch);
 
-    // Dispatcher fallback: result fee is 0, so read the fee pinned on the row.
+    // Dispatcher (VG-04): the sweep amount is derived from the row's gross, independent of
+    // the coordinator response fee (0 here) and independent of the pinned row fee (FEE).
     const rec = await store.get(action.id);
-    let feeMilliViz = 0n; // == result.feeMilliViz on the recovery path
-    if (rec.direction === "PEG_IN" && feeMilliViz <= 0n) feeMilliViz = (await store.get(action.id)).feeMilliViz ?? 0n;
-    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", feeMilliViz });
-    assert.strictEqual(kids.length, 1, "FEE_SWEEP still spawned from the pinned fee");
+    const sweepAmountMilliViz = sweepAmountFor(rec);
+    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz });
+    assert.strictEqual(kids.length, 1, "FEE_SWEEP spawned from the independently-derived base");
     assert.strictEqual(kids[0].direction, "FEE_SWEEP");
-    assert.strictEqual(kids[0].amountMilliViz, FEE, "FEE_SWEEP carries the pinned fee amount");
-    console.log("[25] recovery reads pinned fee -> FEE_SWEEP fires, no stranded surplus OK");
+    assert.strictEqual(kids[0].amountMilliViz, sweepAmountMilliViz, "FEE_SWEEP carries the derived base, not the pinned fee");
+    assert.notStrictEqual(sweepAmountMilliViz, FEE, "base (swept) differs from the withheld fee (base+activation), which stays as surplus");
+    console.log("[25] recovery derives base from gross -> FEE_SWEEP fires (surcharge retained) OK");
   }
 
   console.log("\nRESULT: idempotent delivery: actionExecuted short-circuit prevents double-mint/release;");

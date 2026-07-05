@@ -15,10 +15,23 @@
 //                                              a remote-chain read, so it is read
 //                                              ONCE by the proposer and pinned; the
 //                                              signer re-derives `base` but accepts
-//                                              the pinned `destProvisioned` flag.
+//                                              the pinned `destProvisioned` flag (a
+//                                              wrong flag only shifts <= the surcharge
+//                                              between the user and gateway, never the
+//                                              backing — see keyedSigner.assertNet).
 //
 // `net = gross − base − activation`. A deposit that cannot cover the fee plus a
 // minimum mint-gas floor is rejected (P1: no fixed MIN_PEGIN; refund instead).
+//
+// FEE SWEEP (VG-04): only `base` is ever swept to fees.gate. The exact fee would need
+// the mint-time `destProvisioned` bit, but the sweep is spawned AFTER the mint has
+// provisioned the destination, so no independent read can recover that bit at sweep
+// time. `base` is chain-independent (floor + bps) and both the dispatcher (spawn) and
+// the signer (validateFeeSweep) derive it from the immutable gross, leaving the
+// coordinator no discretion. Any `activation` withheld is deliberately RETAINED on the
+// gateway as backing surplus (fail-safe: over-backed, never under; recon counts it as
+// unswept fees). `PegInBreakdown.fee` (= base + activation) is the total WITHHELD from
+// net; `base` alone is the SWEPT amount.
 
 export interface PegInFeePolicy {
   /** Flat floor (default 10 VIZ). */

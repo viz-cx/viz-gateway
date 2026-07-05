@@ -2,8 +2,10 @@
 //
 // These have no remote source event to re-read; the signer instead re-derives them from
 // the PEG_IN they settle (re-read from the operator's OWN VIZ node). Proves:
-//   - FEE_SWEEP may only ever release to the operator's OWN fees.gate, for an amount within
-//     the independently-derived fee band [base, base + activationSurcharge];
+//   - FEE_SWEEP may only ever release to the operator's OWN fees.gate, for EXACTLY the
+//     independently-derived `base` fee (VG-04: no range — base + activation, the old band
+//     maximum, is now REJECTED, closing the backing-drain vector; the surcharge is retained
+//     as gateway surplus);
 //   - REFUND may only ever return the GROSS deposit to the deposit's ORIGINAL sender;
 //   - every child digest is bound to the re-derived parent PEG_IN digest;
 //   - a missing/non-final parent, a malformed child id, or any tampered field FAILS CLOSED.
@@ -54,10 +56,10 @@ async function expectReject(promise, label) {
   const parent = canonicalPegIn(deposit);
   const parentId = parent.id; // "<trxId>:<opIndex>"
 
-  // Independently-derived fee band for this deposit.
+  // The independently-derived EXACT sweep amount for this deposit (VG-04): always `base`.
   const policy = pegInFeePolicyFor(fees, deposit.remoteChain);
-  const base = baseFee(deposit.amountMilliViz, policy); // destProvisioned=true fee
-  const maxFee = base + policy.activationSurchargeMilliViz; // destProvisioned=false fee
+  const base = baseFee(deposit.amountMilliViz, policy); // the only amount the signer will sign
+  const withheldMax = base + policy.activationSurchargeMilliViz; // base + activation — the OLD band max, now rejected
 
   const deps = (dep) => ({
     vizChain: { getDeposit: async () => dep },
@@ -88,16 +90,17 @@ async function expectReject(promise, label) {
 
   // ============================ FEE_SWEEP ========================================
 
-  // 1) Honest FEE_SWEEP at the lower bound (destProvisioned=true -> fee = base) -> passes.
+  // 1) Honest FEE_SWEEP for exactly `base` -> passes (the only accepted amount).
   {
     await validateAction(feeSweep({ amountMilliViz: base }), deps(deposit));
-    ok("1 honest FEE_SWEEP (fee = base, destProvisioned) -> signs");
+    ok("1 honest FEE_SWEEP (fee = base) -> signs");
   }
 
-  // 2) Honest FEE_SWEEP at the upper bound (destProvisioned=false -> fee = base + activation).
+  // 2) VG-04 core: sweeping base + activation (the OLD band maximum) is now REJECTED. This is
+  //    the drain vector — a coordinator pinning destProvisioned=true at mint (net = gross-base)
+  //    then sweeping base+activation would make net+fee = gross+surcharge, draining backing.
   {
-    await validateAction(feeSweep({ amountMilliViz: maxFee }), deps(deposit));
-    ok("2 honest FEE_SWEEP (fee = base + activation) -> signs");
+    await expectReject(validateAction(feeSweep({ amountMilliViz: withheldMax }), deps(deposit)), "2 FEE_SWEEP base+activation (drain) rejected");
   }
 
   // 3) Redirected FEE_SWEEP: coordinator points the sweep at an attacker, not fees.gate -> rejected.
@@ -105,12 +108,12 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(feeSweep({ recipient: "attacker" }), deps(deposit)), "3 FEE_SWEEP wrong recipient");
   }
 
-  // 4) Over-sweep: amount above the derived band would drain the backing -> rejected.
+  // 4) Over-sweep by a single milli-VIZ above base -> rejected (exact, no upward tolerance).
   {
-    await expectReject(validateAction(feeSweep({ amountMilliViz: maxFee + 1n }), deps(deposit)), "4 FEE_SWEEP amount too high");
+    await expectReject(validateAction(feeSweep({ amountMilliViz: base + 1n }), deps(deposit)), "4 FEE_SWEEP amount too high");
   }
 
-  // 5) Under-sweep: amount below base (impossible fee) -> rejected.
+  // 5) Under-sweep: amount below base -> rejected (exact, no downward tolerance).
   {
     await expectReject(validateAction(feeSweep({ amountMilliViz: base - 1n }), deps(deposit)), "5 FEE_SWEEP amount too low");
   }
@@ -162,8 +165,9 @@ async function expectReject(promise, label) {
     console.error(`\nRESULT: ${failures} FAILED`);
     process.exit(1);
   }
-  console.log("\nRESULT: FEE_SWEEP sweeps only to the operator's own fees.gate within the derived fee band;");
-  console.log("REFUND returns only the gross deposit to the original sender; both bind to the parent PEG_IN.");
+  console.log("\nRESULT: FEE_SWEEP sweeps only to the operator's own fees.gate for EXACTLY the derived base fee");
+  console.log("(VG-04: base+activation drain rejected); REFUND returns only the gross deposit to the original");
+  console.log("sender; both bind to the parent PEG_IN.");
 })().catch((e) => {
   console.error(e);
   process.exit(1);

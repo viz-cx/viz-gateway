@@ -251,7 +251,7 @@ scope here; the silent-skip root cause is eliminated.)
 
 ---
 
-### VG-04 — Medium — Fee amount is coordinator-authoritative for the sweep; FEE_SWEEP validated by range, not exact
+### VG-04 — Medium — Fee amount is coordinator-authoritative for the sweep; FEE_SWEEP validated by range, not exact ✅ FIXED
 
 - **Component:** `packages/coordinator/src/orchestrator.ts` · `packages/dispatcher/src/policy.ts` · `packages/signer/src/sourceValidator.ts`
 - **Location:** fee from `buildProposal` returned in the orchestration result (`orchestrator.ts:111-115`); dispatcher spawns `FEE_SWEEP` from `ctx.feeMilliViz` (`policy.ts:72-84`); signer accepts sweep amount in `[base, base+activationSurcharge]` (`sourceValidator.ts:191-209`)
@@ -277,6 +277,38 @@ recon invariant.
 by action id at mint time so `validateFeeSweep` can exact-match, and derive the
 dispatcher's sweep amount from that persisted value rather than the coordinator
 response. Alert (don't silently swallow) on `pinFee` failure.
+
+**Remediation status — FIXED** (`fix/vg-04-exact-fee-sweep`). Resolved by a
+different (and stronger) route than the original recommendation, because the
+recommendation is not implementable as stated: the `FEE_SWEEP` is only spawned
+*after* the PEG_IN mint has CONFIRMED (`dispatcher/policy.ts` on `CONFIRMED`), and
+the mint itself provisions the destination — so at sweep-signing time an
+independent `accountExists`/existence read *always* returns provisioned, and the
+mint-time `destProvisioned` bit is unrecoverable by any independent read (on TON
+the on-chain mint order carries no action id, so the minted net is not even
+discoverable from the action id). Instead:
+- The signer's `validateFeeSweep` now requires the sweep amount to equal
+  **exactly `base`** — a pure, chain-independent function of the immutable gross
+  (`floor`, `bps`), re-derived by every operator with zero coordinator input
+  (`sourceValidator.ts`). The old `[base, base+surcharge]` range — and with it the
+  backing-drain vector (mint with `destProvisioned=true` → net = gross−base, then
+  sweep `base+surcharge` → `net+fee = gross+surcharge`, draining locked backing per
+  peg-in) — is gone.
+- The dispatcher independently derives the same `base` from the row's gross and
+  spawns the `FEE_SWEEP` for that amount (`dispatcher/index.ts`, `policy.ts`), so
+  it no longer depends on the coordinator-pinned fee.
+- Any `activation` surcharge withheld at mint is deliberately **retained on the
+  gateway as backing surplus** — fail-safe (over-backed, never under). The pinned
+  row fee (`base+activation`) is unchanged, so recon's invariant
+  `locked == circulating + unsweptFees` still nets to drift 0 (the retained
+  surcharge shows up as `unsweptFees`).
+- The residual (a wrong mint-time `destProvisioned` flag shifts ≤ surcharge between
+  the user and gateway surplus, never backing) is the *same* bounded, internal
+  property already noted for the net path — no new exposure.
+- Regression coverage: `tools/fee-sweep-refund-spike.cjs` (base+activation now
+  REJECTED; exact ±1 rejected), `tools/dispatcher-policy-spike.cjs`,
+  `tools/idempotent-delivery-spike.cjs` (sweep derived from gross, not pinned fee);
+  all wired into `npm run verify`.
 
 ---
 

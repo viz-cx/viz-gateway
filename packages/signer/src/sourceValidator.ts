@@ -181,11 +181,18 @@ async function reReadParentPegIn(
  * source event; instead the signer re-derives it from the PEG_IN it settles:
  *   - recipient MUST be the operator's OWN fees.gate account (config, never coordinator-fed),
  *     so a compromised coordinator can never redirect swept fees to an attacker;
- *   - amount MUST fall within [base, base + activationSurcharge]. The exact fee depends on
- *     the pinned `destProvisioned` flag, which the signer does not persist from mint time,
- *     so it bounds rather than exact-matches. This is the SAME tolerance the PEG_IN mint
- *     path already accepts (a wrong flag shifts <= the surcharge between the user and
- *     fees.gate, never the backing) — and here the funds can only ever land at fees.gate;
+ *   - amount MUST equal EXACTLY the `base` fee (pure function of the immutable gross), never
+ *     a range. VG-04: the previous [base, base + activationSurcharge] tolerance let a
+ *     compromised coordinator steer the sweep to the band maximum while pinning
+ *     destProvisioned=true at mint (net = gross − base), so net + fee = gross + surcharge —
+ *     the extra surcharge drained locked backing, repeatable per peg-in. The exact fee would
+ *     need the mint-time `destProvisioned` bit, but the FEE_SWEEP is only spawned AFTER the
+ *     mint has provisioned the destination, so no independent read (of either chain) can
+ *     recover it at signing time. We therefore sweep ONLY the flag-free `base`; the activation
+ *     surcharge (if any was withheld) is deliberately RETAINED on the gateway as backing
+ *     surplus — fail-safe (over-backed, never under), and recon accounts for it as unswept
+ *     fees. `base` is chain-independent (floor + bps), and both the dispatcher (spawn) and the
+ *     signer (this check) derive it from `gross` alone, so the coordinator has no discretion;
  *   - the child digest MUST be bound to the re-derived parent digest ("<parentDigest>:fee").
  */
 async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
@@ -198,12 +205,11 @@ async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDe
   if (action.digest !== `${parent.digest}${FEE_SWEEP_SUFFIX}`) {
     throw new SourceMismatchError(`FEE_SWEEP digest not bound to parent PEG_IN ${parent.id} (${action.id})`);
   }
-  const policy = pegInFeePolicyFor(deps.fees, deposit.remoteChain);
-  const base = baseFee(deposit.amountMilliViz, policy);
-  const maxFee = base + policy.activationSurchargeMilliViz;
-  if (action.amountMilliViz < base || action.amountMilliViz > maxFee) {
+  const base = baseFee(deposit.amountMilliViz, pegInFeePolicyFor(deps.fees, deposit.remoteChain));
+  if (action.amountMilliViz !== base) {
     throw new SourceMismatchError(
-      `FEE_SWEEP amount ${action.amountMilliViz} outside derived fee range [${base}, ${maxFee}] for ${action.id}`,
+      `FEE_SWEEP amount ${action.amountMilliViz} != exact derived base fee ${base} for ${action.id} ` +
+        `(activation surcharge is never swept — retained as gateway backing surplus)`,
     );
   }
 }
