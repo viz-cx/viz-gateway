@@ -251,6 +251,11 @@ async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps)
   if (!deposit) {
     throw new SourceMismatchError(`PEG_IN source ${action.id} not found or not yet irreversible on VIZ`);
   }
+  // CRITICAL: remoteChain is derived from the deposit's receiving account by VizJsChain.getDeposit
+  // via GatewayAccounts.chainFor(to), NOT from coordinator-supplied data. The assertSameAction call
+  // below compares derived.remoteChain !== wire.remoteChain (line 314), so any coordinator claiming
+  // the wrong chain is rejected here. This guards against routing attacks where a compromised
+  // coordinator tries to mint on the wrong chain by claiming the deposit landed somewhere it didn't.
   assertSameAction(canonicalPegIn(deposit), action);
 }
 
