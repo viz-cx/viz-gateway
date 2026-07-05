@@ -38,12 +38,16 @@ function recordToAction(rec: OutboxRecord): CanonicalAction {
   };
 }
 
-async function submit(url: string, rec: OutboxRecord): Promise<DeliveryResult> {
+async function submit(url: string, rec: OutboxRecord, timeoutMs: number): Promise<DeliveryResult> {
   try {
     const res = await fetch(`${url.replace(/\/$/, "")}/submit`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: actionToWire(recordToAction(rec)) }),
+      // Bound the call so a blackhole coordinator (socket accepted, no response) can't
+      // wedge the delivery loop forever — the timeout surfaces as a caught error and the
+      // row retries. Generous (see submitTimeoutMs) so a legit slow mint is not aborted.
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.status === 423) return { broadcast: false, error: "coordinator paused" };
     if (!res.ok) return { broadcast: false, error: `coordinator HTTP ${res.status}` };
@@ -67,6 +71,7 @@ async function tick(
     windowMs: number;
     signingTimeoutMs: { pegIn: number; pegOut: number };
     staleDeliveryAlertMs: number;
+    submitTimeoutMs: number;
     feesGateAccount: string;
     fees: GatewayFeeConfig;
   },
@@ -121,7 +126,7 @@ async function tick(
     // CONFIRMED is recoverable: orphaned BROADCAST rows are requeued and the
     // coordinator's actionExecuted check prevents a double-mint/release.
     await store.setStatus(rec.id, "BROADCAST");
-    const result = await submit(url, rec);
+    const result = await submit(url, rec, opts.submitTimeoutMs);
     const t = planTransition(rec, result, Date.now(), opts);
     await store.setStatus(rec.id, t.status, t.patch);
     if (t.status !== "QUEUED") state.alertedWedged.delete(rec.id); // recovered/advanced — re-arm
@@ -167,6 +172,7 @@ async function main(): Promise<void> {
     windowMs: cfg.dispatcher.windowMs,
     signingTimeoutMs: cfg.dispatcher.signingTimeoutMs,
     staleDeliveryAlertMs: cfg.dispatcher.staleDeliveryAlertMs,
+    submitTimeoutMs: cfg.dispatcher.submitTimeoutMs,
     feesGateAccount: cfg.feesGateAccount,
     fees: cfg.fees,
   };

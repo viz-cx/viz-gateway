@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   const store = createStore(cfg.storeUrl);
 
   const signers = cfg.coordinator.signerEndpoints.map(
-    (ep, i) => new HttpSignerClient(`signer-${i + 1}`, ep),
+    (ep, i) => new HttpSignerClient(`signer-${i + 1}`, ep, cfg.coordinator.signerApproveTimeoutMs),
   );
 
   const accounts = buildGatewayAccounts(cfg);

@@ -76,11 +76,24 @@ export interface GatewayConfig {
     depositProgramId: string;
     lookupListen: string; // host:port for the deposit-address lookup service
   };
-  coordinator: { url: string; listen: string; signerEndpoints: string[] };
+  coordinator: {
+    url: string;
+    listen: string;
+    signerEndpoints: string[];
+    /** Per-signer /approve HTTP timeout. A blackhole signer (socket accepted, no
+     * response) must become a caught error, not an unbounded await that wedges the
+     * whole sequential approval loop — and thus every /submit behind it. */
+    signerApproveTimeoutMs: number;
+  };
   dispatcher: {
     intervalMs: number;
     retryIntervalMs: number;
     windowMs: number;
+    /** dispatcher -> coordinator /submit HTTP timeout. Generous: /submit runs the full
+     * orchestration (collect approvals + broadcast) synchronously, so this must exceed the
+     * coordinator's worst-case round-trip, else a legit slow mint is aborted. Its job is
+     * only to stop a blackhole coordinator from wedging the delivery loop forever. */
+    submitTimeoutMs: number;
     /** SIGNING-orphan recovery timeout, per direction (mint confirms slower than a VIZ release). */
     signingTimeoutMs: { pegIn: number; pegOut: number };
     /** Alert when a release/refund row stays undelivered this long (a degraded federation). */
@@ -278,6 +291,10 @@ export function loadConfig(): GatewayConfig {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+      // 30s: a signer only re-validates the proposal and signs locally (no broadcast),
+      // so a healthy /approve is sub-second. Well above that keeps a slow-but-legit
+      // signer from being dropped, while still converting a hang into a caught error.
+      signerApproveTimeoutMs: int("SIGNER_APPROVE_TIMEOUT_MS", 30000),
     },
     // Dispatcher: drains QUEUED outbox rows to the coordinator with retries.
     // P3 policy: retry every 10s for 3 min, then REFUND. intervalMs is the loop tick.
@@ -299,6 +316,11 @@ export function loadConfig(): GatewayConfig {
       // A release/refund retries forever (nothing to refund), so a row wedged this long
       // means the federation can't sign — alert operators rather than fail silently.
       staleDeliveryAlertMs: int("DISPATCHER_STALE_ALERT_MS", 3600000), // 1h
+      // Ceiling on one /submit call. Must exceed the coordinator's total orchestration
+      // budget (up to N signers × SIGNER_APPROVE_TIMEOUT_MS + broadcast). Defaults to the
+      // peg-in orphan-recovery timeout (300s) so a submit that outlives it is requeued by
+      // the same clock rather than being aborted mid-flight and re-run gratuitously.
+      submitTimeoutMs: int("DISPATCHER_SUBMIT_TIMEOUT_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", 300000)),
     },
     feesGateAccount: opt("FEES_GATE_ACCOUNT", "fees.gate"),
     // Conservative bootstrap caps (1 VIZ ~ $0.005): $500 / $1,000 / $10,000.

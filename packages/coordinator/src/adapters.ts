@@ -21,6 +21,11 @@ export class HttpSignerClient implements SignerClient {
   constructor(
     public readonly operatorId: string,
     private readonly endpoint: string,
+    // Hard ceiling per call. A blackhole signer (socket accepted, no bytes) would
+    // otherwise hang this await forever; the orchestrator loops signers sequentially,
+    // so one such peer stalls every approval and wedges the whole delivery pipeline.
+    // AbortSignal turns the hang into the SAME caught error a refusing signer produces.
+    private readonly timeoutMs: number = 30000,
   ) {}
 
   async approve(action: CanonicalAction, proposal: Proposal): Promise<Approval> {
@@ -28,6 +33,7 @@ export class HttpSignerClient implements SignerClient {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: actionToWire(action), proposal }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (res.status === 423) throw new Error(`signer ${this.endpoint} is paused`);
     if (!res.ok) {
