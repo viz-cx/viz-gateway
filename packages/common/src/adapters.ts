@@ -31,8 +31,8 @@ export interface VizChain {
    * `opIndex` is structurally not a transfer to the gateway account.
    */
   getDeposit(trxId: string, opIndex: number): Promise<VizDeposit | null>;
-  /** Current gateway account VIZ balance, in milli-VIZ (for reconciliation). */
-  gatewayBalanceMilliViz(): Promise<bigint>;
+  /** Current backing account VIZ balance, in milli-VIZ (for reconciliation). */
+  gatewayBalanceMilliViz(account: string): Promise<bigint>;
   /**
    * Whether a VIZ account exists. A peg-out release to a non-existent account
    * can never land, so the peg-out path checks this BEFORE the irreversible burn

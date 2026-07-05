@@ -7,8 +7,8 @@ import viz, {
 } from "viz-js-lib";
 import {
   validateRemoteAddress,
+  GatewayAccounts,
   type CanonicalAction,
-  type RemoteChainId,
   type VizChain,
   type VizDeposit,
   type VizReleaseProposal,
@@ -26,21 +26,6 @@ import { buildReleaseTx, releaseTxId } from "./vizSign";
  * and a transfer payload is { from, to, amount:"X.XXX VIZ", memo }.
  */
 const ZERO_TRX = "0000000000000000000000000000000000000000";
-
-/** @internal Shim: parse legacy "<chain>:<address>" memo until Task 2.1 replaces callers. */
-const CHAIN_PREFIX_MAP: Record<string, RemoteChainId> = { gram: "GRAM", solana: "SOLANA" };
-function parseMemoTarget(memo: string): { chain: RemoteChainId; destination: string } {
-  const trimmed = memo.trim();
-  const sep = trimmed.indexOf(":");
-  if (sep <= 0) throw new Error(`peg-in memo missing chain prefix: "${memo}"`);
-  const prefix = trimmed.slice(0, sep).toLowerCase();
-  const destination = trimmed.slice(sep + 1).trim();
-  const chain = CHAIN_PREFIX_MAP[prefix];
-  if (!chain) throw new Error(`peg-in memo has unknown chain prefix "${prefix}": "${memo}"`);
-  if (!destination) throw new Error(`peg-in memo has empty destination: "${memo}"`);
-  validateRemoteAddress(chain, destination);
-  return { chain, destination };
-}
 
 /**
  * Bound the per-call block scan so a watcher tick can't accidentally scan the
@@ -86,7 +71,7 @@ export function milliToViz(milli: bigint): string {
 }
 
 export class VizJsChain implements VizChain {
-  constructor(nodeUrl: string, private readonly gatewayAccount: string) {
+  constructor(nodeUrl: string, private readonly accounts: GatewayAccounts) {
     // viz-js-lib selects http/ws transport from the "websocket" config value;
     // it accepts http(s):// and ws(s):// URLs alike.
     viz.config.set("websocket", nodeUrl);
@@ -112,15 +97,16 @@ export class VizJsChain implements VizChain {
         if (w.trx_id === ZERO_TRX) continue; // belt-and-suspenders
         const [name, payload] = w.op;
         if (name !== "transfer") continue;
-        if (payload["to"] !== this.gatewayAccount) continue;
-        const memo = String(payload["memo"] ?? "");
-        let target: { chain: RemoteChainId; destination: string };
+        const to = String(payload["to"] ?? "");
+        if (!this.accounts.isBackingAccount(to)) continue;
+        const chain = this.accounts.chainFor(to);
+        const destination = String(payload["memo"] ?? "").trim();
         try {
-          // Memo is "<chain>:<address>"; the target chain is committed in the digest.
-          // Remote address-format validation happens before signing (signer-side).
-          target = parseMemoTarget(memo);
+          // Memo is the raw remote address; the chain is determined by the receiving account.
+          // Reject empty memos, colons, and malformed addresses for this chain.
+          validateRemoteAddress(chain, destination);
         } catch (err) {
-          // Unparseable/prefixless memo: not a valid peg-in target. Skip and warn
+          // Malformed destination: not a valid peg-in target. Skip and warn
           // (flag for manual refund); never silently default the destination chain.
           console.warn(`[viz-chain] skipping deposit ${w.trx_id}:${w.op_in_trx}: ${String(err)}`);
           continue;
@@ -130,10 +116,10 @@ export class VizJsChain implements VizChain {
           opIndex: w.op_in_trx,
           blockNum: w.block,
           from: String(payload["from"] ?? ""),
-          to: String(payload["to"] ?? ""),
+          to,
           amountMilliViz: vizToMilli(String(payload["amount"] ?? "0.000 VIZ")),
-          remoteChain: target.chain,
-          remoteDestination: target.destination,
+          remoteChain: chain,
+          remoteDestination: destination,
         });
       }
     }
@@ -183,27 +169,30 @@ export class VizJsChain implements VizChain {
     if (name !== "transfer") {
       throw new Error(`getDeposit(${trxId}:${opIndex}): op is "${name}", not a transfer`);
     }
-    if (payload["to"] !== this.gatewayAccount) {
+    const to = String(payload["to"] ?? "");
+    if (!this.accounts.isBackingAccount(to)) {
       throw new Error(
-        `getDeposit(${trxId}:${opIndex}): transfer "to" (${String(payload["to"])}) != gateway ${this.gatewayAccount}`,
+        `getDeposit(${trxId}:${opIndex}): transfer "to" (${to}) is not a backing account`,
       );
     }
-    // Memo "<chain>:<address>"; throws on a missing/unknown prefix (no silent default).
-    const target = parseMemoTarget(String(payload["memo"] ?? ""));
+    const chain = this.accounts.chainFor(to);
+    const destination = String(payload["memo"] ?? "").trim();
+    // Throws on empty, colon-containing, or format-invalid address (no silent default).
+    validateRemoteAddress(chain, destination);
     return {
       trxId,
       opIndex,
       blockNum: tx.block_num,
       from: String(payload["from"] ?? ""),
-      to: String(payload["to"] ?? ""),
+      to,
       amountMilliViz: vizToMilli(String(payload["amount"] ?? "0.000 VIZ")),
-      remoteChain: target.chain,
-      remoteDestination: target.destination,
+      remoteChain: chain,
+      remoteDestination: destination,
     };
   }
 
-  async gatewayBalanceMilliViz(): Promise<bigint> {
-    const accounts = await call<Account[]>((cb) => viz.api.getAccounts([this.gatewayAccount], cb));
+  async gatewayBalanceMilliViz(account: string): Promise<bigint> {
+    const accounts = await call<Account[]>((cb) => viz.api.getAccounts([account], cb));
     const acct = accounts?.[0];
     if (!acct) return 0n;
     return vizToMilli(acct.balance);
