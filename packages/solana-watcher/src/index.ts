@@ -3,9 +3,8 @@ import {
   CircuitBreaker,
   createStore,
   loadConfig,
-  type RemoteChain,
-  type SolanaMintProposal,
 } from "@gateway/common";
+import { notifyStaff } from "@gateway/log";
 import { SolanaChain } from "./solanaChain";
 
 /**
@@ -20,13 +19,17 @@ async function main(): Promise<void> {
   if (!cfg.solana.wvizMint) {
     throw new Error("SOLANA_WVIZ_MINT is required (set it after deploying the wVIZ Token-2022 mint).");
   }
-  const chain: RemoteChain<SolanaMintProposal> = new SolanaChain(
+  const chain = new SolanaChain(
     cfg.solana.rpcUrl,
     cfg.solana.wvizMint,
     cfg.solana.gatewayTokenAccount,
     cfg.solana.finalitySlots,
     null,
-    { maxSignatures: cfg.solana.scanMaxSignatures, txDelayMs: cfg.solana.scanTxDelayMs },
+    {
+      maxSignatures: cfg.solana.scanMaxSignatures,
+      maxScanPages: cfg.solana.maxScanPages,
+      txDelayMs: cfg.solana.scanTxDelayMs,
+    },
   );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
@@ -61,7 +64,7 @@ async function main(): Promise<void> {
         await store.setCursor(CURSOR, cursor);
         console.log(`[solana-watcher] starting at finalized slot ${cursor}`);
       } else if (slot > cursor) {
-        const burns = await chain.finalizedBurnsSince(cursor, slot);
+        const { burns, newestFinalSlot, drained } = await chain.finalizedBurnsPaginated(cursor);
         for (const burn of burns) {
           const action = canonicalPegOut(burn);
           const first = await store.enqueue({
@@ -90,8 +93,21 @@ async function main(): Promise<void> {
             `[solana-watcher] peg-out ${action.id} QUEUED -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
           );
         }
-        cursor = slot;
-        await store.setCursor(CURSOR, cursor);
+        if (drained) {
+          // Only advance the cursor once the tick fully drained back to it; the
+          // not-yet-final tail (slot > safeSlot) is re-scanned next tick.
+          cursor = newestFinalSlot;
+          await store.setCursor(CURSOR, cursor);
+        } else {
+          // A burst larger than maxScanPages*scanMaxSignatures: older burns lie beyond what
+          // we could scan this tick. Fail closed — do NOT advance past them; pause + alert so
+          // operators raise the window / catch up rather than silently skip peg-outs (funds
+          // locked with no wVIZ burned would otherwise never be released = lost funds).
+          const reason = `Solana peg-out scan truncated at slot ${cursor}: burst exceeds scan window (maxScanPages=${cfg.solana.maxScanPages})`;
+          console.error(`[solana-watcher] ${reason}`);
+          notifyStaff("withdraws", reason, { cursorSlot: cursor, newestFinalSlot });
+          await store.pause(reason); // shared, cross-process
+        }
       }
     } catch (err) {
       console.error("[solana-watcher] loop error:", err);

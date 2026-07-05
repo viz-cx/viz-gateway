@@ -66,7 +66,8 @@ export interface GatewayConfig {
     // signer pins proposal.feePayer against it so a compromised coordinator cannot name an
     // arbitrary fee payer / nonce authority (defense-in-depth; empty = not pinned).
     submitterPubkey: string;
-    scanMaxSignatures: number; // signatures fetched per scan (RPC rate-limit tuning)
+    scanMaxSignatures: number; // signatures fetched per scan page (RPC rate-limit tuning)
+    maxScanPages: number; // page ceiling per peg-out scan; hit before draining => fail closed
     scanTxDelayMs: number; // delay between per-tx parses (429 avoidance)
     scanAddressBatch: number; // deposit addresses scanned per peg-out loop (rotation)
     submitterMinLamports: number; // reserve alert floor for the submitter SOL balance
@@ -277,6 +278,10 @@ export function loadConfig(): GatewayConfig {
       submitterSecret: solanaSecret("SOLANA_SUBMITTER_SECRET"),
       submitterPubkey: opt("SOLANA_SUBMITTER_PUBKEY", ""),
       scanMaxSignatures: int("SOLANA_MAX_SIGNATURES", 25),
+      // Page ceiling per peg-out scan. If a burst needs more than maxScanPages *
+      // scanMaxSignatures txs to drain back to the cursor, the scan fails closed (pause +
+      // cursor NOT advanced) rather than silently skipping the older, unscanned burns.
+      maxScanPages: int("SOLANA_MAX_SCAN_PAGES", 50),
       scanTxDelayMs: int("SOLANA_RPC_TX_DELAY_MS", 250),
       scanAddressBatch: int("SOLANA_SCAN_ADDRESS_BATCH", 50),
       submitterMinLamports: int("SOLANA_SUBMITTER_MIN_LAMPORTS", 50_000_000), // ~0.05 SOL
