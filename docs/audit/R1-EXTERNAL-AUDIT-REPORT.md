@@ -71,6 +71,23 @@ insider proposer plus co-signers who trust the tool without inspecting raw JSON.
 | Low | 8 |
 | Informational | 3 |
 
+> **Post-report remediation status (updated 2026-07-05, after `2cfb7cc`).** The body of
+> this report is a point-in-time assessment at the pinned commit and is left unchanged.
+> Since then the federation has remediated **the High and all five Mediums** (each fix
+> annotated ✅ FIXED at its finding below):
+>
+> | Finding | Sev | Fix | main |
+> |---|---|---|---|
+> | VG-01 | High | reject multi-op / non-empty-extensions rotation proposals | `9094955` (#24) |
+> | VG-05 | Med | length-prefixed injective canonical encoding | `5387d6b` (#25) |
+> | VG-03 | Med | durable viz-watcher cursor, cap-bounded advance | `42b1ca3` (#26) |
+> | VG-06 | Med | `lt`-paginated TON burn scan, fail-closed on page-cap burst | `42b1ca3` (#26) |
+> | VG-02 | Med | recon fails closed on read error / missing remotes | `affb955` (#27) |
+> | VG-04 | Med | signer + dispatcher re-derive exact `base`; surcharge retained as surplus | `98d00a7` (#28) |
+>
+> **VG-07…VG-17 (8 Low / 3 Info) remain open** as accepted hardening backlog. This
+> remediation record does **not** discharge the genuine third-party R-1 engagement.
+
 ---
 
 ## 2. Scope & methodology
@@ -112,7 +129,14 @@ over-backing direction). We distinguish *theft* (loss of custody) from *liveness
 
 ---
 
-### VG-01 — High — Rotation co-sign validates only the first operation (multi-op injection → theft)
+### VG-01 — High — Rotation co-sign validates only the first operation (multi-op injection → theft) ✅ FIXED
+
+**Fix (PR #24, main `9094955`):** `packages/common/src/rotation.ts` — validation now
+rejects any proposal whose `vizTx.operations.length !== 1`, whose sole op is not the
+expected `account_update`, or whose op carries non-empty `extensions`/unexpected fields, so
+a co-signer can no longer sign a multi-op transaction while only `operations[0]` is checked.
+Added a rotation-injection spike (wired into `npm run verify`) that asserts a two-op proposal
+(benign `account_update` + a transfer/authority grab) is refused before signing.
 
 - **Component:** `packages/common/src/rotation.ts` · `setup-viz/src/rotate.ts`
 - **Location:** `rotation.ts:178` (`p.vizTx.operations[0]`); signing at `rotate.ts:101`; broadcast at `rotate.ts:153-158`
@@ -206,7 +230,14 @@ is less than the number of chains the deployment expects. Add a required
 
 ---
 
-### VG-03 — Medium — VIZ peg-in detection can silently skip deposits (downtime + scan-cap gap)
+### VG-03 — Medium — VIZ peg-in detection can silently skip deposits (downtime + scan-cap gap) ✅ FIXED
+
+**Fix (PR #26, main `42b1ca3`):** introduced a durable `getCursor`/`setCursor` store primitive
+(shared with VG-06). The viz-watcher now persists `cursor:viz-watcher` and advances it only to
+the actual end of the window it scanned — when the head is beyond the per-scan cap, the cursor
+moves to a cap-bounded `nextScanWindow` rather than jumping to `safeHead`, so no block range is
+skipped across a cap-limited tick or a restart. A watcher-cursor spike (wired into
+`npm run verify`) asserts the cursor never advances past scanned height.
 
 - **Component:** `packages/viz-watcher/src/index.ts` · `packages/viz-watcher/src/vizChain.ts`
 - **Location:** cursor is in-memory `let cursor = 0` (index.ts:27); `cursor = safeHead` unconditional (index.ts:83); scan capped at `start + MAX_BLOCKS_PER_SCAN - 1` (vizChain.ts:73)
@@ -312,7 +343,15 @@ discoverable from the action id). Instead:
 
 ---
 
-### VG-05 — Medium — Canonical encoding has no field separators (stated invariant is false)
+### VG-05 — Medium — Canonical encoding has no field separators (stated invariant is false) ✅ FIXED
+
+**Fix (PR #25, main `5387d6b`):** `packages/common/src/canonical.ts` now length-prefixes every
+key and value (`<byteLen>:<key>=<byteLen>:<value>` per field, `|`-joined). Field boundaries are
+content-independent, so no adversary-chosen value (including the old `\x1f` separator) can forge
+a boundary or produce a colliding encoding for two distinct field sets. Added
+`tools/canonical-spike.cjs` (determinism, boundary-shift injectivity, separator-injection,
+PEG_IN·PEG_OUT domain separation), wired into `npm run verify`. *(Code-cite correction: the
+shipped code being replaced used `\x1f`, not the empty-string join shown above.)*
 
 - **Component:** `packages/common/src/canonical.ts`
 - **Location:** `canonical.ts:14-17` (`fields.map(([k,v]) => `${k}=${v}`).join("")`)
@@ -353,7 +392,13 @@ verify`.
 
 ---
 
-### VG-06 — Medium — TON burn scan is not height-ranged; bursts silently truncated, no alert
+### VG-06 — Medium — TON burn scan is not height-ranged; bursts silently truncated, no alert ✅ FIXED
+
+**Fix (PR #26, main `42b1ca3`):** the burn scan now does real `lt` pagination —
+`paginateBurnsByLt` walks the `{lt, hash}` anchor persisted via the shared `getCursor`/`setCursor`
+primitive (same as VG-03) so every burn since the last processed anchor is enumerated rather than
+just the last N transactions. A burst exceeding `TON_MAX_SCAN_PAGES` (default 50) **fails closed**
+instead of silently truncating, surfacing an alert rather than dropping burns.
 
 - **Component:** `packages/ton-watcher/src/tonChain.ts` · `packages/ton-watcher/src/index.ts`
 - **Location:** `finalizedBurnsSince(_fromHeight, ...)` ignores `_fromHeight` and fetches the last `maxTransactions` (default 20) (`tonChain.ts:~192-201`); cursor advanced regardless (`index.ts:~80`)

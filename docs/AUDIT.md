@@ -24,7 +24,8 @@ work starts; re-pin on any change.
 3. §4 is the threat model — the claims the whole design rests on. Every finding should
    map to breaking one of these.
 4. §6 is build/repro; §7 is the requested deliverable format; §8 lists known accepted
-   risks so you don't re-report them (challenge them if you disagree).
+   risks so you don't re-report them (challenge them if you disagree); §9 records the
+   prior internal pre-audit and the fixes already merged.
 
 The **defining invariant to attack**: the orchestrator holds no keys and every signer
 independently re-derives what it signs from a finalized source event on *its own* node.
@@ -259,9 +260,9 @@ under-rated.
 
 - **F-1 blast radius (retired):** the old additive scheme's "one child scalar ⇒ master
   compromise" is **gone with the code** (R-6 → PDA, no private key). Verify absence.
-- **TON burn scan is limit-windowed, not height-ranged** — burst beyond the page can be
-  missed (liveness/completeness, not theft). Partially addressed; noted in
-  `docs/overview.md §6.5`.
+- **TON burn scan** — *resolved (VG-06, main `42b1ca3`):* the scan is now `lt`-paginated from
+  a durable anchor and **fails closed** when a burst exceeds `TON_MAX_SCAN_PAGES`, rather than
+  silently truncating. Previously limit-windowed; verify the pagination/anchor logic.
 - **TON single-proposer idempotency assumption** — order-seqno idempotency holds only
   with one proposer; multi-proposer would need action-id embedded in the order payload.
 - **`VIZ_ACCOUNT_RE` is a loose pre-filter** — allows some Graphene-invalid shapes
@@ -292,6 +293,30 @@ under-rated.
 
 ---
 
+## 9. Prior internal pre-audit & remediations (read before scoping)
+
+An AI-driven internal dry-run of this scope was performed at commit `2cfb7cc` and is
+recorded in **`docs/audit/R1-EXTERNAL-AUDIT-REPORT.md`** (explicitly *not* a substitute
+for this engagement — a fictional firm name, no third-party attestation). It found 1 High,
+5 Medium, 8 Low, 3 Info. **The High and all five Mediums have since been fixed and merged**;
+each fix is annotated ✅ FIXED in that report and summarised here so they are not re-reported
+as new (challenge the fixes if you disagree):
+
+| Finding | Sev | Fix | main |
+|---|---|---|---|
+| VG-01 rotation multi-op injection (theft) | High | reject multi-op / non-empty-extensions proposals | `9094955` (#24) |
+| VG-05 canonical encoding not injective | Med | length-prefixed encoding | `5387d6b` (#25) |
+| VG-03 peg-in cursor skip | Med | durable cursor, cap-bounded advance | `42b1ca3` (#26) |
+| VG-06 TON burn scan truncation | Med | `lt` pagination, fail-closed | `42b1ca3` (#26) |
+| VG-02 recon fails open | Med | fail-closed on read error / missing remotes | `affb955` (#27) |
+| VG-04 coordinator-authoritative fee sweep (backing drain) | Med | signer + dispatcher re-derive exact `base`; surcharge retained as surplus | `98d00a7` (#28) |
+
+**VG-07…VG-17 (8 Low / 3 Info) remain open** as an accepted hardening backlog — see the
+report's §3 for details.
+
+---
+
 _This package supersedes the whole-system scope of R-1. The retired-crypto internal
 review remains at `docs/audit-ed25519-additive-derivation.md` for historical context
-only. Re-pin the commit hash with the auditor before the engagement begins._
+only. Re-pin the commit hash with the auditor before the engagement begins (the internal
+pre-audit above is at `2cfb7cc`; the current head includes the six fixes)._
