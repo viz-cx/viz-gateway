@@ -60,8 +60,8 @@ async function expectReject(promise, label) {
   const FEES = {
     floorMilliViz: 10_000n,
     bps: 20,
-    activationSurchargeMilliViz: { SOLANA: 10_000n, TON: 10_000n },
-    mintGasFloorMilliViz: { SOLANA: 1_000n, TON: 1_000n },
+    activationSurchargeMilliViz: { SOLANA: 10_000n, GRAM: 10_000n },
+    mintGasFloorMilliViz: { SOLANA: 1_000n, GRAM: 1_000n },
   };
   const FEES_GATE = "fees.gate";
 

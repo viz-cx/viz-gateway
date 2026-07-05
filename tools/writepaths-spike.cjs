@@ -17,8 +17,8 @@ const { canonicalPegOut, canonicalPegIn, quotePegIn, pegInFeePolicyFor } = requi
 const FEES = {
   floorMilliViz: 10000n,
   bps: 20,
-  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
-  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+  activationSurchargeMilliViz: { SOLANA: 10000n, GRAM: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, GRAM: 1000n },
 };
 const { milliToViz } = require("../packages/viz-watcher/dist/vizChain.js");
 const { buildReleaseTx } = require("../packages/viz-watcher/dist/vizSign.js");
@@ -72,12 +72,12 @@ const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/
     from: "viz-user",
     to: "viz-gateway",
     amountMilliViz: 1068237n,
-    remoteChain: "TON",
+    remoteChain: "GRAM",
     remoteDestination: "EQrecipient_addr",
   });
   const orderHashHex = createHash("sha256").update("mint-order-1").digest("hex");
   // Proposal carries NET (gross − fee); destination provisioned -> no surcharge.
-  const qTon = quotePegIn(pegIn.amountMilliViz, true, pegInFeePolicyFor(FEES, "TON"));
+  const qTon = quotePegIn(pegIn.amountMilliViz, true, pegInFeePolicyFor(FEES, "GRAM"));
   assert.ok(qTon.ok, "expected a valid TON quote");
   const mintProposal = {
     orderSeqno: "1",

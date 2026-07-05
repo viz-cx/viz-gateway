@@ -17,7 +17,7 @@ export type ActionStatus =
 /** What kind of on-chain action a row drives. */
 export type OutboxDirection = "PEG_IN" | "PEG_OUT" | "FEE_SWEEP" | "REFUND";
 
-export type OutboxRemoteChain = "TON" | "SOLANA";
+export type OutboxRemoteChain = "GRAM" | "SOLANA";
 
 /** A persisted outbox row: the action plus its delivery state. */
 export interface OutboxRecord {

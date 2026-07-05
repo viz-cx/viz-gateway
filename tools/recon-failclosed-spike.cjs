@@ -40,7 +40,7 @@ async function oneRemoteFailsIsIndeterminate() {
   // Two remotes: TON ok, SOLANA down. Locked = TON supply (fully backed if only TON).
   // If we were to use supply=0 for SOLANA, drift would look fine — but we must NOT do that.
   const recon = new Recon(
-    [okRemote("TON", 500), failingRemote("SOLANA")],
+    [okRemote("GRAM", 500), failingRemote("SOLANA")],
     locked(500),
     store,
     cfg,
@@ -69,7 +69,7 @@ async function oneRemoteFailsIsIndeterminate() {
 
 async function recoveryResetsCounter() {
   const store = new InMemoryGatewayStore();
-  const recon = new Recon([okRemote("TON", 500)], locked(500), store, cfg);
+  const recon = new Recon([okRemote("GRAM", 500)], locked(500), store, cfg);
 
   // Two failures, then a successful check — counter resets, no pause.
   await recon.onCheckResult(null);
@@ -88,7 +88,7 @@ async function recoveryResetsCounter() {
 async function underBackingPauses() {
   const store = new InMemoryGatewayStore();
   // circulating (600) > locked (500) => under-backed
-  const recon = new Recon([okRemote("TON", 600)], locked(500), store, cfg);
+  const recon = new Recon([okRemote("GRAM", 600)], locked(500), store, cfg);
   const r = await recon.check();
   assert.strictEqual(r, false, "under-backed check returns false");
   assert.strictEqual(await store.isPaused(), true, "under-backing trips the pause");
@@ -105,21 +105,21 @@ async function missingExpectedRemoteThrows() {
   // RECON_EXPECTED_REMOTES=[TON,SOLANA] makes recon refuse to start rather than under-count.
   assert.throws(
     () =>
-      new Recon([okRemote("TON", 500)], locked(500), new InMemoryGatewayStore(), {
+      new Recon([okRemote("GRAM", 500)], locked(500), new InMemoryGatewayStore(), {
         ...cfg,
-        expectedRemotes: ["TON", "SOLANA"],
+        expectedRemotes: ["GRAM", "SOLANA"],
       }),
     /expected remote\(s\) \[SOLANA\] missing/,
     "a declared-but-missing remote must throw at construction",
   );
   // When all declared remotes are present, construction succeeds.
-  const ok = new Recon([okRemote("TON", 500), okRemote("SOLANA", 0)], locked(500), new InMemoryGatewayStore(), {
+  const ok = new Recon([okRemote("GRAM", 500), okRemote("SOLANA", 0)], locked(500), new InMemoryGatewayStore(), {
     ...cfg,
-    expectedRemotes: ["TON", "SOLANA"],
+    expectedRemotes: ["GRAM", "SOLANA"],
   });
   assert.ok(ok, "all expected remotes present -> constructs");
   // Empty/absent expectedRemotes keeps the legacy behavior (only the >=1 guard applies).
-  const legacy = new Recon([okRemote("TON", 500)], locked(500), new InMemoryGatewayStore(), cfg);
+  const legacy = new Recon([okRemote("GRAM", 500)], locked(500), new InMemoryGatewayStore(), cfg);
   assert.ok(legacy, "no expected-remotes list -> single remote still allowed");
   console.log("[recon-failclosed] missing expected remote fatal; present set OK; legacy unaffected OK");
 }

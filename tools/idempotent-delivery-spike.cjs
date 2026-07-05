@@ -46,8 +46,8 @@ const { join } = require("node:path");
 const FEES = {
   floorMilliViz: 10000n,
   bps: 20,
-  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
-  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+  activationSurchargeMilliViz: { SOLANA: 10000n, GRAM: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, GRAM: 1000n },
 };
 
 function makePegOutAction() {
@@ -563,7 +563,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
   }
 
   function enqueueTonPegIn(store, id) {
-    return store.enqueue({ id, direction: "PEG_IN", remoteChain: "TON",
+    return store.enqueue({ id, direction: "PEG_IN", remoteChain: "GRAM",
       recipient: "EQrecipient", sender: "alice", amountMilliViz: 100000n,
       digest: "tondeadbeef", status: "QUEUED" });
   }

@@ -111,7 +111,7 @@ export class KeyedSigner implements Signer {
   /** Re-derive the expected NET for a PEG_IN and assert the proposal matches. */
   private assertNet(
     action: CanonicalAction,
-    chain: "SOLANA" | "TON",
+    chain: "SOLANA" | "GRAM",
     destProvisioned: boolean,
     proposalNet: string,
   ): void {
@@ -150,7 +150,7 @@ export class KeyedSigner implements Signer {
     }
     // proposal.amountMilliViz is NET; re-derive base fee from gross, accept the
     // pinned destProvisioned flag for the activation surcharge.
-    this.assertNet(action, "TON", proposal.destProvisioned, proposal.amountMilliViz);
+    this.assertNet(action, "GRAM", proposal.destProvisioned, proposal.amountMilliViz);
     if (!this.tonApprover) throw new Error("TON approver not configured on this signer; refusing to approve");
     // On-chain effect: propose (if this operator is the designated proposer and the
     // order is absent) or approve, from THIS operator's own wallet. The approver

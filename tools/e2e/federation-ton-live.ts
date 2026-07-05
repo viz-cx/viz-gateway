@@ -185,7 +185,7 @@ async function proveThresholdMint(
   // mVIZ). uniqueGrossMilliViz adds only 0–999 jitter, so 20_000n always landed
   // below the floor and the coordinator refunded before any approval.
   const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-mint`);
-  const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
   const { seqno: seqnoBefore } = await nextOrderInfo(cfg);
 
@@ -270,7 +270,7 @@ async function proveCrashWindow(
   // Fast orphan recovery so the relaunched stack requeues within seconds.
   const fastWatcherEnv = { ...watcherEnv, DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS: "8000", DISPATCHER_INTERVAL_MS: "3000" };
   const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-crash`);
-  const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
   const { orderAddr: predicted, seqno: seqnoBefore } = await nextOrderInfo(cfg);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
 
@@ -373,7 +373,7 @@ async function findPegInRow(
 ): Promise<OutboxRecord | null> {
   const rows = await store.stale(Date.now() + 1, 0, ["QUEUED", "BROADCAST", "CONFIRMED"]);
   const mine = rows
-    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "TON" && r.recipient === owner && r.createdAt >= since - 5_000)
+    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "GRAM" && r.recipient === owner && r.createdAt >= since - 5_000)
     .sort((a, b) => b.createdAt - a.createdAt);
   return mine[0] ?? null;
 }

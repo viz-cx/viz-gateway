@@ -13,7 +13,7 @@ const { canonicalPegIn, canonicalPegOut } = require("../packages/common/dist/can
 const dep = {
   trxId: "abc123",
   opIndex: 0,
-  remoteChain: "TON",
+  remoteChain: "GRAM",
   remoteDestination: "EQCuW98IexampleAddr",
   amountMilliViz: 10_000n,
 };

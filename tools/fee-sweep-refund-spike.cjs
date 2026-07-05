@@ -38,8 +38,8 @@ async function expectReject(promise, label) {
   const fees = {
     floorMilliViz: 10_000n,
     bps: 20,
-    activationSurchargeMilliViz: { SOLANA: 10_000n, TON: 10_000n },
-    mintGasFloorMilliViz: { SOLANA: 1_000n, TON: 1_000n },
+    activationSurchargeMilliViz: { SOLANA: 10_000n, GRAM: 10_000n },
+    mintGasFloorMilliViz: { SOLANA: 1_000n, GRAM: 1_000n },
   };
 
   // The TRUE parent PEG_IN deposit the operator's own VIZ node would return.
@@ -50,7 +50,7 @@ async function expectReject(promise, label) {
     from: "viz-user",
     to: "viz-gateway",
     amountMilliViz: 1_068_237n,
-    remoteChain: "TON",
+    remoteChain: "GRAM",
     remoteDestination: "EQsomeTonAddress",
   };
   const parent = canonicalPegIn(deposit);

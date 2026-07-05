@@ -46,10 +46,10 @@ export async function routeApproval(
     return signer.approveSolanaMint(action, proposal);
   }
   if (isTonMintProposal(proposal)) {
-    if (action.remoteChain && action.remoteChain !== "TON") {
-      throw new Error(`TON proposal for a ${action.remoteChain} action (${action.id})`);
+    if (action.remoteChain && action.remoteChain !== "GRAM") {
+      throw new Error(`GRAM proposal for a ${action.remoteChain} action (${action.id})`);
     }
     return signer.approveTonMint(action, proposal);
   }
-  throw new Error(`PEG_IN proposal shape not recognized (neither TON nor Solana) for ${action.id}`);
+  throw new Error(`PEG_IN proposal shape not recognized (neither GRAM nor Solana) for ${action.id}`);
 }

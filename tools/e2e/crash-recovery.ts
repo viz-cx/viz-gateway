@@ -55,7 +55,7 @@ async function main() {
 
   const tonOwner = cfg.ton.burnOwner; // wVIZ mint recipient
   const gross = uniqueGrossMilliViz(20_000n, cfg.runId);
-  const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
 
   // Snapshot BEFORE anything: the seqno the coordinator will consume for this mint,
   // and its deterministic order address (our idempotency key + on-chain landing probe).
@@ -161,7 +161,7 @@ async function findPegInRow(
   // stale(now+1, 0, statuses) returns every row in those statuses (updated_at <= now).
   const rows = await store.stale(Date.now() + 1, 0, ["QUEUED", "BROADCAST", "CONFIRMED"]);
   const mine = rows
-    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "TON" && r.recipient === owner && r.createdAt >= since - 5_000)
+    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "GRAM" && r.recipient === owner && r.createdAt >= since - 5_000)
     .sort((a, b) => b.createdAt - a.createdAt);
   return mine[0] ?? null;
 }

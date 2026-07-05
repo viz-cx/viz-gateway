@@ -94,7 +94,7 @@ function syntheticPegOutAction(runId: string): Record<string, unknown> {
   return {
     direction: "PEG_OUT",
     id: `fed-test-${runId}`,
-    remoteChain: "TON",
+    remoteChain: "GRAM",
     recipient: "babin",
     amountMilliViz: "10000",
     digest: `fed-test-${runId}`,

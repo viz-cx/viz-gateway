@@ -5,7 +5,7 @@
 export type Direction = "PEG_IN" | "PEG_OUT";
 
 /** Remote chains the gateway can mint wrapped VIZ on. */
-export type RemoteChainId = "TON" | "SOLANA";
+export type RemoteChainId = "GRAM" | "SOLANA";
 
 /** A confirmed VIZ -> gateway deposit (peg-in source event). */
 export interface VizDeposit {
@@ -191,8 +191,8 @@ export interface ManifestFees {
   floorMilliViz: bigint;
   /** Basis points (20 = 0.20%). */
   bps: number;
-  activationSurchargeMilliViz: { SOLANA: bigint; TON: bigint };
-  mintGasFloorMilliViz: { SOLANA: bigint; TON: bigint };
+  activationSurchargeMilliViz: { SOLANA: bigint; GRAM: bigint };
+  mintGasFloorMilliViz: { SOLANA: bigint; GRAM: bigint };
 }
 
 export interface FederationManifest {

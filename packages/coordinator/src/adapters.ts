@@ -108,7 +108,7 @@ export class TonMintBroadcaster implements Broadcaster {
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
     // Read destination provisioning ONCE and pin it; compute NET from gross+policy.
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
-    const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "TON"));
+    const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "GRAM"));
     if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
     const net = q.b.net;
     // The REAL packed mint-order cell hash (seqno-independent): every operator rebuilds

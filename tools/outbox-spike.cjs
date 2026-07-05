@@ -73,7 +73,7 @@ const { createStore, SqliteGatewayStore } = require("../packages/common/dist/sto
   // 4b) production flow: the watcher enqueues a PEG_IN with NO fee (it doesn't yet
   //     know the net split); the dispatcher pins the real fee via the CONFIRMED
   //     patch. Before this fix the fee stayed 0 forever and unswept was always 0.
-  await store.enqueue({ id: "trx2:0", direction: "PEG_IN", remoteChain: "TON", recipient: "carol", amountMilliViz: 5_000_000n, digest: "d4", status: "QUEUED" });
+  await store.enqueue({ id: "trx2:0", direction: "PEG_IN", remoteChain: "GRAM", recipient: "carol", amountMilliViz: 5_000_000n, digest: "d4", status: "QUEUED" });
   assert.strictEqual((await store.get("trx2:0")).feeMilliViz, 0n, "watcher enqueues fee 0");
   await store.setStatus("trx2:0", "CONFIRMED", { txid: "t2", feeMilliViz: 15_000n });
   assert.strictEqual((await store.get("trx2:0")).feeMilliViz, 15_000n, "fee pinned at delivery time");
@@ -87,7 +87,7 @@ const { createStore, SqliteGatewayStore } = require("../packages/common/dist/sto
   // 4b') setFee pins the withheld fee WITHOUT a status change (the coordinator calls
   //      this before broadcast, so a lost response / recovery can still spawn the
   //      FEE_SWEEP instead of stranding the fee as surplus — PR#11 follow-up #3).
-  await store.enqueue({ id: "trx3:0", direction: "PEG_IN", remoteChain: "TON", recipient: "erin", amountMilliViz: 8_000_000n, digest: "d4b", status: "BROADCAST" });
+  await store.enqueue({ id: "trx3:0", direction: "PEG_IN", remoteChain: "GRAM", recipient: "erin", amountMilliViz: 8_000_000n, digest: "d4b", status: "BROADCAST" });
   await store.setFee("trx3:0", 24_000n);
   const pinned = await store.get("trx3:0");
   assert.strictEqual(pinned.feeMilliViz, 24_000n, "setFee pins the fee");
@@ -127,8 +127,8 @@ const { createStore, SqliteGatewayStore } = require("../packages/common/dist/sto
   //    whose sum exceeds 2^63 (=9.22e18) must add EXACTLY, not crash.
   store = new SqliteGatewayStore(dbPath); // reopen (section 5 closed it)
   const BIG = 9_000_000_000_000_000_000n; // < 2^63 individually, > 2^63 summed
-  await store.enqueue({ id: "big1", direction: "PEG_IN", remoteChain: "TON", recipient: "z1", amountMilliViz: BIG, feeMilliViz: BIG, digest: "b1", status: "CONFIRMED" });
-  await store.enqueue({ id: "big2", direction: "PEG_IN", remoteChain: "TON", recipient: "z2", amountMilliViz: BIG, feeMilliViz: BIG, digest: "b2", status: "CONFIRMED" });
+  await store.enqueue({ id: "big1", direction: "PEG_IN", remoteChain: "GRAM", recipient: "z1", amountMilliViz: BIG, feeMilliViz: BIG, digest: "b1", status: "CONFIRMED" });
+  await store.enqueue({ id: "big2", direction: "PEG_IN", remoteChain: "GRAM", recipient: "z2", amountMilliViz: BIG, feeMilliViz: BIG, digest: "b2", status: "CONFIRMED" });
   assert.strictEqual(await store.unsweptFeesMilliViz(), BIG * 2n, "unswept fees sum exactly past 2^63 (no REAL overflow)");
   await store.delete("big1");
   await store.delete("big2");

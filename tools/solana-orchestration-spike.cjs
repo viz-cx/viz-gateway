@@ -15,8 +15,8 @@ const { canonicalPegIn, parseRemoteTarget, quotePegIn, pegInFeePolicyFor } = req
 const FEES = {
   floorMilliViz: 10000n,
   bps: 20,
-  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
-  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+  activationSurchargeMilliViz: { SOLANA: 10000n, GRAM: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, GRAM: 1000n },
 };
 const {
   mintMessageB64,
@@ -29,10 +29,10 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
 (async () => {
   // ---- memo parsing -------------------------------------------------------
   assert.deepStrictEqual(parseRemoteTarget("solana:9xRecipient"), { chain: "SOLANA", destination: "9xRecipient" });
-  assert.deepStrictEqual(parseRemoteTarget("ton:EQabc"), { chain: "TON", destination: "EQabc" });
+  assert.deepStrictEqual(parseRemoteTarget("gram:EQabc"), { chain: "GRAM", destination: "EQabc" });
   assert.throws(() => parseRemoteTarget("9xNoPrefix"), /missing chain prefix/);
   assert.throws(() => parseRemoteTarget("doge:9x"), /unknown chain prefix/);
-  console.log("[memo] solana:/ton: parsed; bare + unknown-prefix REJECTED OK");
+  console.log("[memo] solana:/gram: parsed; bare + unknown-prefix REJECTED OK");
 
   // ---- key material + proposal --------------------------------------------
   const submitter = Keypair.generate();
@@ -58,13 +58,13 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   });
   assert.strictEqual(action.remoteChain, "SOLANA", "action must carry the SOLANA tag");
 
-  // the chain is committed in the digest: a TON-targeted twin differs
-  const tonTwin = canonicalPegIn({
+  // the chain is committed in the digest: a GRAM-targeted twin differs
+  const gramTwin = canonicalPegIn({
     trxId: "t1", opIndex: 0, blockNum: 1, from: "viz-user", to: "viz-gateway",
-    amountMilliViz: 1068237n, remoteChain: "TON", remoteDestination: recipient,
+    amountMilliViz: 1068237n, remoteChain: "GRAM", remoteDestination: recipient,
   });
-  assert.notStrictEqual(action.digest, tonTwin.digest, "digest must commit to the target chain");
-  console.log("[canonical] action tagged SOLANA; chain committed in digest (SOLANA != TON) OK");
+  assert.notStrictEqual(action.digest, gramTwin.digest, "digest must commit to the target chain");
+  console.log("[canonical] action tagged SOLANA; chain committed in digest (SOLANA != GRAM) OK");
 
   const q = quotePegIn(action.amountMilliViz, true, pegInFeePolicyFor(FEES, "SOLANA"));
   assert.ok(q.ok, "expected a valid quote");
@@ -118,7 +118,7 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
 
   // ---- negatives ----------------------------------------------------------
   const tonProposal = { orderSeqno: "1", toAddress: recipient, amountMilliViz: q.b.net.toString(), destProvisioned: true, orderHashHex: action.digest };
-  await assert.rejects(routeApproval(ksA, action, tonProposal), /TON proposal for a SOLANA action/);
+  await assert.rejects(routeApproval(ksA, action, tonProposal), /GRAM proposal for a SOLANA action/);
   await assert.rejects(routeApproval(ksA, action, { foo: "bar" }), /shape not recognized/);
   console.log("[orchestrate] TON-shaped proposal on a SOLANA action + unknown shape REJECTED OK");
 

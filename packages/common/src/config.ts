@@ -166,8 +166,8 @@ export function parseManifest(raw: unknown): FederationManifest {
     fees = {
       floorMilliViz: BigInt(f["floorMilliViz"] as number),
       bps: Number(f["bps"]),
-      activationSurchargeMilliViz: { SOLANA: BigInt(act["SOLANA"] as number), TON: BigInt(act["TON"] as number) },
-      mintGasFloorMilliViz: { SOLANA: BigInt(gas["SOLANA"] as number), TON: BigInt(gas["TON"] as number) },
+      activationSurchargeMilliViz: { SOLANA: BigInt(act["SOLANA"] as number), GRAM: BigInt(act["GRAM"] as number) },
+      mintGasFloorMilliViz: { SOLANA: BigInt(gas["SOLANA"] as number), GRAM: BigInt(gas["GRAM"] as number) },
     };
   }
   return { n, threshold, operators, fees };
@@ -314,11 +314,11 @@ export function loadConfig(): GatewayConfig {
       bps: federation.fees?.bps ?? int("FEE_BPS", 20),
       activationSurchargeMilliViz: {
         SOLANA: federation.fees?.activationSurchargeMilliViz.SOLANA ?? big("FEE_ACTIVATION_SOLANA_MILLI_VIZ", "10000"),
-        TON: federation.fees?.activationSurchargeMilliViz.TON ?? big("FEE_ACTIVATION_TON_MILLI_VIZ", "10000"),
+        GRAM: federation.fees?.activationSurchargeMilliViz.GRAM ?? big("FEE_ACTIVATION_TON_MILLI_VIZ", "10000"),
       },
       mintGasFloorMilliViz: {
         SOLANA: federation.fees?.mintGasFloorMilliViz.SOLANA ?? big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"),
-        TON: federation.fees?.mintGasFloorMilliViz.TON ?? big("MINT_GAS_FLOOR_TON_MILLI_VIZ", "1000"),
+        GRAM: federation.fees?.mintGasFloorMilliViz.GRAM ?? big("MINT_GAS_FLOOR_TON_MILLI_VIZ", "1000"),
       },
     },
     storeUrl: opt("STORE_URL", "sqlite:./data/gateway.sqlite"),

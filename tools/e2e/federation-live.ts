@@ -71,7 +71,7 @@ async function main() {
 
   const tonOwner  = baseCfg.ton.burnOwner;
   const gross     = uniqueGrossMilliViz(20_000n, baseCfg.runId);
-  const net       = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net       = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
   const recvAcct  = baseCfg.viz.recipient;
 
   console.log(`[fed-live] run=${baseCfg.runId} gross=${gross} net=${net}`);

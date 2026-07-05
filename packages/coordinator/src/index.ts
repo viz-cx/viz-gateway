@@ -87,8 +87,8 @@ async function main(): Promise<void> {
       if (!solanaBroadcaster) throw new Error(`Solana PEG_IN ${action.id} but Solana mint not configured`);
       return solanaBroadcaster;
     }
-    if (action.remoteChain === "TON") {
-      if (!tonBroadcaster) throw new Error(`TON PEG_IN ${action.id} but TON minter not configured`);
+    if (action.remoteChain === "GRAM") {
+      if (!tonBroadcaster) throw new Error(`GRAM PEG_IN ${action.id} but GRAM minter not configured`);
       return tonBroadcaster;
     }
     throw new Error(`PEG_IN ${action.id} has unknown/absent remoteChain`);
