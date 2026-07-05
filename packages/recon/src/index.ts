@@ -5,6 +5,9 @@ import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
 import { SolanaChain, pubkeyOf } from "@gateway/solana-watcher/dist/solanaChain";
+import { Recon } from "./checker";
+
+export { Recon } from "./checker";
 
 /**
  * recon: continuously checks the peg invariant
@@ -37,43 +40,15 @@ async function main(): Promise<void> {
     const sol = new SolanaChain(cfg.solana.rpcUrl, cfg.solana.wvizMint, cfg.solana.gatewayTokenAccount, cfg.solana.finalitySlots);
     remotes.push({ name: "SOLANA", supply: () => sol.circulatingSupplyMilliViz() });
   }
-  if (remotes.length === 0) {
-    console.warn("[recon] no remote chain configured; circulating supply treated as 0 until configured.");
-  }
 
+  // VG-02: throws if remotes.length === 0 (see Recon constructor).
   const store = createStore(cfg.storeUrl);
+  const recon = new Recon(remotes, viz.gatewayBalanceMilliViz.bind(viz), store, cfg.recon);
+
   const once = process.env.RECON_ONCE === "1";
   console.log(
-    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ remotes=[${remotes.map((r) => r.name).join(",")}] once=${once}`,
+    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ maxConsecFail=${cfg.recon.maxConsecutiveFailures} remotes=[${remotes.map((r) => r.name).join(",")}] once=${once}`,
   );
-
-  const check = async (): Promise<boolean> => {
-    const [locked, supplies, unsweptFees] = await Promise.all([
-      viz.gatewayBalanceMilliViz(),
-      Promise.all(remotes.map((r) => r.supply())),
-      store.unsweptFeesMilliViz(),
-    ]);
-    const circulating = supplies.reduce((a, s) => a + s, 0n);
-    // Per-peg-in fee sweep keeps locked == circulating; between mint and FEE_SWEEP
-    // the fee sits as surplus VIZ, so expected = circulating + unswept fees.
-    const expectedLocked = circulating + unsweptFees;
-    const drift = locked - expectedLocked;
-    // Safe direction is over-backing (locked > expected). Under-backing
-    // (circulating > locked, i.e. drift < −tolerance) is always CRITICAL.
-    const ok = drift >= -cfg.recon.driftToleranceMilliViz;
-    console.log(
-      `[recon] locked=${locked} circulating=${circulating} unsweptFees=${unsweptFees} drift=${drift} status=${ok ? "OK" : "UNDER-BACKED"}`,
-    );
-    if (!ok) {
-      // Trip the shared, cross-process global pause. All watchers/signers see it.
-      // Clearing it is a deliberate T-of-N operator action (unpause), never automatic.
-      const reason = `under-backing ${drift} mVIZ (locked=${locked}, circulating=${circulating}, unsweptFees=${unsweptFees})`;
-      await store.pause(reason);
-      console.error(`[recon] CRITICAL: UNDER-BACKING DETECTED -> gateway paused: ${reason}`);
-      notifyStaff("drift", reason, { locked: String(locked), circulating: String(circulating) });
-    }
-    return ok;
-  };
 
   // D3 reserve monitor: the Solana submitter pays fee + ATA rent for every mint;
   // if it runs dry, mints silently fail. Page (don't pause) when it's low.
@@ -96,10 +71,11 @@ async function main(): Promise<void> {
   };
 
   if (once) {
-    const ok = await check();
+    const result = await recon.check();
     await reserveCheck();
     await store.close();
-    process.exit(ok ? 0 : 2);
+    // exit 0 = healthy; exit 2 = under-backed or indeterminate (can't confirm the peg).
+    process.exit(result === true ? 0 : 2);
   }
 
   let running = true;
@@ -111,7 +87,8 @@ async function main(): Promise<void> {
 
   while (running) {
     try {
-      await check();
+      const result = await recon.check();
+      await recon.onCheckResult(result);
       await reserveCheck();
     } catch (err) {
       console.error("[recon] loop error:", err);
