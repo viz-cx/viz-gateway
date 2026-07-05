@@ -1,4 +1,4 @@
-import type { GatewayStore } from "@gateway/common";
+import type { GatewayStore, RemoteChainId } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 
 export interface ReconCfg {
@@ -31,6 +31,7 @@ export class Recon {
     private readonly getLockedBalance: () => Promise<bigint>,
     private readonly store: GatewayStore,
     private readonly cfg: ReconCfg,
+    private readonly chain?: RemoteChainId,
   ) {
     // VG-02: zero remotes is a fatal misconfiguration — recon with no wVIZ supply
     // visibility always sees circulating = 0, so drift ≥ 0, so always "healthy".
@@ -69,7 +70,7 @@ export class Recon {
       [locked, settled, unsweptFees] = await Promise.all([
         this.getLockedBalance(),
         Promise.allSettled(this.remotes.map((r) => r.supply())),
-        this.store.unsweptFeesMilliViz(),
+        this.store.unsweptFeesMilliViz(this.chain),
       ]);
     } catch (err) {
       console.error("[recon] check indeterminate (VIZ node or store unavailable):", err);
