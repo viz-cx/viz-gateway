@@ -283,6 +283,19 @@ the property will silently regress if the id/recipient charset ever widens.
 any value (e.g. `\x1f`) between pairs, or length-prefix each value, or hash a
 canonical typed structure. Add an assertion that no value contains the separator.
 
+**Correction to the code cite.** The shipped code separated pairs with a `\x1f`
+unit-separator (not `""` as printed above); the finding stands regardless, since
+`\x1f` is not stripped from the memo-derived `recipient`, so an adversary-supplied
+value could still forge a field boundary.
+
+**Remediation status — FIXED.** `canonicalString` now uses a length-prefixed,
+injective encoding (`<byteLen>:<key>=<byteLen>:<value>` per field): field
+boundaries are content-independent, so no value — including one containing the old
+`\x1f` separator — can shift the split or collide with a different field array.
+Verified by `tools/canonical-spike.cjs` (determinism, boundary-shift injectivity,
+separator-injection, and PEG_IN/PEG_OUT domain separation), wired into `npm run
+verify`.
+
 ---
 
 ### VG-06 — Medium — TON burn scan is not height-ranged; bursts silently truncated, no alert

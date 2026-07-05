@@ -12,8 +12,14 @@ import type { CanonicalAction, RemoteBurn, RemoteChainId, VizDeposit } from "./t
  */
 
 function canonicalString(fields: Array<[string, string]>): string {
-  // Fixed field order, explicit separators, no JSON ambiguity.
-  return fields.map(([k, v]) => `${k}=${v}`).join("");
+  // Length-prefixed, injective encoding. Each key and value is tagged with its
+  // UTF-8 byte length ("<len>:<bytes>"), so no value can forge a field boundary
+  // or shift the split between adjacent fields — distinct field arrays always
+  // produce distinct strings. Keys are fixed literals; values are source-derived
+  // and adversary-influenced (addresses, memos), so both are length-tagged.
+  return fields
+    .map(([k, v]) => `${Buffer.byteLength(k, "utf8")}:${k}=${Buffer.byteLength(v, "utf8")}:${v}`)
+    .join("|");
 }
 
 function digestOf(s: string): string {
@@ -30,7 +36,7 @@ const REMOTE_CHAIN_BY_PREFIX: Record<string, RemoteChainId> = {
  * Trust-critical: every operator parses the same memo into the same target, so
  * the derived canonical action (and digest) match across operators.
  *
- * Throws on a missing/unknown chain prefix or an empty destination — a custody
+ * Throws on a missing/unknown chain prefix or an empty destination â a custody
  * bridge never silently defaults the target chain. The split is on the FIRST ':'
  * only; TON (EQ.../UQ... base64url) and Solana (base58) addresses never contain ':'.
  */
