@@ -5,7 +5,7 @@ export interface ReconCfg {
   driftToleranceMilliViz: bigint;
   maxConsecutiveFailures: number;
   /**
-   * Chain names that MUST be present as remotes (e.g. ["TON","SOLANA"]). If any is
+   * Chain names that MUST be present as remotes (e.g. ["GRAM","SOLANA"]). If any is
    * missing, the constructor throws. Closes the gap where dropping a remote's config
    * env var while it still has circulating wVIZ silently stops monitoring its supply
    * (the length===0 guard only catches ALL remotes missing, not a subset). Empty =
@@ -37,7 +37,7 @@ export class Recon {
     if (remotes.length === 0) {
       throw new Error(
         "[recon] no remote chain configured — configure at least one of " +
-          "TON_JETTON_MINTER_ADDRESS / SOLANA_WVIZ_MINT. " +
+          "GRAM_JETTON_MINTER_ADDRESS / SOLANA_WVIZ_MINT. " +
           "A recon with no supply visibility must not run.",
       );
     }

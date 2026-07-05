@@ -1,10 +1,10 @@
 import { createServer } from "node:http";
 import { actionFromWire, createStore, loadConfig, type CanonicalAction } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
-import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { Orchestrator } from "./orchestrator";
-import { HttpSignerClient, SolanaMintBroadcaster, TonMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
+import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
 
 /**
  * coordinator: UNTRUSTED. On POST /submit { action } it builds the one shared
@@ -37,25 +37,25 @@ async function main(): Promise<void> {
   const vizChain = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
   const vizBroadcaster = new VizReleaseBroadcaster(vizChain, cfg.viz.gatewayAccount, store);
 
-  // The single designated TON proposer = first federation operator (see TonMintBroadcaster).
+  // The single designated TON proposer = first federation operator (see GramMintBroadcaster).
   const tonProposerId = cfg.federation.operators[0]?.id;
   // Keyless on TON: no signer mnemonic. The coordinator only DESCRIBES the mint order;
   // operators approve it on-chain from their own wallets. The designated proposer (the
   // one operator that sends `new_order`) is the first federation operator — the signer
   // list must be ordered so this operator is contacted first (harness + deploy invariant).
-  if (cfg.ton.jettonMinterAddress && !tonProposerId) {
+  if (cfg.gram.jettonMinterAddress && !tonProposerId) {
     throw new Error("TON minter configured but no federation operators to designate as proposer");
   }
   const tonBroadcaster =
-    cfg.ton.jettonMinterAddress && tonProposerId
-      ? new TonMintBroadcaster(
-          new TonHttpChain(
-            cfg.ton.endpoint,
-            cfg.ton.apiKey,
-            cfg.ton.jettonMinterAddress,
-            cfg.ton.gatewayJettonWallet,
-            cfg.ton.multisigAddress,
-            cfg.ton.finalityConfirmations,
+    cfg.gram.jettonMinterAddress && tonProposerId
+      ? new GramMintBroadcaster(
+          new GramHttpChain(
+            cfg.gram.endpoint,
+            cfg.gram.apiKey,
+            cfg.gram.jettonMinterAddress,
+            cfg.gram.gatewayJettonWallet,
+            cfg.gram.multisigAddress,
+            cfg.gram.finalityConfirmations,
           ),
           cfg.fees,
           store,
@@ -87,8 +87,8 @@ async function main(): Promise<void> {
       if (!solanaBroadcaster) throw new Error(`Solana PEG_IN ${action.id} but Solana mint not configured`);
       return solanaBroadcaster;
     }
-    if (action.remoteChain === "TON") {
-      if (!tonBroadcaster) throw new Error(`TON PEG_IN ${action.id} but TON minter not configured`);
+    if (action.remoteChain === "GRAM") {
+      if (!tonBroadcaster) throw new Error(`GRAM PEG_IN ${action.id} but GRAM minter not configured`);
       return tonBroadcaster;
     }
     throw new Error(`PEG_IN ${action.id} has unknown/absent remoteChain`);

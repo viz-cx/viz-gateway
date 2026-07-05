@@ -1,10 +1,10 @@
-// tools/e2e/ton-rotation.ts — LIVE criterion 4 for RUNBOOK §9b: multisig signer-set
+// tools/e2e/gram-rotation.ts — LIVE criterion 4 for RUNBOOK §9b: multisig signer-set
 // rotation drops an operator, and the dropped operator's on-chain `approve` is
 // rejected (err 106 unauthorized_sign) while the retained set still reaches
 // threshold.
 //
 // This is the live counterpart of the sandbox rejection proof in
-// tools/ton-onchain-approval-spike.cjs. It drives the full rotation ceremony
+// tools/gram-onchain-approval-spike.cjs. It drives the full rotation ceremony
 // directly against the deployed multisig (the same primitives as
 // contracts/ton/src/rotateTon.ts), then creates a fresh order under the rotated
 // set to prove the dropped operator can no longer authorize it.
@@ -33,7 +33,7 @@ const POLL_MS = 5_000;
 // the order contract (surplus flows to the multisig, not back to the proposer). The
 // update/mint actions need ~0.1 TON + gas; 0.3 keeps the proposer's drain low so a
 // lightly-funded proposer covers the ceremony. Approvers/dropped only send a single
-// ~0.1 TON approve. Matches TON_ORDER_VALUE_NANO in federation-ton-live.ts.
+// ~0.1 TON approve. Matches GRAM_ORDER_VALUE_NANO in federation-ton-live.ts.
 const NEW_ORDER_VALUE = toNano("0.3");
 const MIN_PROPOSER_BALANCE = toNano("1");
 const MIN_SIGNER_BALANCE = toNano("0.3");
@@ -46,7 +46,7 @@ interface Op {
 }
 
 function client(cfg: E2eConfig): TonClient {
-  return new TonClient({ endpoint: cfg.ton.endpoint, apiKey: cfg.ton.apiKey, timeout: 15000 });
+  return new TonClient({ endpoint: cfg.gram.endpoint, apiKey: cfg.gram.apiKey, timeout: 15000 });
 }
 
 async function toOp(id: string, mnemonic: string): Promise<Op> {
@@ -130,16 +130,16 @@ function openWithConfig(c: TonClient, addr: Address, cfg: MultisigConfig) {
 
 /**
  * Drive the live rotation proof. Requires every configured operator's own TON
- * mnemonic (FED_OP<i>_TON_MNEMONIC). Throws on any failed assertion; logs a PASS
+ * mnemonic (FED_OP<i>_GRAM_MNEMONIC). Throws on any failed assertion; logs a PASS
  * line on success.
  */
 export async function proveRotationLive(
   cfg: E2eConfig,
-  operators: Array<{ id: string; tonMnemonic: string }>,
+  operators: Array<{ id: string; gramMnemonic: string }>,
 ): Promise<void> {
   const c = client(cfg);
-  const multisigAddr = Address.parse(cfg.ton.multisigAddress);
-  const ops = await Promise.all(operators.map((o) => toOp(o.id, o.tonMnemonic)));
+  const multisigAddr = Address.parse(cfg.gram.multisigAddress);
+  const ops = await Promise.all(operators.map((o) => toOp(o.id, o.gramMnemonic)));
 
   // Read the live signer set. Map each configured operator to its current index.
   const data = await c.open(Multisig.createFromAddress(multisigAddr)).getMultisigData();

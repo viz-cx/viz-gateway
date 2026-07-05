@@ -7,11 +7,11 @@ import {
   type GatewayFeeConfig,
   type GatewayStore,
   type SolanaMintProposal,
-  type TonMintProposal,
+  type GramMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
-import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import type { Broadcaster, BuildResult, Proposal, SignerClient } from "./orchestrator";
 
@@ -82,8 +82,8 @@ export class VizReleaseBroadcaster implements Broadcaster {
 }
 
 /** Max time the keyless coordinator waits for the on-chain order to self-execute. */
-const TON_EXECUTE_POLL_MAX_MS = 90_000;
-const TON_EXECUTE_POLL_INTERVAL_MS = 3_000;
+const GRAM_EXECUTE_POLL_MAX_MS = 90_000;
+const GRAM_EXECUTE_POLL_INTERVAL_MS = 3_000;
 
 /**
  * PEG_IN (TON): DESCRIBE the mint order for the operators to approve on-chain.
@@ -92,13 +92,13 @@ const TON_EXECUTE_POLL_INTERVAL_MS = 3_000;
  * `new_order` or hold a signer key — it only builds the order proposal (real cell
  * hash + deterministic address) and pins the idempotency key. Each operator's
  * signer performs the actual on-chain propose/approve from its own wallet
- * (KeyedSigner.approveTonMint → TonApprover). `broadcast` therefore does not
+ * (KeyedSigner.approveGramMint → GramApprover). `broadcast` therefore does not
  * submit anything; it confirms the order self-executed once threshold approvals
  * landed. See docs/plan-ton-onchain-approval.md.
  */
-export class TonMintBroadcaster implements Broadcaster {
+export class GramMintBroadcaster implements Broadcaster {
   constructor(
-    private readonly chain: TonHttpChain,
+    private readonly chain: GramHttpChain,
     private readonly fees: GatewayFeeConfig,
     private readonly store: IdempotencyStore,
     /** Operator designated to send `new_order` (single-proposer seqno ordering). */
@@ -108,7 +108,7 @@ export class TonMintBroadcaster implements Broadcaster {
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
     // Read destination provisioning ONCE and pin it; compute NET from gross+policy.
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
-    const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "TON"));
+    const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "GRAM"));
     if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
     const net = q.b.net;
     // The REAL packed mint-order cell hash (seqno-independent): every operator rebuilds
@@ -153,16 +153,16 @@ export class TonMintBroadcaster implements Broadcaster {
     // reach threshold — which is exactly when the orchestrator's approval loop returned —
     // so confirm the order executed and return its address as the txid. `_signatures`
     // are the operators' on-chain approval receipts, carried only for the audit trail.
-    const orderAddr = (proposal as TonMintProposal).orderAddr;
-    const deadline = Date.now() + TON_EXECUTE_POLL_MAX_MS;
+    const orderAddr = (proposal as GramMintProposal).orderAddr;
+    const deadline = Date.now() + GRAM_EXECUTE_POLL_MAX_MS;
     for (;;) {
       if (await this.chain.orderExecuted(orderAddr)) return orderAddr;
       if (Date.now() >= deadline) {
         throw new Error(
-          `TON order ${orderAddr} for ${action.id} not executed within ${TON_EXECUTE_POLL_MAX_MS}ms (approvals below threshold?)`,
+          `GRAM order ${orderAddr} for ${action.id} not executed within ${GRAM_EXECUTE_POLL_MAX_MS}ms (approvals below threshold?)`,
         );
       }
-      await new Promise((r) => setTimeout(r, TON_EXECUTE_POLL_INTERVAL_MS));
+      await new Promise((r) => setTimeout(r, GRAM_EXECUTE_POLL_INTERVAL_MS));
     }
   }
 

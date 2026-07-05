@@ -15,8 +15,8 @@ const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/
 const FEES = {
   floorMilliViz: 10000n,
   bps: 20,
-  activationSurchargeMilliViz: { SOLANA: 10000n, TON: 10000n },
-  mintGasFloorMilliViz: { SOLANA: 1000n, TON: 1000n },
+  activationSurchargeMilliViz: { SOLANA: 10000n, GRAM: 10000n },
+  mintGasFloorMilliViz: { SOLANA: 1000n, GRAM: 1000n },
 };
 
 function signerClient(operatorId, wif) {

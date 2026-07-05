@@ -79,9 +79,9 @@ function looksLikeSolanaSignature(id: string): boolean {
 }
 
 /** A TON peg-out source id is the burn tx hash — exactly 64 hex chars. */
-const TON_TX_HASH_RE = /^[0-9a-f]{64}$/i;
+const GRAM_TX_HASH_RE = /^[0-9a-f]{64}$/i;
 function looksLikeTonTxHash(id: string): boolean {
-  return TON_TX_HASH_RE.test(id);
+  return GRAM_TX_HASH_RE.test(id);
 }
 
 /**

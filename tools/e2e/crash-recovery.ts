@@ -2,7 +2,7 @@
 // crash in the BROADCAST window WITHOUT double-minting wVIZ.
 //
 // This is the live counterpart to spike cases 21-24 (tools/idempotent-delivery-spike.cjs):
-// the spike proves the TonMintBroadcaster logic against a mocked chain; this driver
+// the spike proves the GramMintBroadcaster logic against a mocked chain; this driver
 // proves the same guarantee end-to-end against a real TON testnet + the full stack.
 //
 // The double-mint sequence it reproduces (see docs/plan-ton-peg-in-idempotency.md):
@@ -38,7 +38,7 @@ const MINT_SETTLE_TIMEOUT_MS = 3 * 60_000; // async mint execution credits the b
 const POLL_MS = 4_000;
 
 async function main() {
-  const cfg = loadE2eConfig(process.env, "ton");
+  const cfg = loadE2eConfig(process.env, "gram");
   // Recover fast: shrink the peg-in signing timeout so an orphaned BROADCAST row is
   // requeued seconds (not 5 min) after the crash, and tighten the tick interval.
   const baseEnv = buildRunEnv(cfg);
@@ -53,9 +53,9 @@ async function main() {
   const fees = loadConfig().fees;
   const store = createStore(baseEnv.STORE_URL!);
 
-  const tonOwner = cfg.ton.burnOwner; // wVIZ mint recipient
+  const tonOwner = cfg.gram.burnOwner; // wVIZ mint recipient
   const gross = uniqueGrossMilliViz(20_000n, cfg.runId);
-  const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
 
   // Snapshot BEFORE anything: the seqno the coordinator will consume for this mint,
   // and its deterministic order address (our idempotency key + on-chain landing probe).
@@ -74,7 +74,7 @@ async function main() {
   const stop = async () => { if (stack) { await stack.stop(); stack = null; } };
   try {
     // ── Round 1: drive the peg-in until the order lands, then CRASH ──────────────
-    stack = await launchStack(["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
+    stack = await launchStack(["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
     const lockAt = Date.now();
     const lockTx = await submitLock(cfg, gross, `ton:${tonOwner}`);
     console.log(`[crash] peg-in lock submitted: ${lockTx}`);
@@ -117,7 +117,7 @@ async function main() {
     console.log(`[crash] confirmed exactly one order created (seqno ${seqnoBefore} -> ${seqnoAfterMint})`);
 
     // ── Round 2: relaunch — orphan recovery must short-circuit, NOT re-mint ──────
-    stack = await launchStack(["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
+    stack = await launchStack(["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
     console.log(`[crash] stack relaunched — awaiting orphan recovery + actionExecuted short-circuit`);
     const recovered = await pollUntil(async () => {
       const r = await store.get(row.id);
@@ -161,7 +161,7 @@ async function findPegInRow(
   // stale(now+1, 0, statuses) returns every row in those statuses (updated_at <= now).
   const rows = await store.stale(Date.now() + 1, 0, ["QUEUED", "BROADCAST", "CONFIRMED"]);
   const mine = rows
-    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "TON" && r.recipient === owner && r.createdAt >= since - 5_000)
+    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "GRAM" && r.recipient === owner && r.createdAt >= since - 5_000)
     .sort((a, b) => b.createdAt - a.createdAt);
   return mine[0] ?? null;
 }

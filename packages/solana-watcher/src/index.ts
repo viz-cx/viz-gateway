@@ -13,7 +13,7 @@ import { SolanaChain } from "./solanaChain";
  * gateway token account (peg-out), and ENQUEUES a durable PEG_OUT action. The
  * separate dispatcher delivers it to the coordinator with retries — the watcher
  * never loses an action on a failed submit.
- * Structurally identical to ton-watcher (shared RemoteChain interface).
+ * Structurally identical to gram-watcher (shared RemoteChain interface).
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();

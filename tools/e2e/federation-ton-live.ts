@@ -3,9 +3,9 @@
 // Proves the Phase B trust boundary on TON testnet: FIVE independent operator
 // wallets, a KEYLESS coordinator, and a wVIZ mint that only lands once THREE
 // distinct operators approve on-chain. Each signer approves from its OWN TON
-// wallet (FED_OP<i>_TON_MNEMONIC) — the coordinator holds no TON key.
+// wallet (FED_OP<i>_GRAM_MNEMONIC) — the coordinator holds no TON key.
 //
-// This is the live counterpart of tools/ton-onchain-approval-spike.cjs (which
+// This is the live counterpart of tools/gram-onchain-approval-spike.cjs (which
 // proves the same threshold gating offline against the vendored contracts).
 //
 // Exit criteria (§9b), each asserted here:
@@ -21,10 +21,10 @@
 //
 // Prereqs (RUNBOOK §9b): a fresh 3-of-5 multisig deployed with the 5 operator
 // wallets as signers, wVIZ minter admin handed to it, and .env.e2e carrying
-// FED_N=5, FED_THRESHOLD=3, FED_OP{1..5}_ID/WIF/TON_MNEMONIC + the shared
-// E2E_TON_MULTISIG_ADDRESS / E2E_TON_JETTON_MINTER_ADDRESS.
+// FED_N=5, FED_THRESHOLD=3, FED_OP{1..5}_ID/WIF/GRAM_MNEMONIC + the shared
+// E2E_GRAM_MULTISIG_ADDRESS / E2E_GRAM_JETTON_MINTER_ADDRESS.
 //
-// Run: npm run e2e:federation:ton:live
+// Run: npm run e2e:federation:gram:live
 import { createStore, loadConfig, type OutboxRecord, type RemoteChainId } from "@gateway/common";
 import { loadE2eConfig, buildRunEnv } from "./config";
 import { loadFederationConfig, buildFederationRunEnv } from "./federation-config";
@@ -33,7 +33,7 @@ import { pollUntil } from "./poll";
 import { launchStack, launchFederationStack, type FederationStack, type LaunchedStack } from "./stack";
 import { submitLock, vizBalanceMilliViz } from "./viz";
 import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists } from "./ton";
-import { proveRotationLive } from "./ton-rotation";
+import { proveRotationLive } from "./gram-rotation";
 
 // Live testnet end-to-end mint latency (VIZ irreversibility lag + 3 SEQUENTIAL
 // on-chain TON approvals + toncenter 504 retries) routinely exceeds 4 min, so the
@@ -62,23 +62,23 @@ const DISPATCHER_WINDOW_MS = 8 * 60_000;
 // Per-step on-chain wait for the TON approver (order deploy / vote reflect). The 60s
 // default is too tight for testnet; three sequential steps at this ceiling stay
 // within DISPATCHER_WINDOW_MS on the happy path (each step typically ~30-90s).
-const TON_APPROVE_MAX_WAIT_MS = 150_000;
+const GRAM_APPROVE_MAX_WAIT_MS = 150_000;
 // TON (nano) the proposer attaches per order. The mint action needs ~0.1 TON + gas;
 // 0.3 TON covers it with margin while keeping the proposer's per-order drain low
 // (surplus flows to the multisig, not back to the proposer), so a lightly-funded
 // proposer can still cover the whole suite. Overrides the 1 TON default.
-const TON_ORDER_VALUE_NANO = 300_000_000;
+const GRAM_ORDER_VALUE_NANO = 300_000_000;
 
-const WATCHERS = ["viz-watcher", "ton-watcher", "dispatcher"] as const;
+const WATCHERS = ["viz-watcher", "gram-watcher", "dispatcher"] as const;
 
 async function main() {
-  const cfg = loadE2eConfig(process.env, "ton");
+  const cfg = loadE2eConfig(process.env, "gram");
   const fedCfg = loadFederationConfig(process.env);
   if (fedCfg.n < 5 || fedCfg.threshold < 3) {
     throw new Error(`§9b expects a 3-of-5 (or larger) federation; got ${fedCfg.threshold}-of-${fedCfg.n}`);
   }
-  if (fedCfg.operators.some((o) => !o.tonMnemonic)) {
-    throw new Error("every operator needs its OWN FED_OP<i>_TON_MNEMONIC for the live TON proof");
+  if (fedCfg.operators.some((o) => !o.gramMnemonic)) {
+    throw new Error("every operator needs its OWN FED_OP<i>_GRAM_MNEMONIC for the live TON proof");
   }
 
   // Rotation-only: criteria 1-3 already proven+recorded on this multisig (RUNBOOK
@@ -109,14 +109,14 @@ async function main() {
     ...baseEnv,
     COORDINATOR_LISTEN: "127.0.0.1:8080",
     COORDINATOR_URL: "http://127.0.0.1:8080",
-    // Each signer's TonApprover waits for its proposed order / approval to land
+    // Each signer's GramApprover waits for its proposed order / approval to land
     // on-chain. Testnet inclusion + toncenter view lag exceed the 60s default
     // (observed: order did not appear within 60s), so widen it for the live run.
-    TON_APPROVE_MAX_WAIT_MS: String(TON_APPROVE_MAX_WAIT_MS),
+    GRAM_APPROVE_MAX_WAIT_MS: String(GRAM_APPROVE_MAX_WAIT_MS),
     // Lower per-order deployment value so a lightly-funded proposer covers the suite.
-    TON_ORDER_VALUE_NANO: String(TON_ORDER_VALUE_NANO),
+    GRAM_ORDER_VALUE_NANO: String(GRAM_ORDER_VALUE_NANO),
   });
-  delete coordinatorEnv["TON_SIGNER_MNEMONIC"];
+  delete coordinatorEnv["GRAM_SIGNER_MNEMONIC"];
 
   const watcherEnv: Record<string, string> = {
     ...baseEnv,
@@ -127,7 +127,7 @@ async function main() {
     DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),
   };
 
-  const tonOwner = cfg.ton.burnOwner; // wVIZ mint recipient
+  const tonOwner = cfg.gram.burnOwner; // wVIZ mint recipient
   console.log(`[fed-ton] run=${cfg.runId} federation=${fedCfg.threshold}-of-${fedCfg.n} (${fedCfg.operators.map((o) => o.id).join(",")})`);
 
   // Preflight: VIZ principal + fee headroom for the several locks we will submit.
@@ -185,7 +185,7 @@ async function proveThresholdMint(
   // mVIZ). uniqueGrossMilliViz adds only 0–999 jitter, so 20_000n always landed
   // below the floor and the coordinator refunded before any approval.
   const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-mint`);
-  const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
   const { seqno: seqnoBefore } = await nextOrderInfo(cfg);
 
@@ -270,7 +270,7 @@ async function proveCrashWindow(
   // Fast orphan recovery so the relaunched stack requeues within seconds.
   const fastWatcherEnv = { ...watcherEnv, DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS: "8000", DISPATCHER_INTERVAL_MS: "3000" };
   const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-crash`);
-  const net = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
   const { orderAddr: predicted, seqno: seqnoBefore } = await nextOrderInfo(cfg);
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
 
@@ -341,7 +341,7 @@ async function proveCrashWindow(
 // contract) drives the deployed multisig from its current set to one with an
 // operator dropped, then proves the dropped operator's on-chain `approve` is
 // rejected (err 106 unauthorized_sign) while the retained set still reaches
-// threshold. The full ceremony is automated in ./ton-rotation (proveRotationLive).
+// threshold. The full ceremony is automated in ./gram-rotation (proveRotationLive).
 //
 // SAFETY: this PERMANENTLY rotates the deployed multisig (3-of-5 -> 3-of-4), so it
 // is opt-in via FED_ROTATION_MODE=live and runs last. When unset, it is SKIPPED
@@ -354,13 +354,13 @@ async function proveRotation(
   console.log(`\n[fed-ton] Criterion 4: rotation rejects old signers`);
   if (process.env.FED_ROTATION_MODE !== "live") {
     console.log(
-      `[fed-ton]   ⇢ SKIPPED. This criterion PERMANENTLY rotates ${cfg.ton.multisigAddress} ` +
+      `[fed-ton]   ⇢ SKIPPED. This criterion PERMANENTLY rotates ${cfg.gram.multisigAddress} ` +
         `(drops one operator). Set FED_ROTATION_MODE=live to run it (last), then re-deploy a ` +
         `fresh ${fedCfg.threshold}-of-${fedCfg.n} to re-run the suite (RUNBOOK §9b step 0-1).`,
     );
     return false;
   }
-  const operators = fedCfg.operators.map((o) => ({ id: o.id, tonMnemonic: o.tonMnemonic! }));
+  const operators = fedCfg.operators.map((o) => ({ id: o.id, gramMnemonic: o.gramMnemonic! }));
   await proveRotationLive(cfg, operators);
   return true;
 }
@@ -373,7 +373,7 @@ async function findPegInRow(
 ): Promise<OutboxRecord | null> {
   const rows = await store.stale(Date.now() + 1, 0, ["QUEUED", "BROADCAST", "CONFIRMED"]);
   const mine = rows
-    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "TON" && r.recipient === owner && r.createdAt >= since - 5_000)
+    .filter((r) => r.direction === "PEG_IN" && r.remoteChain === "GRAM" && r.recipient === owner && r.createdAt >= since - 5_000)
     .sort((a, b) => b.createdAt - a.createdAt);
   return mine[0] ?? null;
 }

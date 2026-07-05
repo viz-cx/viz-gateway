@@ -37,7 +37,7 @@ so one operator can run a working bridge solo and grow with no redeploy.
 |---------|-------|------|
 | [`packages/common`](../packages/common/src) | **critical** | Chain-agnostic core: canonical encoding/digest, types, config, caps, fees, **durable outbox + shared cap window + deposit-address registry** (`store.ts`), threshold accumulation, operator rotation. Dependency-light by rule. |
 | [`packages/viz-watcher`](../packages/viz-watcher/src) | read+sign | Follows VIZ irreversible head, detects deposits (peg-in source) → enqueues; VIZ release signing/broadcast. |
-| [`packages/ton-watcher`](../packages/ton-watcher/src) | read+sign | TON finality + `transfer_notification` burn detection (peg-out source), TON mint-order approval. |
+| [`packages/gram-watcher`](../packages/gram-watcher/src) | read+sign | TON finality + `transfer_notification` burn detection (peg-out source), TON mint-order approval. |
 | [`packages/solana-watcher`](../packages/solana-watcher/src) | read+sign | Solana `RemoteChain` adapter (finalized slot, supply, burn parse, provisioning check) + SPL/Token-2022 mint signing + **deposit-address derivation, lookup service, peg-out scanner, burn**. |
 | [`packages/signer`](../packages/signer/src) | **holds keys** | The only key-holding service. Re-validates each proposal against the independently-derived action (incl. re-deriving the fee), then signs. One per operator. |
 | [`packages/coordinator`](../packages/coordinator/src) | **untrusted** | Keyless orchestration: builds one shared proposal (computes net + pins provisioning), collects partials to threshold, broadcasts. |
@@ -211,7 +211,7 @@ limit is now configurable with RPC throttling (A2). The underlying completeness 
 (limit-windowed rather than `fromHeight`-ranged, so a burst beyond the page is still
 missed) remains. (Original analysis below.)
 
-[`tonChain.finalizedBurnsSince`](../packages/ton-watcher/src/tonChain.ts#L75) ignores
+[`gramChain.finalizedBurnsSince`](../packages/gram-watcher/src/gramChain.ts#L75) ignores
 `fromHeight` and reads the **last 20** txs; [`solanaChain.finalizedBurnsSince`](../packages/solana-watcher/src/solanaChain.ts#L56)
 reads the **last 25** signatures. Under burst load (> limit relevant txs inside one
 finality window) older burns fall off the page and are **missed**. Idempotency prevents

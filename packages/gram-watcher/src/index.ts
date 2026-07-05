@@ -1,31 +1,31 @@
 import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
-import { TonHttpChain } from "./tonChain";
+import { GramHttpChain } from "./gramChain";
 
 /** Durable scan-cursor name; value is the last-processed logical time (lt). */
-const CURSOR = "cursor:ton-watcher";
+const CURSOR = "cursor:gram-watcher";
 
 /**
- * ton-watcher: follows TON masterchain finality, detects wVIZ burns, and
+ * gram-watcher: follows TON masterchain finality, detects wVIZ burns, and
  * ENQUEUES a durable PEG_OUT action. The separate dispatcher delivers it to the
  * coordinator with retries — the watcher never loses an action on a failed submit.
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  if (!cfg.ton.jettonMinterAddress) {
+  if (!cfg.gram.jettonMinterAddress) {
     throw new Error(
-      "TON_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
+      "GRAM_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
     );
   }
-  const chain = new TonHttpChain(
-    cfg.ton.endpoint,
-    cfg.ton.apiKey,
-    cfg.ton.jettonMinterAddress,
-    cfg.ton.gatewayJettonWallet,
-    cfg.ton.multisigAddress,
-    cfg.ton.finalityConfirmations,
-    cfg.ton.scanMaxTransactions,
-    cfg.ton.maxScanPages,
+  const chain = new GramHttpChain(
+    cfg.gram.endpoint,
+    cfg.gram.apiKey,
+    cfg.gram.jettonMinterAddress,
+    cfg.gram.gatewayJettonWallet,
+    cfg.gram.multisigAddress,
+    cfg.gram.finalityConfirmations,
+    cfg.gram.scanMaxTransactions,
+    cfg.gram.maxScanPages,
   );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
@@ -41,13 +41,13 @@ async function main(): Promise<void> {
   process.on("SIGTERM", stop);
 
   console.log(
-    `[ton-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} minter=${cfg.ton.jettonMinterAddress || "unset"}`,
+    `[gram-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} minter=${cfg.gram.jettonMinterAddress || "unset"}`,
   );
 
   while (running) {
     try {
       if (await store.isPaused()) {
-        console.warn(`[ton-watcher] gateway paused (${await store.pauseReason()}); skipping scan`);
+        console.warn(`[gram-watcher] gateway paused (${await store.pauseReason()}); skipping scan`);
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
         // (backfill before first-ever run is a separate, deliberate operation).
         cursor = await chain.newestLt();
         await store.setCursor(CURSOR, cursor);
-        console.log(`[ton-watcher] starting at lt ${cursor}`);
+        console.log(`[gram-watcher] starting at lt ${cursor}`);
       } else {
         const { burns, newestFinalLt, drained } = await chain.finalizedBurnsPaginated(cursor);
         for (const burn of burns) {
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
           if (!first) continue;
           const decision = await breaker.check(action.amountMilliViz);
           if (!decision.ok) {
-            console.warn(`[ton-watcher] burn ${action.id} held: ${decision.reason}`);
+            console.warn(`[gram-watcher] burn ${action.id} held: ${decision.reason}`);
             await store.setStatus(action.id, "HELD", { lastError: decision.reason });
             if (decision.reason === "OVER_24H") {
               await store.pause("TON peg-out 24h cap exceeded"); // shared, cross-process
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
           await breaker.record(action.amountMilliViz);
           await store.setStatus(action.id, "QUEUED");
           console.log(
-            `[ton-watcher] peg-out ${action.id} QUEUED -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
+            `[gram-watcher] peg-out ${action.id} QUEUED -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
           );
         }
         if (drained) {
@@ -94,20 +94,20 @@ async function main(): Promise<void> {
           // A burst larger than maxScanPages*scanMaxTransactions: older burns lie
           // beyond what we could scan. Fail closed — do NOT advance past them; pause
           // + alert so an operator raises the scan window rather than silently drop.
-          const reason = `TON peg-out scan truncated at lt ${cursor}: burst exceeds scan window (maxScanPages=${cfg.ton.maxScanPages})`;
-          console.error(`[ton-watcher] ${reason}`);
+          const reason = `TON peg-out scan truncated at lt ${cursor}: burst exceeds scan window (maxScanPages=${cfg.gram.maxScanPages})`;
+          console.error(`[gram-watcher] ${reason}`);
           notifyStaff("withdraws", reason, { cursorLt: cursor, newestFinalLt });
           await store.pause(reason); // shared, cross-process
         }
       }
     } catch (err) {
-      console.error("[ton-watcher] loop error:", err);
+      console.error("[gram-watcher] loop error:", err);
     }
     await new Promise((r) => setTimeout(r, 3000));
   }
 
   await store.close();
-  console.log("[ton-watcher] stopped");
+  console.log("[gram-watcher] stopped");
 }
 
 main().catch((e) => {

@@ -68,13 +68,13 @@ assert.strictEqual(m.fees, undefined, "fees absent when not present in manifest"
 
 // manifest with fees section takes precedence over env vars
 const mf = parseManifest({ n: 1, threshold: 1, operators: [{ id: "op-1", vizPubkey: "VIZ1aaa", tonPubkey: "11" }],
-  fees: { floorMilliViz: 5000, bps: 10, activationSurchargeMilliViz: { SOLANA: 20000, TON: 15000 }, mintGasFloorMilliViz: { SOLANA: 500, TON: 500 } },
+  fees: { floorMilliViz: 5000, bps: 10, activationSurchargeMilliViz: { SOLANA: 20000, GRAM: 15000 }, mintGasFloorMilliViz: { SOLANA: 500, GRAM: 500 } },
 });
 assert.deepStrictEqual(mf.fees, {
   floorMilliViz: 5000n,
   bps: 10,
-  activationSurchargeMilliViz: { SOLANA: 20000n, TON: 15000n },
-  mintGasFloorMilliViz: { SOLANA: 500n, TON: 500n },
+  activationSurchargeMilliViz: { SOLANA: 20000n, GRAM: 15000n },
+  mintGasFloorMilliViz: { SOLANA: 500n, GRAM: 500n },
 });
 assert.throws(() => parseManifest({ n: 3, threshold: 2, operators: [] }), /operators.length/);
 console.log("[manifest] parseManifest validation + fees round-trip OK");

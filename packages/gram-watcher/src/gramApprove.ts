@@ -1,15 +1,15 @@
 import { Address, TonClient, WalletContractV4, toNano } from "@ton/ton";
 import { Multisig, Order } from "@gateway/contracts-ton";
-import type { TonMintProposal } from "@gateway/common";
-import { buildMintTransfer, mintOrderCell } from "./tonChain";
-import { keyPairFromMnemonic } from "./tonSign";
+import type { GramMintProposal } from "@gateway/common";
+import { buildMintTransfer, mintOrderCell } from "./gramChain";
+import { keyPairFromMnemonic } from "./gramSign";
 
 /**
  * Operator-side TON multisig-v2 approval routing (Phase B write path).
  *
  * This is the ONLY component that sends a TON message, and it runs INSIDE the
  * operator's own signer process using the operator's own wallet key and own node.
- * The coordinator stays keyless: it only describes the order (TonMintProposal).
+ * The coordinator stays keyless: it only describes the order (GramMintProposal).
  *
  * multisig-v2 has no off-chain signature aggregation — an approval IS an on-chain
  * `Order.approve` from `signers[myIdx]`'s wallet. So:
@@ -29,26 +29,26 @@ import { keyPairFromMnemonic } from "./tonSign";
 /** How the operator's on-chain effect resolved, encoded into the approval receipt. */
 export type TonApprovalRole = "propose" | "approve" | "already" | "executed";
 
-export interface TonApprovalReceipt {
+export interface GramApprovalReceipt {
   orderAddr: string;
   myIdx: number;
   role: TonApprovalRole;
 }
 
 /** The on-chain approval surface KeyedSigner depends on (injectable for tests). */
-export interface TonApprovalClient {
-  approveMint(proposal: TonMintProposal, isProposer: boolean): Promise<TonApprovalReceipt>;
+export interface GramApprovalClient {
+  approveMint(proposal: GramMintProposal, isProposer: boolean): Promise<GramApprovalReceipt>;
 }
 
 /** TTL for a new multisig order (1 hour covers any realistic signing latency). */
 const ORDER_TTL_SEC = 3600;
 
 /** Encode a receipt into the `Approval.signature` slot (the orchestrator only needs presence). */
-export function encodeReceipt(r: TonApprovalReceipt): string {
+export function encodeReceipt(r: GramApprovalReceipt): string {
   return `ton:${r.orderAddr}:${r.myIdx}:${r.role}`;
 }
 
-export interface TonApproverOpts {
+export interface GramApproverOpts {
   /** Poll interval while waiting for an order/approval to land on-chain (ms). */
   pollIntervalMs?: number;
   /** Max time to wait for the proposer's order to appear / an approval to reflect (ms). */
@@ -57,7 +57,7 @@ export interface TonApproverOpts {
   orderValueNano?: bigint;
 }
 
-export class TonApprover implements TonApprovalClient {
+export class GramApprover implements GramApprovalClient {
   private readonly client: TonClient;
   private readonly minter: Address;
   private readonly multisigAddr: Address;
@@ -71,11 +71,11 @@ export class TonApprover implements TonApprovalClient {
     minterAddress: string,
     multisigAddress: string,
     private readonly mnemonic: string,
-    opts: TonApproverOpts = {},
+    opts: GramApproverOpts = {},
   ) {
-    if (!minterAddress) throw new Error("TonApprover: minter address is required");
-    if (!multisigAddress) throw new Error("TonApprover: TON_MULTISIG_ADDRESS is required");
-    if (!mnemonic) throw new Error("TonApprover: TON_SIGNER_MNEMONIC is required to approve on-chain");
+    if (!minterAddress) throw new Error("GramApprover: minter address is required");
+    if (!multisigAddress) throw new Error("GramApprover: GRAM_MULTISIG_ADDRESS is required");
+    if (!mnemonic) throw new Error("GramApprover: GRAM_SIGNER_MNEMONIC is required to approve on-chain");
     this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
     this.minter = Address.parse(minterAddress);
     this.multisigAddr = Address.parse(multisigAddress);
@@ -92,7 +92,7 @@ export class TonApprover implements TonApprovalClient {
     return (await this.client.getContractState(orderAddr)).state === "active";
   }
 
-  async approveMint(proposal: TonMintProposal, isProposer: boolean): Promise<TonApprovalReceipt> {
+  async approveMint(proposal: GramMintProposal, isProposer: boolean): Promise<GramApprovalReceipt> {
     const toAddr = Address.parse(proposal.toAddress);
     const amountBaseUnits = BigInt(proposal.amountMilliViz);
 

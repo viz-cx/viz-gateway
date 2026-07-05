@@ -3,7 +3,7 @@ import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
-import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain, pubkeyOf } from "@gateway/solana-watcher/dist/solanaChain";
 import { Recon } from "./checker";
 
@@ -25,16 +25,16 @@ async function main(): Promise<void> {
   // Sum circulating wVIZ across EVERY configured remote chain — a single-remote
   // recon would mask an over-mint on the other chain (§6.2).
   const remotes: Array<{ name: string; supply: () => Promise<bigint> }> = [];
-  if (cfg.ton.jettonMinterAddress) {
-    const ton = new TonHttpChain(
-      cfg.ton.endpoint,
-      cfg.ton.apiKey,
-      cfg.ton.jettonMinterAddress,
-      cfg.ton.gatewayJettonWallet,
-      cfg.ton.multisigAddress,
-      cfg.ton.finalityConfirmations,
+  if (cfg.gram.jettonMinterAddress) {
+    const ton = new GramHttpChain(
+      cfg.gram.endpoint,
+      cfg.gram.apiKey,
+      cfg.gram.jettonMinterAddress,
+      cfg.gram.gatewayJettonWallet,
+      cfg.gram.multisigAddress,
+      cfg.gram.finalityConfirmations,
     );
-    remotes.push({ name: "TON", supply: () => ton.circulatingSupplyMilliViz() });
+    remotes.push({ name: "GRAM", supply: () => ton.circulatingSupplyMilliViz() });
   }
   if (cfg.solana.wvizMint) {
     const sol = new SolanaChain(cfg.solana.rpcUrl, cfg.solana.wvizMint, cfg.solana.gatewayTokenAccount, cfg.solana.finalitySlots);

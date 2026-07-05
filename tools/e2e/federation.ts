@@ -94,7 +94,7 @@ function syntheticPegOutAction(runId: string): Record<string, unknown> {
   return {
     direction: "PEG_OUT",
     id: `fed-test-${runId}`,
-    remoteChain: "TON",
+    remoteChain: "GRAM",
     recipient: "babin",
     amountMilliViz: "10000",
     digest: `fed-test-${runId}`,
@@ -232,7 +232,7 @@ async function runKeyIsolationCheck(signerSpecs: Array<{ operatorId: string; wif
 
 async function main() {
   const fedCfg = loadFederationConfig(process.env);
-  const baseCfg = loadE2eConfig(process.env, "ton");
+  const baseCfg = loadE2eConfig(process.env, "gram");
   const baseEnv = buildRunEnv(baseCfg);
   const { signerSpecs, coordinatorEnv } = buildFederationRunEnv(fedCfg, {
     ...baseEnv,

@@ -38,7 +38,7 @@ Per-chain implementation (in [`coordinator/src/adapters.ts`](../packages/coordin
   outgoing `transfer` with `memo == action.id`. The memo already carries the id
   (`VizReleaseProposal.memo`), so this is clean. Add a `VizChain.releaseByMemo(memo)`
   read (reuse the `getOpsInBlock` / account-history path already in `vizChain.ts`).
-- **TON mint** (`TonMintBroadcaster`) — query the multisig-v2 order by seqno / its
+- **TON mint** (`GramMintBroadcaster`) — query the multisig-v2 order by seqno / its
   executed flag. Ties into the unfinished real-order work (today `orderHashHex` is a
   digest stand-in, `adapters.ts`), so land it with the live multisig-v2 integration.
 - **Solana mint** (`SolanaMintBroadcaster`) — **no memo today**. Add a memo instruction

@@ -34,7 +34,7 @@ const PEG_OUT_TIMEOUT_MS = 8 * 60_000;
 const POLL_MS = 5_000;
 
 async function main() {
-  const baseCfg = loadE2eConfig(process.env, "ton");
+  const baseCfg = loadE2eConfig(process.env, "gram");
   const fedCfg  = loadFederationConfig(process.env);
   const baseEnv = buildRunEnv(baseCfg);
   const logDir  = `tools/e2e/logs/fed-live-${baseCfg.runId}`;
@@ -69,9 +69,9 @@ async function main() {
     throw new Error(`PREFLIGHT: top up ${baseCfg.viz.testAccount} — have ${vizBal} mVIZ, need ${baseCfg.viz.minBalanceMilliViz}`);
   }
 
-  const tonOwner  = baseCfg.ton.burnOwner;
+  const tonOwner  = baseCfg.gram.burnOwner;
   const gross     = uniqueGrossMilliViz(20_000n, baseCfg.runId);
-  const net       = expectedNetMilliViz(gross, fees, "TON" as RemoteChainId, true);
+  const net       = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
   const recvAcct  = baseCfg.viz.recipient;
 
   console.log(`[fed-live] run=${baseCfg.runId} gross=${gross} net=${net}`);
@@ -87,7 +87,7 @@ async function main() {
   console.log(`[fed-live] wVIZ before: ${wvizBefore}`);
 
   const soloStack = await launchStack(
-    ["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"],
+    ["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"],
     soloEnv,
     `${logDir}-phase1`,
   );
@@ -130,7 +130,7 @@ async function main() {
     COORDINATOR_URL: "http://127.0.0.1:8080",
   };
   const watcherStack = await launchStack(
-    ["viz-watcher", "ton-watcher", "dispatcher"],
+    ["viz-watcher", "gram-watcher", "dispatcher"],
     watcherEnv,
     `${logDir}-phase2`,
   );

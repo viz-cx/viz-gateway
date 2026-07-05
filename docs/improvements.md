@@ -14,7 +14,7 @@ VIZ transfer out of the gateway account is T-of-N.
 ## Verification status
 
 - **Fully built + spike-verified locally** (no network): `common`, `log`,
-  `dispatcher`, `solana-watcher`, `ton-watcher`.
+  `dispatcher`, `solana-watcher`, `gram-watcher`.
 - New offline spikes (in `npm run verify`): `solana-innerix`, `outbox`,
   `dispatcher-policy`, `fee-viz`, `pegout-address` — all green.
 - `signer` / `coordinator` / `recon` / `viz-watcher` compile on CI but **not
@@ -36,9 +36,9 @@ scan silently lost them → lost user funds. Spike: `tools/solana-innerix-spike.
 
 **A2 — RPC throttle + pagination.** `SolanaChain` takes `SolanaScanOpts`
 (`maxSignatures`, `txDelayMs`, with a `sleep` between `getParsedTransaction`); TON
-gets `TON_MAX_TRANSACTIONS`. _Why:_ the burn scan looped RPC with no pause and a
+gets `GRAM_MAX_TRANSACTIONS`. _Why:_ the burn scan looped RPC with no pause and a
 hardcoded limit → 429s on real/free-tier RPC. Config: `SOLANA_MAX_SIGNATURES`,
-`SOLANA_RPC_TX_DELAY_MS`, `TON_MAX_TRANSACTIONS`.
+`SOLANA_RPC_TX_DELAY_MS`, `GRAM_MAX_TRANSACTIONS`.
 
 **A3 — confirm after broadcast.** `SolanaChain.submitMint` now polls
 `getSignatureStatus` to confirmation (durable-nonce txs have no blockhash expiry, so

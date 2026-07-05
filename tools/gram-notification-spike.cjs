@@ -1,13 +1,13 @@
-// SPIKE: verify the TEP-74 inbound-jetton parser the ton-watcher uses to detect
+// SPIKE: verify the TEP-74 inbound-jetton parser the gram-watcher uses to detect
 // peg-out deposits (wVIZ sent to the gateway Jetton wallet with a comment = the
 // user's VIZ account). The gateway jetton wallet actually receives internal_transfer
 // (0x178d4519); transfer_notification (0x7362d09c) is what a wallet emits to its owner.
 // parseJettonDeposit accepts both. Constructs each with forward_payload inline vs. ref.
 //
-// Run: node tools/ton-notification-spike.cjs
+// Run: node tools/gram-notification-spike.cjs
 const assert = require("node:assert");
 const { beginCell, Address } = require("@ton/ton");
-const { parseJettonDeposit } = require("../packages/ton-watcher/dist/tonChain.js");
+const { parseJettonDeposit } = require("../packages/gram-watcher/dist/gramChain.js");
 
 const SENDER = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs";
 const AMOUNT = 1068237n; // base units == milli-VIZ at 3 decimals (1068.237 wVIZ)

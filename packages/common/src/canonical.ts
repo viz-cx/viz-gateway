@@ -27,7 +27,7 @@ function digestOf(s: string): string {
 }
 
 const REMOTE_CHAIN_BY_PREFIX: Record<string, RemoteChainId> = {
-  ton: "TON",
+  gram: "GRAM",
   solana: "SOLANA",
 };
 

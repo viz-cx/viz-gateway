@@ -12,7 +12,7 @@ already fixed and merged / in-branch.
 - ☑ **VG-03** — VIZ peg-in detection gap: durable cursor (`getCursor`/`setCursor`)
   + cap-bounded advance via `nextScanWindow`; `tools/viz-scan-cursor-spike.cjs`.
 - ☑ **VG-06** — TON burn scan lt-paginated (`paginateBurnsByLt`) + fail-closed on
-  truncation (pause + `notifyStaff`); `tools/ton-scan-pagination-spike.cjs`.
+  truncation (pause + `notifyStaff`); `tools/gram-scan-pagination-spike.cjs`.
 - ☑ **VG-04** — fee coordinator-authoritative for the sweep. FIXED via exact-`base`
   sweep (`fix/vg-04-exact-fee-sweep`): signer `validateFeeSweep` requires exactly
   `base` (chain-independent, re-derived from gross); dispatcher derives the same
@@ -46,7 +46,7 @@ store already has a `gateway_state` KV table with private `getKey`/`setKey`
 
 Implement on both `SqliteGatewayStore` (via existing `gateway_state` KV, value
 stored as text) and `InMemoryGatewayStore` (a `Map<string, number>`). Cursor
-names: `"cursor:viz-watcher"`, `"cursor:ton-watcher"`.
+names: `"cursor:viz-watcher"`, `"cursor:gram-watcher"`.
 
 File: `packages/common/src/store.ts` (interface at ~line 24; sqlite impl ~106;
 in-memory impl ~365). Rebuild `@gateway/common` before dependent packages.
@@ -69,7 +69,7 @@ Three fail-open holes:
 
 **Changes:**
 - **Zero remotes = fatal.** If `remotes.length === 0`, `throw` at startup (like
-  ton-watcher does for a missing minter). A recon that can see no wVIZ supply
+  gram-watcher does for a missing minter). A recon that can see no wVIZ supply
   must not run. Keep the multi-remote intent: this is a misconfig, not a state.
 - **Per-remote failure is indeterminate, not zero.** Replace
   `Promise.all(remotes.map(supply))` with `Promise.allSettled`; if *any* remote
@@ -138,7 +138,7 @@ Wire into `npm run verify`.
 
 ## VG-06 — TON burn scan not height-ranged; bursts silently truncated
 
-**Files:** `packages/ton-watcher/src/tonChain.ts`, `packages/ton-watcher/src/index.ts`
+**Files:** `packages/gram-watcher/src/gramChain.ts`, `packages/gram-watcher/src/index.ts`
 
 `finalizedBurnsSince(_fromHeight, toHeight)` ignores `_fromHeight` and fetches the
 last `maxTransactions` (default 20) txs; `index.ts:80` advances the cursor
@@ -150,7 +150,7 @@ this.)
 **Changes (real protocol work — TON pagination by logical time):**
 - **Track last-processed `lt` (logical time), not masterchain height.** TON wallet
   txs are ordered by `lt`; that's the correct cursor for the gateway wallet's own
-  tx stream. Persist `store.getCursor("cursor:ton-watcher")` as the last-processed
+  tx stream. Persist `store.getCursor("cursor:gram-watcher")` as the last-processed
   `lt` (fits a JS number for TON `lt` ranges; if precision is a concern, store as
   text and compare as BigInt — prefer BigInt-safe compare).
 - **Paginate `getTransactions` until reaching the cursor.** `TonClient.getTransactions`
@@ -159,7 +159,7 @@ this.)
   (or the wallet's history end). This makes the scan genuinely range-based instead
   of a fixed tail.
 - **Truncation guard / fail-closed backstop.** If pagination hits a sane
-  page-count ceiling (`cfg.ton.maxScanPages`, new, default e.g. 50) before
+  page-count ceiling (`cfg.gram.maxScanPages`, new, default e.g. 50) before
   reaching the cursor, do NOT advance the cursor past the last fully-scanned tx,
   and `notifyStaff` (and optionally `store.pause`) — a burst we can't fully drain
   must not be silently skipped.
@@ -170,7 +170,7 @@ before coding (use context7 / the installed d.ts). The existing spikes
 (`tools/ton-*-spike.cjs`) and `contracts/ton/tools/verify-offline.cjs` show the
 offline test idiom.
 
-**Spike:** `tools/ton-scan-pagination-spike.cjs` — pure, with a fake tx source:
+**Spike:** `tools/gram-scan-pagination-spike.cjs` — pure, with a fake tx source:
 - > maxTransactions burns since cursor → all are collected across pages; none
   dropped; cursor ends at newest `lt`.
 - page ceiling reached → cursor holds, alert fired, no silent skip.

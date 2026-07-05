@@ -2,7 +2,7 @@
 // update-action/order cell building, order validation vs proposal, signer-set
 // hash. Pure/offline (no network); uses the vendored multisig-v2 wrappers.
 //
-// Run (after `npm run build`): node tools/ton-rotation-spike.cjs
+// Run (after `npm run build`): node tools/gram-rotation-spike.cjs
 const assert = require("node:assert");
 const { mnemonicToPrivateKey } = require("@ton/crypto");
 const { Address } = require("@ton/core");

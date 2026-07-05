@@ -28,18 +28,18 @@ path does not exist yet.
   Solana: `solana-watcher/src/solanaSign.ts` `buildSignedMintTx` adds each `pk:sigHex`,
   submitter partial-signs as fee payer, `verifySignatures()`.
 - **Key isolation is already per-process via env.** VIZ `VIZ_SIGNING_WIF`, TON
-  `TON_SIGNER_MNEMONIC`, Solana `SOLANA_SIGNER_SECRET`. Each signer `.env` carries only
+  `GRAM_SIGNER_MNEMONIC`, Solana `SOLANA_SIGNER_SECRET`. Each signer `.env` carries only
   its own secrets. Federation manifest (`federation.json.example`, `config.ts:parseManifest`)
   holds public pubkeys + `{n, threshold}`.
 
 ## The one real gap: TON is architecturally different
 
 TON multisig-v2 uses **on-chain approvals**, not off-chain signature combination.
-`ton-watcher/src/tonChain.ts:submitMint` **explicitly ignores `_mintAuth`** (docstring
+`gram-watcher/src/gramChain.ts:submitMint` **explicitly ignores `_mintAuth`** (docstring
 ~line 205) and only does 1-of-1 self-approve-on-init. For M-of-N, each operator's
 *wallet* must send an on-chain `approve` to the order-contract address. There is no
 routing for this today. Also, the TON key currently lives in BOTH the signer service
-and ton-watcher (`ton-watcher` calls `submitMint` directly) — a co-location that must
+and gram-watcher (`gram-watcher` calls `submitMint` directly) — a co-location that must
 be split for a clean per-operator trust boundary.
 
 ---
@@ -74,7 +74,7 @@ independent processes, with the full fault matrix green.
 
 The substantive dev work. Makes TON a genuine M-of-N chain.
 
-1. **Split the TON key out of ton-watcher.** ton-watcher becomes read/detect-only; TON
+1. **Split the TON key out of gram-watcher.** gram-watcher becomes read/detect-only; TON
    signing + approval submission moves to the signer service (mirrors VIZ/Solana), so each
    operator's TON wallet key lives only in that operator's signer process.
 2. **Design the on-chain approval flow.** Proposer operator sends `new_order`
@@ -112,7 +112,7 @@ is; scope/estimate it as its own session (or split B into B1 key-split + B2 appr
 | Endpoint wiring (no change) | `packages/coordinator/src/index.ts:21-23`, `packages/common/src/config.ts:240` |
 | VIZ broadcast (no change) | `packages/viz-watcher/src/vizChain.ts`, `vizSign.ts` |
 | Solana broadcast (no change) | `packages/solana-watcher/src/solanaSign.ts`, `solanaChain.ts` |
-| **TON split + approval routing (Phase B)** | `packages/ton-watcher/src/tonChain.ts:submitMint`, `packages/ton-watcher/src/index.ts`, `packages/signer/src/keyedSigner.ts:approveTonMint`, `packages/coordinator/src/adapters.ts:TonMintBroadcaster` |
+| **TON split + approval routing (Phase B)** | `packages/gram-watcher/src/gramChain.ts:submitMint`, `packages/gram-watcher/src/index.ts`, `packages/signer/src/keyedSigner.ts:approveGramMint`, `packages/coordinator/src/adapters.ts:GramMintBroadcaster` |
 | Multi-signer harness (Phase A) | `tools/e2e/`, new `tools/e2e/federation.ts`, `package.json` scripts |
 | Manifest / config | `federation.json.example`, `.env.example` |
 | In-process reference behavior | `tools/orchestration-spike.cjs` (2-of-3 assertions to mirror across processes) |

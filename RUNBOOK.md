@@ -3,6 +3,11 @@
 Stand up a working bridge with **just your own keys** (1-of-1), then push one
 real peg each way. Grow to a validator federation later with no redeploy.
 
+> **Naming note:** internally the gateway identifies this chain as **GRAM** (env vars,
+> npm scripts, config keys). Externally the chain is still the **TON network** — the
+> `@ton/…` SDK packages, toncenter endpoints, and `contracts/ton/` deploy scripts are
+> unchanged.
+
 ## One architecture note you must internalise first
 
 The two chains authorize disbursements *differently*, and the code reflects this:
@@ -19,13 +24,13 @@ The two chains authorize disbursements *differently*, and the code reflects this
   single `new_order` with `approve_on_init=true` from your signer wallet.
 
 Consequence (Phase B, DONE): the coordinator is **keyless on TON**. It only
-describes the mint order (`TonMintBroadcaster.buildProposal` → real order-cell
+describes the mint order (`GramMintBroadcaster.buildProposal` → real order-cell
 hash + deterministic order address); each operator's signer performs the actual
-on-chain propose/approve **from its own wallet** (`KeyedSigner.approveTonMint` →
-`TonApprover`, `packages/ton-watcher/src/tonApprove.ts`). `broadcast` submits
+on-chain propose/approve **from its own wallet** (`KeyedSigner.approveGramMint` →
+`GramApprover`, `packages/gram-watcher/src/gramApprove.ts`). `broadcast` submits
 nothing — it polls `orderExecuted`. This is what makes TON a genuine M-of-N: the
 component that builds the order cannot itself move funds. Proven offline against
-the real vendored contracts by `tools/ton-onchain-approval-spike.cjs` (3-of-5, in
+the real vendored contracts by `tools/gram-onchain-approval-spike.cjs` (3-of-5, in
 `npm run verify`); live 3-of-5 testnet checklist in §9b.
 
 > For the automated end-to-end round-trip harness, see [docs/e2e.md](docs/e2e.md).
@@ -49,7 +54,7 @@ multisig gas (step 6) and run a peg-out (step 8).
 ## 0. Networks & funds
 
 - **TON testnet** for the multisig + wVIZ jetton. Get test TON from the testnet
-  faucet (e.g. @testgiver_ton_bot). Use a testnet `TON_ENDPOINT`
+  faucet (e.g. @testgiver_ton_bot). Use a testnet `GRAM_ENDPOINT`
   (`https://testnet.toncenter.com/api/v2/jsonRPC`) and a testnet API key.
 - **VIZ**: confirm whether a public VIZ testnet exists. If not, use a dedicated,
   low-balance VIZ **mainnet** account for the gateway (VIZ is ~$0.005, so a
@@ -75,7 +80,7 @@ npx blueprint build --all                                    # -> build/JettonMi
 ```
 
 > **Minter source = `token-contract`, NOT `stablecoin-contract`.** Our code
-> (`packages/ton-watcher/src/tonChain.ts`, `contracts/ton/src/{minter,setMinterAdmin}.ts`)
+> (`packages/gram-watcher/src/gramChain.ts`, `contracts/ton/src/{minter,setMinterAdmin}.ts`)
 > targets the standard governed minter: `op::mint()=21`, `internal_transfer=0x178d4519`,
 > single-step `change_admin` (op 3), storage `total_supply admin content jetton_wallet_code`.
 > `token-contract/ft/jetton-minter-discoverable.fc` matches exactly; stablecoin-contract's
@@ -101,13 +106,13 @@ require("fs").writeFileSync("multisig.data.boc", data.toBoc());
 MULTISIG_CODE_BOC=./multisig.code.boc \
 MULTISIG_DATA_BOC=./multisig.data.boc \
 MULTISIG_THRESHOLD=1 MULTISIG_SIGNERS=<your_ton_addr> \
-TON_ENDPOINT=https://testnet.toncenter.com/api/v2/jsonRPC TON_API_KEY=... \
+GRAM_ENDPOINT=https://testnet.toncenter.com/api/v2/jsonRPC GRAM_API_KEY=... \
 npm run deploy:multisig            # dry-run prints the address
 # fund that address with test TON, then:
 DEPLOY_SEND=1 DEPLOYER_MNEMONIC="...24 words..." npm run deploy:multisig
 ```
 
-Record the multisig address → `TON_MULTISIG_ADDRESS`.
+Record the multisig address → `GRAM_MULTISIG_ADDRESS`.
 
 ## 3. Deploy the wVIZ Jetton minter, then hand admin to the multisig
 
@@ -116,12 +121,12 @@ JETTON_MINTER_CODE_BOC=./minter.code.boc \
 JETTON_WALLET_CODE_BOC=./wallet.code.boc \
 JETTON_INITIAL_ADMIN=<your deployer addr> \
 WVIZ_SYMBOL=wVIZ WVIZ_DECIMALS=3 \
-TON_ENDPOINT=... TON_API_KEY=... \
+GRAM_ENDPOINT=... GRAM_API_KEY=... \
 npm run deploy:minter              # dry-run prints the minter address
 DEPLOY_SEND=1 DEPLOYER_MNEMONIC="..." npm run deploy:minter
 ```
 
-Record the minter address → `TON_JETTON_MINTER_ADDRESS`. Then transfer admin so
+Record the minter address → `GRAM_JETTON_MINTER_ADDRESS`. Then transfer admin so
 only the multisig can mint/burn:
 
 ```
@@ -131,7 +136,7 @@ npm run set-minter-admin
 ```
 
 Get the gateway's own Jetton wallet address (the multisig's wVIZ wallet) for the
-minter, and record it → `TON_GATEWAY_JETTON_WALLET` (peg-out deposits go here).
+minter, and record it → `GRAM_GATEWAY_JETTON_WALLET` (peg-out deposits go here).
 
 ## 4. Create & configure the VIZ gateway account
 
@@ -156,9 +161,9 @@ set. Note: `change_recovery_account` takes effect after VIZ's owner-recovery del
 ## 5. Configure `.env`
 
 `cp .env.example .env` and fill: `VIZ_NODE_URL`, `VIZ_GATEWAY_ACCOUNT`,
-`VIZ_SIGNING_WIF` (your active key), `TON_ENDPOINT`/`TON_API_KEY`,
-`TON_MULTISIG_ADDRESS`, `TON_JETTON_MINTER_ADDRESS`, `TON_GATEWAY_JETTON_WALLET`,
-`TON_SIGNER_MNEMONIC` (your TON signer wallet), `FEDERATION_N=1`,
+`VIZ_SIGNING_WIF` (your active key), `GRAM_ENDPOINT`/`GRAM_API_KEY`,
+`GRAM_MULTISIG_ADDRESS`, `GRAM_JETTON_MINTER_ADDRESS`, `GRAM_GATEWAY_JETTON_WALLET`,
+`GRAM_SIGNER_MNEMONIC` (your TON signer wallet), `FEDERATION_N=1`,
 `FEDERATION_THRESHOLD=1`, `SIGNER_ENDPOINTS=http://signer:8090`. Keep the fee/cap
 defaults (100 VIZ floor, 0.30%, 2,000 VIZ min; $500/$1k/$10k caps).
 
@@ -179,9 +184,9 @@ security guarantee.
 > Note also: PEG_OUT is dispatched by source-id **shape**, not the coordinator-supplied
 > `remoteChain` — a `:fee`/`:refund` suffix → gateway-internal re-derivation (below), a
 > Solana signature (base58) → Solana re-read, a 64-hex burn tx hash → TON re-read, anything
-> else → refused fail-closed. TON peg-out re-read is now implemented (`TonHttpChain.getBurn`
+> else → refused fail-closed. TON peg-out re-read is now implemented (`GramHttpChain.getBurn`
 > bounded-scans the gateway jetton wallet on the operator's own node); the signer needs
-> `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` pointed at that node.
+> `GRAM_ENDPOINT` / `GRAM_GATEWAY_JETTON_WALLET` pointed at that node.
 >
 > **Gateway-internal releases (FEE_SWEEP / REFUND)** have no remote source; the signer
 > re-derives them from the PEG_IN they settle (re-read from its OWN VIZ node). A FEE_SWEEP
@@ -243,17 +248,17 @@ This starts watchers + signer + recon + coordinator in one stack (solo). Check
 ## 8. Test peg-out
 
 > ✅ **TON peg-out PROVEN end-to-end (2026-07-01).** A live testnet round-trip detected the
-> burn, the signer independently re-read it (`TonHttpChain.getBurn`), validated the release
+> burn, the signer independently re-read it (`GramHttpChain.getBurn`), validated the release
 > against its own node view, and broadcast the VIZ release (1-of-1). Two fixes were required
 > to get here: (1) the watcher now parses the gateway jetton wallet's real inbound message,
 > TEP-74 `internal_transfer` (0x178d4519), not `transfer_notification`; (2) F2 source
-> re-read. The signer's `TON_ENDPOINT` / `TON_GATEWAY_JETTON_WALLET` **must** point at the
+> re-read. The signer's `GRAM_ENDPOINT` / `GRAM_GATEWAY_JETTON_WALLET` **must** point at the
 > operator's own node (the F2 independence invariant).
 >
 > ✅ **Persistent store (default since 2026-07-01):** the harness now points every run at a
 > stable `sqlite:./data/e2e.sqlite`, so idempotency memory survives across runs — a peg-out
 > burn already released on a prior run is **not** re-released when it's still inside the
-> watcher's `TON_MAX_TRANSACTIONS` scan window (matches production). Set `E2E_FRESH_STORE=1`
+> watcher's `GRAM_MAX_TRANSACTIONS` scan window (matches production). Set `E2E_FRESH_STORE=1`
 > to opt back into a per-run store keyed by `runId` (a clean idempotency slate; the old
 > behaviour). Note: with the persistent store, re-running the *same* round-trip re-detects the
 > prior burn as already-processed — use a fresh burn (each run mints a unique amount) or
@@ -261,15 +266,15 @@ This starts watchers + signer + recon + coordinator in one stack (solo). Check
 
 You need some wVIZ to send. As multisig admin, mint a little wVIZ to a test
 user wallet (one multisig order). Then from that wallet, **send the wVIZ to
-`TON_GATEWAY_JETTON_WALLET` with a text comment = a VIZ account name**. Expected:
+`GRAM_GATEWAY_JETTON_WALLET` with a text comment = a VIZ account name**. Expected:
 
-1. `ton-watcher` detects the `transfer_notification`, after the finality buffer.
+1. `gram-watcher` detects the `transfer_notification`, after the finality buffer.
 2. It POSTs the peg-out action to the coordinator.
 3. The coordinator builds the VIZ release proposal, the signer signs (1-of-1),
    and `broadcastRelease` sends the VIZ transfer.
 4. The VIZ account receives VIZ. `recon` stays 1:1 (burn the received wVIZ to keep it).
 
-This exercises `ton-watcher → coordinator → signer → VizJsChain.broadcastRelease`
+This exercises `gram-watcher → coordinator → signer → VizJsChain.broadcastRelease`
 against live chains.
 
 ## 9. Test peg-in (wire the on-chain mint order here)
@@ -284,7 +289,7 @@ other operator's signer sends `approve` from its own wallet; at threshold the
 order executes and mints `net` wVIZ to the user. For **1-of-1** this collapses to
 a single `new_order` — **PROVEN end-to-end on TON testnet 2026-07-01**. The
 multi-operator on-chain routing is proven offline (3-of-5) by
-`tools/ton-onchain-approval-spike.cjs`; live 3-of-5 checklist in §9b. The fee-split
+`tools/gram-onchain-approval-spike.cjs`; live 3-of-5 checklist in §9b. The fee-split
 mint (fee → treasury) is still a gap (see below).
 
 ## 9b. Live 3-of-5 TON peg-in proof (real M-of-N, on-chain approvals)
@@ -298,21 +303,21 @@ approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
    npm run gen:multisig-data` prints 5 fresh mnemonics (save to gitignored
    `docs/federation-ton-keys.md`) + the ordered signer addresses and writes
    `contracts/ton/boc/multisig-3of5.data.boc`. Re-run without `GEN=1` (with the
-   saved `FED_OP<i>_TON_MNEMONIC` in env) to rebuild the same data cell.
+   saved `FED_OP<i>_GRAM_MNEMONIC` in env) to rebuild the same data cell.
 1. **Deploy a fresh 3-of-5 multisig** with those five operator wallet addresses as
    signers (order matters — it fixes each operator's `signers[index]`):
    `DEPLOY_SEND=1 MULTISIG_DATA_BOC=contracts/ton/boc/multisig-3of5.data.boc … npm
    run deploy:multisig`. Deploy the minter and hand it the wVIZ minter admin.
-   Record → `TON_MULTISIG_ADDRESS`, `TON_JETTON_MINTER_ADDRESS`.
+   Record → `GRAM_MULTISIG_ADDRESS`, `GRAM_JETTON_MINTER_ADDRESS`.
 2. **Run five signer processes**, one per operator, each with its OWN
-   `TON_SIGNER_MNEMONIC` (its wallet key) — wired via `FED_OP<i>_TON_MNEMONIC` in
-   the harness — its own `TON_ENDPOINT`, and the shared `TON_MULTISIG_ADDRESS` +
-   `TON_JETTON_MINTER_ADDRESS`. Set `FED_N=5`, `FED_THRESHOLD=3`. The signer refuses
-   a TON peg-in unless its `TonApprover` is configured (minter + multisig + mnemonic).
-3. **Run the coordinator with NO `TON_SIGNER_MNEMONIC`** (it is keyless on TON and
+   `GRAM_SIGNER_MNEMONIC` (its wallet key) — wired via `FED_OP<i>_GRAM_MNEMONIC` in
+   the harness — its own `GRAM_ENDPOINT`, and the shared `GRAM_MULTISIG_ADDRESS` +
+   `GRAM_JETTON_MINTER_ADDRESS`. Set `FED_N=5`, `FED_THRESHOLD=3`. The signer refuses
+   a TON peg-in unless its `GramApprover` is configured (minter + multisig + mnemonic).
+3. **Run the coordinator with NO `GRAM_SIGNER_MNEMONIC`** (it is keyless on TON and
    ignores it if set). It designates the **first** federation operator as proposer;
    the harness orders `SIGNER_ENDPOINTS` op-1-first automatically. Driver:
-   `npm run e2e:federation:ton:live` runs criteria 1-3; criterion 4 (rotation) is
+   `npm run e2e:federation:gram:live` runs criteria 1-3; criterion 4 (rotation) is
    gated on `FED_ROTATION_MODE=live` after the rotation ceremony (step 7).
 4. **Drive a peg-in** (send ≥ min VIZ to `viz-gateway` with the memo = a TON
    address). Expected: proposer's signer sends `new_order` (self-approve = 1/3);
@@ -327,7 +332,7 @@ approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
    SAME order. Supply increases by `net` exactly once (no double-mint).
 7. **Rotation proof:** rotate the multisig signer set (drop an old operator); the
    dropped operator's `approve` is rejected on-chain (err 106 `unauthorized_sign`),
-   while the new set reaches threshold. Automated in the driver (`tools/e2e/ton-rotation.ts`),
+   while the new set reaches threshold. Automated in the driver (`tools/e2e/gram-rotation.ts`),
    opt-in via `FED_ROTATION_MODE=live` and run **last** — it PERMANENTLY rotates the
    multisig (3-of-5 → 3-of-4), so re-running the suite needs a fresh 3-of-5 deploy
    (step 0-1). Left unset, criterion 4 is skipped and criteria 1-3 still prove out.
@@ -342,7 +347,7 @@ crash-window single-mint ✔, rotation rejects old signers ✔.
 ### Verification record (2026-07-04 / 2026-07-05) — ALL 4 criteria PROVEN live
 
 Run `e2e-1783094535761-49bmor` on TON testnet, driver `npm run
-e2e:federation:ton:live` (with `.env.e2e` sourced + `E2E_FRESH_STORE=1`). Real
+e2e:federation:gram:live` (with `.env.e2e` sourced + `E2E_FRESH_STORE=1`). Real
 3-of-5, keyless coordinator, each operator approving from its OWN wallet.
 
 - **Multisig (3-of-5):** `EQCuW98IIpl9tbqnd5c4mGDf1BJahHutqAHoGEPhcR5swo_7`
@@ -371,9 +376,9 @@ e2e:federation:ton:live` (with `.env.e2e` sourced + `E2E_FRESH_STORE=1`). Real
   **3-of-4** — re-running criteria 1-3 needs a fresh 3-of-5 deploy (step 0-1).
 
 Fixes this run made the live path work (all on `fix/9b-ton-live-driver`): the
-proposer needs ~1 TON/order (`TON_ORDER_VALUE_NANO`, lowered to 0.3 TON for the
-run); the TonApprover order-wait was 60s (too tight for testnet →
-`TON_APPROVE_MAX_WAIT_MS`, 150s); the dispatcher refunded landing mints at its 3-min
+proposer needs ~1 TON/order (`GRAM_ORDER_VALUE_NANO`, lowered to 0.3 TON for the
+run); the GramApprover order-wait was 60s (too tight for testnet →
+`GRAM_APPROVE_MAX_WAIT_MS`, 150s); the dispatcher refunded landing mints at its 3-min
 window (`DISPATCHER_WINDOW_MS`, 8 min for c1/c3; a short window for c2 so its
 under-threshold peg-in refunds terminally before c3); and the coordinator now
 surfaces signer error bodies (was a bare HTTP status).
@@ -550,7 +555,7 @@ signatures (no master).
 >       (`tester4` ended byte-identical to pre-proof: active/regular/master/memo_key)
 > Offline coverage remains in `tools/rotation-spike.cjs`.
 
-### TON side of a rotation (on-chain, asynchronous)
+### GRAM chain side of a rotation (on-chain, asynchronous)
 
 After `broadcast viz` lands the VIZ side, rotate the TON multisig to the same new
 operator set. TON approval is **on-chain**: there is no off-chain signature file —
@@ -559,16 +564,16 @@ addresses derived from each operator's `tonPubkey`.
 
 ```bash
 # 1. A current signer submits the update order (dry-run, then APPLY=1)
-APPLY=1 TON_MULTISIG_ADDRESS=<addr> TON_SIGNER_MNEMONIC="<24 words>" \
-  npm run rotate:ton -- submit-ton rotation-proposal.json     # prints ORDER_ADDR
+APPLY=1 GRAM_MULTISIG_ADDRESS=<addr> GRAM_SIGNER_MNEMONIC="<24 words>" \
+  npm run rotate:gram -- submit-gram rotation-proposal.json     # prints ORDER_ADDR
 # 2. Each OTHER current signer approves on-chain (validates the order vs the proposal first)
-APPLY=1 TON_SIGNER_MNEMONIC="<24 words>" npm run rotate:ton -- approve-ton <ORDER_ADDR>
+APPLY=1 GRAM_SIGNER_MNEMONIC="<24 words>" npm run rotate:gram -- approve-gram <ORDER_ADDR>
 # 3. Anyone polls both chains; sets tonDone once the multisig signer set changed
-TON_MULTISIG_ADDRESS=<addr> npm run rotate:ton -- status
+GRAM_MULTISIG_ADDRESS=<addr> npm run rotate:gram -- status
 ```
 
 Because TON serializes config changes (a pending order is rejected once any update
-lands), only one rotation may be in flight at a time. `approve-ton` re-derives the
+lands), only one rotation may be in flight at a time. `approve-gram` re-derives the
 expected order from the proposal and aborts unless the on-chain order is byte-identical.
 
 > **Verification record — TODO (live testnet).** Run the ceremony on TON testnet and record:
@@ -635,14 +640,14 @@ operator to carry a Solana pubkey and fails if one is missing.
   via `npm run e2e:federation:live`. Operator keys in `docs/federation-keys.md` (gitignored).
 - **TON on-chain M-of-N approval routing (Phase B)** — ✅ WIRED + offline-proven
   3-of-5. Coordinator is keyless on TON; operators propose/approve from their own
-  wallets (`TonApprover`); `broadcast` polls `orderExecuted`. Proven against the real
-  vendored contracts in `tools/ton-onchain-approval-spike.cjs` (`npm run verify`).
+  wallets (`GramApprover`); `broadcast` polls `orderExecuted`. Proven against the real
+  vendored contracts in `tools/gram-onchain-approval-spike.cjs` (`npm run verify`).
   Live 3-of-5 testnet proof: checklist in §9b (deferred operational step). 1-of-1
   peg-in round-trip proven live on TON testnet 2026-07-01.
 - **TON peg-out (detection + source validation)** — ✅ PROVEN end-to-end on testnet
   2026-07-01. Required fixing burn detection to parse `internal_transfer` (the real inbound
-  message at the gateway jetton wallet) plus `TonHttpChain.getBurn` + the TON branch in
-  `sourceValidator.ts` (offline-proven in `tools/ton-pegout-f2-spike.cjs`). Plan:
+  message at the gateway jetton wallet) plus `GramHttpChain.getBurn` + the TON branch in
+  `sourceValidator.ts` (offline-proven in `tools/gram-pegout-f2-spike.cjs`). Plan:
   `docs/plan-ton-pegout-source-validation.md`.
 - **FEE_SWEEP / REFUND signer validation** — ✅ DONE 2026-07-01. These gateway-internal VIZ
   releases are now re-derived from the PEG_IN they settle (see the gateway-internal note

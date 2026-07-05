@@ -13,8 +13,8 @@ const PEG_OUT_TIMEOUT_MS = 8 * 60_000;
 const POLL_MS = 5_000;
 
 async function main() {
-  const chain = (process.argv[2] ?? "ton") as "ton" | "solana";
-  if (chain !== "ton") throw new Error(`Phase 1 supports 'ton' only; got '${chain}'`);
+  const chain = (process.argv[2] ?? "gram") as "gram" | "solana";
+  if (chain !== "gram") throw new Error(`Phase 1 supports 'gram' only; got '${chain}'`);
   const cfg = loadE2eConfig(process.env, chain);
   const runEnv = buildRunEnv(cfg);
   const logDir = `tools/e2e/logs/${cfg.runId}`;
@@ -33,7 +33,7 @@ async function main() {
   }
 
   // 2) Snapshot
-  const tonOwner = cfg.ton.burnOwner; // burn wallet address = wVIZ mint recipient
+  const tonOwner = cfg.gram.burnOwner; // burn wallet address = wVIZ mint recipient
   const gross = uniqueGrossMilliViz(20_000n, cfg.runId);
   const net = expectedNetMilliViz(gross, fees, chain.toUpperCase() as RemoteChainId, true);
   const recvBefore = await vizBalanceMilliViz(cfg.viz.nodeUrl, cfg.viz.recipient);
@@ -41,7 +41,7 @@ async function main() {
 
   // 3) Bring up the stack
   const stack = await launchStack(
-    ["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"],
+    ["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"],
     runEnv,
     logDir,
   );
