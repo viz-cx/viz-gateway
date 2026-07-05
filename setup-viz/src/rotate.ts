@@ -98,6 +98,31 @@ function coSign(): void {
   // set/threshold, wrong chainId, or expired. Network not required.
   validateProposal(proposal, { chainId: CHAIN_ID, nowMs: Date.now() });
 
+  // Human-review gate. Unlike a fund transfer, a rotation has NO objective on-chain source to
+  // re-derive against — the new operator set is a human decision. validateProposal only proves
+  // the tx is internally consistent with the file's claimed set, NOT that the set is what THIS
+  // operator intended. Whoever built the proposal (an untrusted coordinator) chose newOperators;
+  // signing it blindly hands the gateway's active authority to that set (theft). So show the full
+  // set, threshold, the current-active hash the tx pins, and the diff vs the local federation
+  // manifest, and refuse to sign unless the operator explicitly confirms out-of-band review.
+  const manifestPath = arg("manifest") || "federation.json";
+  let diff = "(no local federation.json to diff against — verify the set manually)";
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { operators: { vizPubkey: string }[] };
+    diff = diffOperators(manifest.operators.map((o) => o.vizPubkey), proposal.newOperators);
+  } catch {
+    /* manifest optional (e.g. 1-of-1 bootstrap) — diff unavailable, set shown below regardless */
+  }
+  console.log("[co-sign] REVIEW BEFORE SIGNING — you are authorizing a NEW gateway active authority:");
+  console.log(`  new set:       ${serializeOperators(proposal.newOperators)}`);
+  console.log(`  new threshold: ${proposal.newThreshold}-of-${proposal.newOperators.length}`);
+  console.log(`  pins current:  active-hash ${proposal.currentActiveHash}`);
+  console.log(`  vs ${manifestPath}: ${diff}`);
+  if (process.env.CONFIRM !== "1") {
+    console.log("[co-sign] NOT signed. Verify the set above out-of-band, then re-run with CONFIRM=1 to sign.");
+    return;
+  }
+
   const signed = viz.auth.signTransaction({ ...proposal.vizTx, signatures: [] }, [wif]);
   const mySig = signed.signatures?.[signed.signatures.length - 1];
   if (!mySig) throw new Error("signTransaction produced no signature");
