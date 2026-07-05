@@ -27,6 +27,22 @@ async function main(): Promise<void> {
   // A per-chain split prevents a surplus on one chain from masking under-backing on another.
   const store = createStore(cfg.storeUrl);
   const recons: Recon[] = [];
+  // VG-02: validate that every chain in RECON_EXPECTED_REMOTES is actually configured.
+  // The per-chain Recon constructor can't catch "GRAM expected but no GRAM_JETTON_MINTER_ADDRESS
+  // set" because that Recon is never even created in that case.
+  if (cfg.recon.expectedRemotes && cfg.recon.expectedRemotes.length > 0) {
+    const configuredChains = new Set<string>();
+    if (cfg.gram.jettonMinterAddress) configuredChains.add("GRAM");
+    if (cfg.solana.wvizMint) configuredChains.add("SOLANA");
+    const missing = cfg.recon.expectedRemotes.filter((c) => !configuredChains.has(c));
+    if (missing.length > 0) {
+      throw new Error(
+        `[recon] expected remote(s) [${missing.join(",")}] not configured ` +
+          `(present: [${[...configuredChains].join(",")}]). ` +
+          `A remote with live wVIZ must never drop out of recon. Fix config or update RECON_EXPECTED_REMOTES.`,
+      );
+    }
+  }
   const reconCfg = { ...cfg.recon, expectedRemotes: undefined };
   if (cfg.gram.jettonMinterAddress) {
     const gram = new GramHttpChain(
