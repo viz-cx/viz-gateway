@@ -26,32 +26,21 @@ function digestOf(s: string): string {
   return createHash("sha256").update(s, "utf8").digest("hex");
 }
 
-const REMOTE_CHAIN_BY_PREFIX: Record<string, RemoteChainId> = {
-  gram: "GRAM",
-  solana: "SOLANA",
-};
+const SOLANA_ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const GRAM_ADDR_RE = /^[EU]Q[A-Za-z0-9_-]{46}$/;
 
 /**
- * Parse a peg-in memo "<chain>:<address>" into its target chain + destination.
- * Trust-critical: every operator parses the same memo into the same target, so
- * the derived canonical action (and digest) match across operators.
- *
- * Throws on a missing/unknown chain prefix or an empty destination â a custody
- * bridge never silently defaults the target chain. The split is on the FIRST ':'
- * only; TON (EQ.../UQ... base64url) and Solana (base58) addresses never contain ':'.
+ * Validate a remote chain destination address shape. Throws on empty, on
+ * addresses containing ':' (no memo prefix allowed -- routing is by receiving
+ * account now), or on an address that doesn't match the chain's expected format.
+ * Trust-critical: every operator validates the same address against the same
+ * rules, so a malformed destination is uniformly rejected before signing.
  */
-export function parseRemoteTarget(memo: string): { chain: RemoteChainId; destination: string } {
-  const trimmed = memo.trim();
-  const sep = trimmed.indexOf(":");
-  if (sep <= 0) {
-    throw new Error(`peg-in memo missing chain prefix (expected "<chain>:<address>"): "${memo}"`);
-  }
-  const prefix = trimmed.slice(0, sep).toLowerCase();
-  const destination = trimmed.slice(sep + 1).trim();
-  const chain = REMOTE_CHAIN_BY_PREFIX[prefix];
-  if (!chain) throw new Error(`peg-in memo has unknown chain prefix "${prefix}": "${memo}"`);
-  if (!destination) throw new Error(`peg-in memo has empty destination: "${memo}"`);
-  return { chain, destination };
+export function validateRemoteAddress(chain: RemoteChainId, address: string): void {
+  if (!address) throw new Error(`peg-in destination is empty for chain ${chain}`);
+  if (address.includes(":")) throw new Error(`peg-in destination must not contain ':' (${address})`);
+  const re = chain === "SOLANA" ? SOLANA_ADDR_RE : GRAM_ADDR_RE;
+  if (!re.test(address)) throw new Error(`invalid ${chain} destination address: ${address}`);
 }
 
 /** VIZ deposit -> remote mint of wVIZ (chain committed in the digest). */
@@ -81,6 +70,7 @@ export function canonicalPegOut(b: RemoteBurn): CanonicalAction {
   const body = canonicalString([
     ["v", "1"],
     ["dir", "PEG_OUT"],
+    ["chain", b.chain],
     ["src", id],
     ["recipient", b.homeDestination],
     ["amount_milli_viz", b.amountMilliViz.toString()],
@@ -90,6 +80,7 @@ export function canonicalPegOut(b: RemoteBurn): CanonicalAction {
     id,
     recipient: b.homeDestination,
     amountMilliViz: b.amountMilliViz,
+    remoteChain: b.chain,
     digest: digestOf(body),
   };
 }

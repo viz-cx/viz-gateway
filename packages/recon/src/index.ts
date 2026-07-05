@@ -1,4 +1,4 @@
-import { createStore, loadConfig } from "@gateway/common";
+import { buildGatewayAccounts, createStore, loadConfig } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
@@ -21,12 +21,31 @@ export { Recon } from "./checker";
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
-  // Sum circulating wVIZ across EVERY configured remote chain — a single-remote
-  // recon would mask an over-mint on the other chain (§6.2).
-  const remotes: Array<{ name: string; supply: () => Promise<bigint> }> = [];
+  const accounts = buildGatewayAccounts(cfg);
+  const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
+  // One Recon per chain: each checks locked(accountₖ) ≥ circulating(k) + unsweptFees(k).
+  // A per-chain split prevents a surplus on one chain from masking under-backing on another.
+  const store = createStore(cfg.storeUrl);
+  const recons: Recon[] = [];
+  // VG-02: validate that every chain in RECON_EXPECTED_REMOTES is actually configured.
+  // The per-chain Recon constructor can't catch "GRAM expected but no GRAM_JETTON_MINTER_ADDRESS
+  // set" because that Recon is never even created in that case.
+  if (cfg.recon.expectedRemotes && cfg.recon.expectedRemotes.length > 0) {
+    const configuredChains = new Set<string>();
+    if (cfg.gram.jettonMinterAddress) configuredChains.add("GRAM");
+    if (cfg.solana.wvizMint) configuredChains.add("SOLANA");
+    const missing = cfg.recon.expectedRemotes.filter((c) => !configuredChains.has(c));
+    if (missing.length > 0) {
+      throw new Error(
+        `[recon] expected remote(s) [${missing.join(",")}] not configured ` +
+          `(present: [${[...configuredChains].join(",")}]). ` +
+          `A remote with live wVIZ must never drop out of recon. Fix config or update RECON_EXPECTED_REMOTES.`,
+      );
+    }
+  }
+  const reconCfg = { ...cfg.recon, expectedRemotes: undefined };
   if (cfg.gram.jettonMinterAddress) {
-    const ton = new GramHttpChain(
+    const gram = new GramHttpChain(
       cfg.gram.endpoint,
       cfg.gram.apiKey,
       cfg.gram.jettonMinterAddress,
@@ -34,20 +53,31 @@ async function main(): Promise<void> {
       cfg.gram.multisigAddress,
       cfg.gram.finalityConfirmations,
     );
-    remotes.push({ name: "GRAM", supply: () => ton.circulatingSupplyMilliViz() });
+    recons.push(new Recon(
+      [{ name: "GRAM", supply: () => gram.circulatingSupplyMilliViz() }],
+      () => viz.gatewayBalanceMilliViz(accounts.accountFor("GRAM")),
+      store,
+      reconCfg,
+      "GRAM",
+    ));
   }
   if (cfg.solana.wvizMint) {
     const sol = new SolanaChain(cfg.solana.rpcUrl, cfg.solana.wvizMint, cfg.solana.gatewayTokenAccount, cfg.solana.finalitySlots);
-    remotes.push({ name: "SOLANA", supply: () => sol.circulatingSupplyMilliViz() });
+    recons.push(new Recon(
+      [{ name: "SOLANA", supply: () => sol.circulatingSupplyMilliViz() }],
+      () => viz.gatewayBalanceMilliViz(accounts.accountFor("SOLANA")),
+      store,
+      reconCfg,
+      "SOLANA",
+    ));
   }
+  // VG-02: no remotes = fatal misconfiguration (recon would always see circulating = 0).
+  if (recons.length === 0) throw new Error("[recon] no remote configured — set GRAM_JETTON_MINTER_ADDRESS or SOLANA_WVIZ_MINT");
 
-  // VG-02: throws if remotes.length === 0 (see Recon constructor).
-  const store = createStore(cfg.storeUrl);
-  const recon = new Recon(remotes, viz.gatewayBalanceMilliViz.bind(viz), store, cfg.recon);
-
+  const configuredChains = [cfg.gram.jettonMinterAddress && "GRAM", cfg.solana.wvizMint && "SOLANA"].filter(Boolean).join(",");
   const once = process.env.RECON_ONCE === "1";
   console.log(
-    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ maxConsecFail=${cfg.recon.maxConsecutiveFailures} remotes=[${remotes.map((r) => r.name).join(",")}] once=${once}`,
+    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ maxConsecFail=${cfg.recon.maxConsecutiveFailures} chains=[${configuredChains}] once=${once}`,
   );
 
   // D3 reserve monitor: the Solana submitter pays fee + ATA rent for every mint;
@@ -71,11 +101,11 @@ async function main(): Promise<void> {
   };
 
   if (once) {
-    const result = await recon.check();
+    const results = await Promise.all(recons.map((r) => r.check()));
     await reserveCheck();
     await store.close();
-    // exit 0 = healthy; exit 2 = under-backed or indeterminate (can't confirm the peg).
-    process.exit(result === true ? 0 : 2);
+    // exit 0 = all chains healthy; exit 2 = any chain under-backed or indeterminate.
+    process.exit(results.every((r) => r === true) ? 0 : 2);
   }
 
   let running = true;
@@ -87,8 +117,9 @@ async function main(): Promise<void> {
 
   while (running) {
     try {
-      const result = await recon.check();
-      await recon.onCheckResult(result);
+      for (const r of recons) {
+        await r.onCheckResult(await r.check());
+      }
       await reserveCheck();
     } catch (err) {
       console.error("[recon] loop error:", err);

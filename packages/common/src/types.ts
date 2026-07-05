@@ -34,6 +34,8 @@ export interface VizDeposit {
  *   Solana -> sourceId = tx signature, height = slot
  */
 export interface RemoteBurn {
+  /** Source chain identifier — determines which backing account releases VIZ. */
+  chain: RemoteChainId;
   /** Unique source-event id on the remote chain (idempotency key). */
   sourceId: string;
   /** Remote-chain height/seqno/slot at which it was observed final. */
@@ -55,8 +57,8 @@ export interface RemoteBurn {
 export interface CanonicalAction {
   direction: Direction;
   /**
-   * Target remote chain for a PEG_IN mint, committed into the digest. Absent for
-   * PEG_OUT, which always releases on the VIZ home chain.
+   * Remote chain for this action: the mint chain (PEG_IN) or the source burn chain
+   * (PEG_OUT). Committed into the digest for both directions.
    */
   remoteChain?: RemoteChainId;
   /** Idempotency key = source event key (trxId:opIndex or msgHash). */

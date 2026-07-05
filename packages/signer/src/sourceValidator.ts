@@ -4,6 +4,7 @@ import {
   canonicalPegOut,
   pegInFeePolicyFor,
   type CanonicalAction,
+  type GatewayAccounts,
   type GatewayFeeConfig,
   type GatewayStore,
   type RemoteBurn,
@@ -64,6 +65,13 @@ export interface SourceValidatorDeps {
    * address; a coordinator-supplied recipient is ignored beyond the equality check.
    */
   feesGateAccount: string;
+  /**
+   * Per-chain backing account registry. Used to assert that child actions (FEE_SWEEP /
+   * REFUND) inherit the parent deposit's remoteChain, and that peg-out releases
+   * carry the chain they were dispatched from. Prevents a compromised coordinator from
+   * crossing chain contexts (e.g. claiming a GRAM-sourced release is SOLANA).
+   */
+  accounts: GatewayAccounts;
 }
 
 /** Child-action id suffixes for gateway-internal VIZ releases spawned off a PEG_IN. */
@@ -197,6 +205,11 @@ async function reReadParentPegIn(
  */
 async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
   const { deposit, parent } = await reReadParentPegIn(action, FEE_SWEEP_SUFFIX, deps);
+  if (action.remoteChain !== deposit.remoteChain) {
+    throw new SourceMismatchError(
+      `FEE_SWEEP remoteChain ${String(action.remoteChain)} != parent deposit chain ${deposit.remoteChain} (${action.id})`,
+    );
+  }
   if (action.recipient !== deps.feesGateAccount) {
     throw new SourceMismatchError(
       `FEE_SWEEP recipient ${action.recipient} != operator's own fees.gate ${deps.feesGateAccount} (${action.id})`,
@@ -222,6 +235,11 @@ async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDe
  */
 async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
   const { deposit, parent } = await reReadParentPegIn(action, REFUND_SUFFIX, deps);
+  if (action.remoteChain !== deposit.remoteChain) {
+    throw new SourceMismatchError(
+      `REFUND remoteChain ${String(action.remoteChain)} != parent deposit chain ${deposit.remoteChain} (${action.id})`,
+    );
+  }
   if (action.recipient !== deposit.from) {
     throw new SourceMismatchError(
       `REFUND recipient ${action.recipient} != deposit sender ${deposit.from} (${action.id})`,
@@ -251,6 +269,11 @@ async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps)
   if (!deposit) {
     throw new SourceMismatchError(`PEG_IN source ${action.id} not found or not yet irreversible on VIZ`);
   }
+  // CRITICAL: remoteChain is derived from the deposit's receiving account by VizJsChain.getDeposit
+  // via GatewayAccounts.chainFor(to), NOT from coordinator-supplied data. The assertSameAction call
+  // below compares derived.remoteChain !== wire.remoteChain (line 314), so any coordinator claiming
+  // the wrong chain is rejected here. This guards against routing attacks where a compromised
+  // coordinator tries to mint on the wrong chain by claiming the deposit landed somewhere it didn't.
   assertSameAction(canonicalPegIn(deposit), action);
 }
 

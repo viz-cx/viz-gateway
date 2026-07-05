@@ -11,7 +11,7 @@
 //   - a missing/non-final parent, a malformed child id, or any tampered field FAILS CLOSED.
 //
 // Run (after `npm run build`): node tools/fee-sweep-refund-spike.cjs
-const { canonicalPegIn, baseFee, pegInFeePolicyFor } = require("@gateway/common");
+const { canonicalPegIn, baseFee, pegInFeePolicyFor, GatewayAccounts } = require("@gateway/common");
 const { validateAction, SourceMismatchError } = require("../packages/signer/dist/sourceValidator.js");
 
 let failures = 0;
@@ -61,6 +61,8 @@ async function expectReject(promise, label) {
   const base = baseFee(deposit.amountMilliViz, policy); // the only amount the signer will sign
   const withheldMax = base + policy.activationSurchargeMilliViz; // base + activation — the OLD band max, now rejected
 
+  // accounts: deposit lands at "viz-gateway" (GRAM backing account for this spike fixture)
+  const spikeAccounts = new GatewayAccounts({ GRAM: "viz-gateway", SOLANA: "solana.gate" });
   const deps = (dep) => ({
     vizChain: { getDeposit: async () => dep },
     solanaChain: { getBurn: async () => null },
@@ -68,6 +70,7 @@ async function expectReject(promise, label) {
     store: { depositAddressBy: async () => undefined },
     fees,
     feesGateAccount: FEES_GATE,
+    accounts: spikeAccounts,
   });
 
   // Build the FEE_SWEEP / REFUND child actions exactly as dispatcher/policy.ts planChildren does.
@@ -77,6 +80,7 @@ async function expectReject(promise, label) {
     recipient: FEES_GATE,
     amountMilliViz: base,
     digest: `${parent.digest}:fee`,
+    remoteChain: deposit.remoteChain, // inherited from parent (Task 3.2/3.4)
     ...over,
   });
   const refund = (over = {}) => ({
@@ -85,6 +89,7 @@ async function expectReject(promise, label) {
     recipient: deposit.from, // back to the original sender
     amountMilliViz: deposit.amountMilliViz, // gross, no fee
     digest: `${parent.digest}:refund`,
+    remoteChain: deposit.remoteChain, // inherited from parent (Task 3.2/3.4)
     ...over,
   });
 

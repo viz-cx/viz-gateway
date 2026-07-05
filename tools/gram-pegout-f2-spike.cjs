@@ -151,6 +151,7 @@ const depsWith = (chain) => ({
   {
     const ghostHash = "cc".repeat(32);
     const action = canonicalPegOut({
+      chain: "GRAM",
       sourceId: ghostHash,
       height: 0,
       from: SENDER,
@@ -164,6 +165,7 @@ const depsWith = (chain) => ({
   {
     const freshTx = makeTx(BURN_HASH, notFinalNow, internalTransferBody(AMOUNT, COMMENT, SENDER));
     const action = canonicalPegOut({
+      chain: "GRAM",
       sourceId: BURN_HASH,
       height: 0,
       from: SENDER,

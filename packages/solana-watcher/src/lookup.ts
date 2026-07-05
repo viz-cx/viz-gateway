@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { createStore, loadConfig } from "@gateway/common";
+import { buildGatewayAccounts, createStore, loadConfig } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { depositAddress, depositAta } from "./depositAddress";
 import { resolveDepositAddress } from "./lookupValidate";
@@ -23,8 +23,9 @@ async function main(): Promise<void> {
   if (!cfg.solana.depositProgramId) throw new Error("SOLANA_DEPOSIT_PROGRAM_ID is required for the lookup service");
   if (!cfg.solana.wvizMint) throw new Error("SOLANA_WVIZ_MINT is required");
   console.log(`[lookup] deposit program = ${cfg.solana.depositProgramId}`);
+  const accounts = buildGatewayAccounts(cfg);
   const store = createStore(cfg.storeUrl);
-  const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
+  const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
   const [host, portStr] = cfg.solana.lookupListen.split(":");
   const port = Number.parseInt(portStr ?? "8095", 10);
 

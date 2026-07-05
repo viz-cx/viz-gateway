@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import {
   actionFromWire,
+  buildGatewayAccounts,
   createStore,
   loadConfig,
   type SolanaMintProposal,
@@ -28,12 +29,13 @@ interface ApproveRequest {
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
+  const accounts = buildGatewayAccounts(cfg);
   const store = createStore(cfg.storeUrl);
 
   // F2 INDEPENDENCE LINCHPIN: these readers MUST point at the operator's OWN nodes
   // (VIZ_NODE_URL / SOLANA_RPC_URL), never a coordinator-fed endpoint. They re-derive
   // the source event so a compromised coordinator cannot forge a (action, proposal) pair.
-  const vizChain = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
+  const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
   // Read-only Solana reader (no writer): only getBurn is exercised here. Constructing it
   // needs a real mint; if Solana is not configured on this signer, a Solana peg-out can
   // never be validated, so fail closed if one ever arrives.
@@ -84,6 +86,7 @@ async function main(): Promise<void> {
     // never coordinator-fed, so a swept fee can only ever land at this operator's fees.gate.
     fees: cfg.fees,
     feesGateAccount: cfg.feesGateAccount,
+    accounts,
   };
 
   // Pin the Solana accounts to this operator's own config so a compromised coordinator
@@ -126,6 +129,7 @@ async function main(): Promise<void> {
     (action) => validateAction(action, validatorDeps),
     solanaPins,
     gramApprover,
+    accounts,
   );
   const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8090").split(":");
   const port = Number.parseInt(portStr ?? "8090", 10);

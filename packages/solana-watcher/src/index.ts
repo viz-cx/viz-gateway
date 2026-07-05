@@ -61,6 +61,7 @@ async function main(): Promise<void> {
           const first = await store.enqueue({
             id: action.id,
             direction: "PEG_OUT",
+            remoteChain: action.remoteChain,
             recipient: action.recipient,
             amountMilliViz: action.amountMilliViz,
             digest: action.digest,

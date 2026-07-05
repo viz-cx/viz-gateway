@@ -1,4 +1,5 @@
 import {
+  buildGatewayAccounts,
   canonicalPegIn,
   CircuitBreaker,
   createStore,
@@ -21,7 +22,8 @@ const CURSOR = "cursor:viz-watcher";
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  const chain: VizChain = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
+  const accounts = buildGatewayAccounts(cfg);
+  const chain: VizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
 
@@ -37,7 +39,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", stop);
 
   console.log(
-    `[viz-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} gateway=${cfg.viz.gatewayAccount}`,
+    `[viz-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} gateway=${accounts.all().join(",")}`,
   );
 
   while (running) {

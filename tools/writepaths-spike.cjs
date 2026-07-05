@@ -30,6 +30,7 @@ const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/
   const wifB = viz.auth.toWif("gateway", "pwB", "active");
 
   const action = canonicalPegOut({
+    chain: "GRAM",
     sourceId: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
     height: 1,
     from: "EQsender",

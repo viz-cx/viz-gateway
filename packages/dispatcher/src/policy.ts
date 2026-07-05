@@ -81,6 +81,7 @@ export function planChildren(
       {
         id: `${rec.id}:fee`,
         direction: "FEE_SWEEP",
+        remoteChain: rec.remoteChain,
         recipient: ctx.feesGateAccount,
         amountMilliViz: ctx.sweepAmountMilliViz,
         digest: `${rec.digest}:fee`,
@@ -94,6 +95,7 @@ export function planChildren(
       {
         id: `${rec.id}:refund`,
         direction: "REFUND",
+        remoteChain: rec.remoteChain,
         recipient: rec.sender, // back to the VIZ sender
         amountMilliViz: rec.amountMilliViz, // gross (no fee on a refund)
         digest: `${rec.digest}:refund`,
