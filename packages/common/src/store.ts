@@ -10,6 +10,7 @@ import type {
   StatusPatch,
 } from "./idempotency";
 import type { RemoteChainId } from "./types";
+import { baseFee, type PegInFeePolicy } from "./fees";
 
 /**
  * Persistent, cross-process gateway state:
@@ -49,6 +50,15 @@ export interface GatewayStore {
    * to circulating to keep `locked == circulating + unswept` exact between sweeps.
    */
   unsweptFeesMilliViz(chain?: RemoteChainId): Promise<bigint>;
+  /**
+   * Like unsweptFeesMilliViz, but the minted-side fee is RE-DERIVED per row as
+   * baseFee(gross, feePolicy) from the row's immutable gross, instead of trusting the
+   * coordinator-written fee_milli_viz column. recon uses this so a compromised or
+   * recovery-path coordinator that understates the pinned fee cannot shrink expectedLocked
+   * and mask an under-backing. The activation surcharge is NOT credited (unrecoverable, and
+   * under-crediting is the safe direction — stricter backing check, never laxer).
+   */
+  unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint>;
 
   // --- rolling 24h cap window (shared) ---
   recordCap(amountMilliViz: bigint, now: number): Promise<void>;
@@ -334,6 +344,23 @@ export class SqliteGatewayStore implements GatewayStore {
     return v > 0n ? v : 0n;
   }
 
+  async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
+    const ph = MINTED_STATUSES.map(() => "?").join(",");
+    const chainFilter = chain ? " AND remote_chain = ?" : "";
+    const chainArgs: string[] = chain ? [chain] : [];
+    // Re-derive the minted fee from each row's immutable GROSS (never the coordinator-pinned
+    // fee_milli_viz), so an understated pinned fee cannot mask under-backing (see interface doc).
+    const minted = this.db
+      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})${chainFilter}`)
+      .all(...MINTED_STATUSES, ...chainArgs) as Row[];
+    const mintedFees = minted.reduce((a, r) => a + baseFee(BigInt(String(r["v"])), feePolicy), 0n);
+    const swept = this.db
+      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'${chainFilter}`)
+      .all(...chainArgs) as Row[];
+    const v = mintedFees - sumBigIntColumn(swept);
+    return v > 0n ? v : 0n;
+  }
+
   async recordCap(amountMilliViz: bigint, now: number): Promise<void> {
     this.db
       .prepare("INSERT INTO cap_window(ts, amount_milli_viz) VALUES(?, ?)")
@@ -492,6 +519,18 @@ export class InMemoryGatewayStore implements GatewayStore {
     let swept = 0n;
     for (const r of this.rows.values()) {
       if (r.direction === "PEG_IN" && (r.status === "BROADCAST" || r.status === "CONFIRMED") && (!chain || r.remoteChain === chain)) minted += r.feeMilliViz;
+      if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
+    }
+    const v = minted - swept;
+    return v > 0n ? v : 0n;
+  }
+  async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
+    let minted = 0n;
+    let swept = 0n;
+    for (const r of this.rows.values()) {
+      if (r.direction === "PEG_IN" && (r.status === "BROADCAST" || r.status === "CONFIRMED") && (!chain || r.remoteChain === chain)) {
+        minted += baseFee(r.amountMilliViz, feePolicy); // re-derived from GROSS, not the pinned fee
+      }
       if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
     }
     const v = minted - swept;
