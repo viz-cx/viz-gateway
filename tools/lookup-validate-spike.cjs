@@ -12,6 +12,7 @@
 const assert = require("node:assert");
 const {
   VIZ_ACCOUNT_RE,
+  MAX_VIZ_ACCOUNT_BYTES,
   normalizeVizAccount,
   resolveDepositAddress,
 } = require("../packages/solana-watcher/dist/lookupValidate");
@@ -97,7 +98,32 @@ const existsFor = (set) => async (name) => set.has(name);
   );
   console.log("[lookup] VIZ node outage propagates (fail closed) OK");
 
+  // 7) Over-length names (regex allows up to 32; on-chain program guards <= 16 bytes) are
+  //    rejected at issuance BEFORE the RPC, so a deposit address whose release burn would
+  //    revert on-chain (AccountNameTooLong) and strand funds is never handed out.
+  assert.strictEqual(MAX_VIZ_ACCOUNT_BYTES, 16, "guard must mirror the on-chain limit");
+  const sixteen = "a".repeat(16); // exactly at the limit -> allowed (if it exists)
+  const seventeen = "a".repeat(17); // 1 over -> rejected at issuance
+  let overLenRpc = 0;
+  const overLenDeps = {
+    accountExists: async () => { overLenRpc++; return true; }, // would "exist", but must never be reached
+    depositAddress: (n) => `addr:${n}`,
+    depositAta: (n) => `ata:${n}`,
+  };
+  const over = await resolveDepositAddress(seventeen, overLenDeps);
+  assert.strictEqual(over.status, 400, "17-byte name must be rejected (over on-chain limit)");
+  assert.match(over.body.error, /exceeds 16 bytes/, "clear over-length error");
+  assert.strictEqual(overLenRpc, 0, "over-length reject must not hit the VIZ node");
+  const atLimit = await resolveDepositAddress(sixteen, {
+    accountExists: async () => true,
+    depositAddress: (n) => `addr:${n}`,
+    depositAta: (n) => `ata:${n}`,
+  });
+  assert.strictEqual(atLimit.status, 200, "16-byte name (at the limit) is issuable");
+  console.log("[lookup] >16-byte names rejected at issuance (zero RPC); 16-byte boundary allowed OK");
+
   console.log("\nRESULT: lookup gates issuance on VIZ account existence; format is a\n" +
     "cheap pre-filter (zero RPC on reject); malformed-but-regex-valid names ('id',\n" +
-    "'a.sub') are caught by the on-chain gate; node outage fails closed.");
+    "'a.sub') are caught by the on-chain gate; >16-byte names are rejected at\n" +
+    "issuance (consistent with the burn-only program); node outage fails closed.");
 })();

@@ -141,6 +141,32 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   }
   console.log("[pin] tampered mint/multisig/nonceAccount REJECTED; honest config accepted OK");
 
+  // ---- feePayer pinning (pre-audit sweep, finding C) ----------------------
+  // When the operator configures the expected submitter pubkey, the signer also pins
+  // feePayer: a compromised coordinator naming a different (even internally-consistent)
+  // fee payer is rejected at validation, not left to fail the on-chain nonce advance.
+  const ksFeePin = new KeyedSigner("op-feepin", "", "", FEES, opA.secretKey, DISABLED_SOURCE_VALIDATION, {
+    mint,
+    multisig,
+    nonceAccount,
+    feePayer: submitter.publicKey.toBase58(),
+  });
+  await ksFeePin.approveSolanaMint(action, proposal); // honest feePayer matches config -> passes
+  // Swap feePayer to an attacker key AND recompute messageB64 so the proposal is internally
+  // consistent — proving the PIN (not the message check) is what rejects it.
+  const evilPayer = Keypair.generate().publicKey.toBase58();
+  const tamperedPayer = { ...proposal, feePayer: evilPayer };
+  tamperedPayer.messageB64 = mintMessageB64(tamperedPayer);
+  await assert.rejects(
+    ksFeePin.approveSolanaMint(action, tamperedPayer),
+    /proposal\.feePayer .* != signer-configured feePayer/,
+    "tampered (but self-consistent) feePayer must be rejected by the pin",
+  );
+  // And when feePayer is NOT pinned (no submitter pubkey configured), the same swap is
+  // NOT rejected by the pin layer (on-chain nonce authority is the backstop) -> liveness only.
+  await ksPinned.approveSolanaMint(action, tamperedPayer); // ksPinned has no feePayer pin -> passes validation
+  console.log("[pin] feePayer pin REJECTS a self-consistent wrong payer; unpinned falls back to on-chain OK");
+
   console.log("\nRESULT: a Solana peg-in routes end-to-end through the real signer routing");
   console.log("and coordinator orchestration; chain tag committed, partials merge, broadcast.");
 })().catch((e) => {

@@ -51,6 +51,14 @@ export interface SolanaPins {
   mint: string;
   multisig: string;
   nonceAccount: string;
+  /**
+   * Expected fee-payer / nonce-authority pubkey (the designated submitter). Optional:
+   * when set, the signer rejects a proposal whose `feePayer` differs, so a compromised
+   * coordinator cannot name an arbitrary fee payer (a wrong one would fail the on-chain
+   * nonce advance anyway — this fails closed earlier, at validation). Omitted in spikes
+   * and when SOLANA_SUBMITTER_PUBKEY is unset.
+   */
+  feePayer?: string;
 }
 
 /** Explicit test-only sentinel: pass this to KeyedSigner to disable F2 source validation. */
@@ -166,6 +174,8 @@ export class KeyedSigner implements Signer {
         ["multisig", proposal.multisig],
         ["nonceAccount", proposal.nonceAccount],
       ];
+      // feePayer is pinned only when the operator configured the expected submitter pubkey.
+      if (pins.feePayer) mismatches.push(["feePayer", proposal.feePayer]);
       for (const [field, got] of mismatches) {
         if (got !== pins[field]) {
           throw new Error(`proposal.${field} (${got}) != signer-configured ${field} (${pins[field]}) for ${action.id}`);

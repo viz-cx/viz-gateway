@@ -89,7 +89,13 @@ async function main(): Promise<void> {
   // Pin the Solana accounts to this operator's own config so a compromised coordinator
   // can't redirect a mint (only meaningful once Solana is wired: SOLANA_WVIZ_MINT set).
   const solanaPins = cfg.solana.wvizMint
-    ? { mint: cfg.solana.wvizMint, multisig: cfg.solana.multisig, nonceAccount: cfg.solana.nonceAccount }
+    ? {
+        mint: cfg.solana.wvizMint,
+        multisig: cfg.solana.multisig,
+        nonceAccount: cfg.solana.nonceAccount,
+        // Pinned only when SOLANA_SUBMITTER_PUBKEY is configured (empty => undefined => not pinned).
+        feePayer: cfg.solana.submitterPubkey || undefined,
+      }
     : null;
 
   // TON on-chain approver (Phase B): performs this operator's propose/approve from its

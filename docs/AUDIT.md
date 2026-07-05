@@ -84,7 +84,7 @@ Two independent custody gates:
 |---|---|---|
 | `packages/common` | **critical** | Chain-agnostic core: canonical digest, types, caps, fees, durable outbox + cap window + deposit-address registry (`store.ts`), threshold accumulation, operator rotation. |
 | `packages/signer` | **holds keys** | The only key-holding service. Re-validates each proposal against an independently re-derived action (F2), then signs. One per operator. |
-| `packages/coordinator` | **untrusted / keyless** | Builds one shared proposal, collects partials to threshold, broadcasts. Compromise → liveness stall, not theft. |
+| `packages/coordinator` | **untrusted** | Builds one shared proposal, collects partials to threshold, broadcasts. Keyless on VIZ and TON. On **Solana** it holds the *submitter* key (`SOLANA_SUBMITTER_SECRET`) = fee payer + durable-nonce authority + ATA funder — **not** mint authority (that is the on-chain SPL multisig). Compromise → liveness stall (nonce grind / SOL drain), not theft. See §8. |
 | `packages/viz-watcher` | read+sign | VIZ head-follow, peg-in detection, VIZ release signing/broadcast. |
 | `packages/ton-watcher` | read+sign | TON finality + burn detection, TON mint-order approval. |
 | `packages/solana-watcher` | read+sign | Solana adapter + PDA deposit-address derivation, lookup service, peg-out scanner, burn. |
@@ -133,7 +133,7 @@ Two independent custody gates:
 
 | # | Claim the design makes | Where it lives | If false → |
 |---|---|---|---|
-| T1 | A keyless coordinator cannot cause theft; worst case is liveness. | signer gates §1 | direct fund theft |
+| T1 | A compromised coordinator cannot cause theft; worst case is liveness. (It is keyless on VIZ/TON; on Solana it holds only the *submitter* key — fee payer + nonce authority + ATA funder — never mint authority. See §2, §8.) | signer gates §1 | direct fund theft |
 | T2 | Each signer re-derives the action from a finalized source event on its **own** node; coordinator-supplied fields never reach the chain reader. | `sourceValidator.ts` | forge a release for a non-existent/misattributed deposit |
 | T3 | The canonical digest is a pure, unambiguous function of the source event, so honest operators produce byte-identical signable bytes. | `canonical.ts` | signature-splitting / a signer tricked into signing a different action than it validated |
 | T4 | Every source event maps to exactly one action id; re-submission and crash-replay cannot double-mint/double-release. | `store.ts`, `sourceValidator.ts`, dispatcher recovery | double-mint / double-release |
@@ -267,7 +267,21 @@ under-rated.
   with one proposer; multi-proposer would need action-id embedded in the order payload.
 - **`VIZ_ACCOUNT_RE` is a loose pre-filter** — allows some Graphene-invalid shapes
   (`id`, `a.`, `a..b`); the authoritative gate is `accountExists`. Confirm the loose
-  regex can't be leveraged before the existence check.
+  regex can't be leveraged before the existence check. Note the regex permits up to 32
+  chars while the burn-only program guards `viz_account.len() <= 16`; the lookup now
+  rejects >16-byte names at issuance (`MAX_VIZ_ACCOUNT_BYTES`, `lookupValidate.ts`) so it
+  can never hand out an address whose release burn would revert on-chain and strand funds.
+- **Coordinator holds the Solana *submitter* key** (`SOLANA_SUBMITTER_SECRET`): it is the
+  fee payer, durable-nonce authority, and ATA funder for every Solana mint. It is **not**
+  mint authority (that is the on-chain SPL M-of-N multisig), so it cannot mint, redirect,
+  or inflate: each signer pins `mint`/`multisig`/`nonceAccount`/`feePayer` from its own
+  config and re-derives NET before signing. The submitter key's blast radius is liveness
+  only — grinding the durable nonce (invalidating a collected sig set) or draining its SOL
+  (mints stall until refunded). The recon SOL-reserve monitor pages on the drain case. This
+  is the one place T1's "keyless" shorthand is imprecise; the *no-theft* property still
+  holds. (VIZ and TON are genuinely keyless on the coordinator.) `feePayer` is pinned by the
+  signer only when `SOLANA_SUBMITTER_PUBKEY` is configured; a wrong fee payer otherwise
+  fails the on-chain nonce advance (still liveness-only).
 - **Coordinator counts approvals it hasn't locally verified** (liveness-only by design;
   the chain rejects bad merges).
 - **Release proposal TaPoS uses head, not LIB** (low probability given VIZ finality).

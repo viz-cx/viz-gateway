@@ -4,6 +4,14 @@ import { notifyStaff } from "@gateway/log";
 export interface ReconCfg {
   driftToleranceMilliViz: bigint;
   maxConsecutiveFailures: number;
+  /**
+   * Chain names that MUST be present as remotes (e.g. ["TON","SOLANA"]). If any is
+   * missing, the constructor throws. Closes the gap where dropping a remote's config
+   * env var while it still has circulating wVIZ silently stops monitoring its supply
+   * (the length===0 guard only catches ALL remotes missing, not a subset). Empty =
+   * only the "at least one remote" guard applies.
+   */
+  expectedRemotes?: string[];
 }
 
 export interface RemoteChain {
@@ -31,6 +39,18 @@ export class Recon {
         "[recon] no remote chain configured — configure at least one of " +
           "TON_JETTON_MINTER_ADDRESS / SOLANA_WVIZ_MINT. " +
           "A recon with no supply visibility must not run.",
+      );
+    }
+    // VG-follow-up (D): fail closed if an operator-declared remote is absent. Dropping a
+    // remote's config while it still has circulating wVIZ would otherwise silently hide
+    // that supply from the peg invariant (drift under-counts circulating → false "healthy").
+    const present = new Set(remotes.map((r) => r.name));
+    const missing = (cfg.expectedRemotes ?? []).filter((name) => !present.has(name));
+    if (missing.length > 0) {
+      throw new Error(
+        `[recon] expected remote(s) [${missing.join(",")}] missing from config ` +
+          `(present: [${[...present].join(",")}]). A remote with live wVIZ must never drop out of recon. ` +
+          `Fix the config or update RECON_EXPECTED_REMOTES.`,
       );
     }
   }
