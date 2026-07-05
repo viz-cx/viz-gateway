@@ -48,12 +48,111 @@ export function createLogger(module: string): Logger {
 
 const staffLog = createLogger("staff");
 
+// --- Operator alerting (VG BH4) ---------------------------------------------
+// notifyStaff was a red log line in a file nobody tails. Every fail-closed pause
+// (cap breach, scan truncation, wedged delivery, drift) routes through it, so a
+// silent channel means the bridge halts and no operator ever learns. Now it ALSO
+// pushes to a real webhook when STAFF_WEBHOOK_URL is set, with bounded retries, and
+// flags alerting as UNHEALTHY (surfaced via isAlertingHealthy) when delivery fails —
+// so a /health probe or the recon loop can escalate a blind alerting pipe.
+
+function envInt(name: string, dflt: number): number {
+  const v = process.env[name];
+  if (v === undefined || v === "") return dflt;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : dflt;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** False once a webhook delivery has exhausted its retries; re-armed by the next success. */
+let alertingHealthy = true;
+let warnedNoChannel = false;
+
+/** Alerting-pipe health. A service can expose this on /health so a blind alert channel
+ * (webhook configured but unreachable) is itself an alertable, visible condition. */
+export function isAlertingHealthy(): boolean {
+  return alertingHealthy;
+}
+
+/** Test seam: reset the module health flags between cases. */
+export function __resetAlertingHealthForTest(): void {
+  alertingHealthy = true;
+  warnedNoChannel = false;
+}
+
+export interface StaffWebhookOpts {
+  timeoutMs?: number;
+  retries?: number;
+  retryDelayMs?: number;
+  /** Injectable for tests; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
 /**
- * Operator notification. For now this is just a loud red error log with a scope
- * tag; the interface is ready for a real channel (Telegram, PagerDuty, ...) later
- * without touching call sites. Scopes: "deposits" | "withdraws" | "drift" |
- * "reserve" | "refund".
+ * POST a staff alert as JSON to `url`, retrying on network error / non-2xx up to `retries`
+ * extra attempts. Each attempt is bounded by an AbortSignal timeout so a blackhole endpoint
+ * cannot hang the caller. Returns true on the first delivered attempt, false if all fail.
+ */
+export async function deliverStaffWebhook(
+  url: string,
+  scope: string,
+  message: string,
+  meta: Record<string, unknown> = {},
+  opts: StaffWebhookOpts = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? envInt("STAFF_WEBHOOK_TIMEOUT_MS", 10000);
+  const retries = opts.retries ?? envInt("STAFF_WEBHOOK_RETRIES", 3);
+  const retryDelayMs = opts.retryDelayMs ?? envInt("STAFF_WEBHOOK_RETRY_DELAY_MS", 500);
+  const doFetch = opts.fetchImpl ?? fetch;
+  const body = JSON.stringify({ scope, message, meta, ts: Math.floor(Date.now() / 1000) });
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await doFetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok) return true;
+    } catch {
+      /* network error / timeout / abort — fall through to retry */
+    }
+    if (attempt < retries) await sleep(retryDelayMs);
+  }
+  return false;
+}
+
+/**
+ * Operator notification. Always writes the loud audit line (console + daily file); when
+ * STAFF_WEBHOOK_URL is configured it ALSO fires the webhook (fire-and-forget so call sites
+ * stay synchronous). A delivery that exhausts its retries flips isAlertingHealthy() to false
+ * and logs a CRITICAL meta-alert; the next success re-arms it. With no webhook configured, it
+ * warns ONCE that alerts are file-only (a prod custody bridge must set a channel).
+ * Scopes: "deposits" | "withdraws" | "drift" | "reserve" | "refund" | "delivery" | "rotation".
  */
 export function notifyStaff(scope: string, message: string, meta: Record<string, unknown> = {}): void {
   staffLog.error(`[NOTIFY:${scope}] ${message}`, meta);
+  const url = process.env.STAFF_WEBHOOK_URL;
+  if (!url) {
+    if (!warnedNoChannel) {
+      warnedNoChannel = true;
+      staffLog.error(
+        "[NOTIFY:alerting] STAFF_WEBHOOK_URL is not set — operator alerts are file-only. Set it so fail-closed pauses reach an on-call channel.",
+      );
+    }
+    return;
+  }
+  void deliverStaffWebhook(url, scope, message, meta).then((ok) => {
+    if (ok) {
+      alertingHealthy = true;
+    } else {
+      alertingHealthy = false;
+      staffLog.error("[NOTIFY:alerting] FAILED to deliver staff alert after retries; alerting pipe is DEGRADED", {
+        scope,
+        message,
+      });
+    }
+  });
 }
