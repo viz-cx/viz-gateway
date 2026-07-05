@@ -48,6 +48,10 @@ export interface GatewayStore {
    * VIZ fees minted-as-surplus but not yet swept to fees.gate, in milli-VIZ.
    * = sum(PEG_IN fee, minted) − sum(FEE_SWEEP amount, confirmed). recon adds this
    * to circulating to keep `locked == circulating + unswept` exact between sweeps.
+   *
+   * SIGNED: a NEGATIVE result (swept > minted fees) is an over-sweep anomaly — mis-pinning
+   * or a double FEE_SWEEP leaking backing — NOT clamped to 0 (which would hide it). recon
+   * must treat < 0 as a fail-closed condition (pause + alert), never as "0 = fine" (M10).
    */
   unsweptFeesMilliViz(chain?: RemoteChainId): Promise<bigint>;
   /**
@@ -341,7 +345,7 @@ export class SqliteGatewayStore implements GatewayStore {
       .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'${chainFilter}`)
       .all(...chainArgs) as Row[];
     const v = sumBigIntColumn(minted) - sumBigIntColumn(swept);
-    return v > 0n ? v : 0n;
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
 
   async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
@@ -358,7 +362,7 @@ export class SqliteGatewayStore implements GatewayStore {
       .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'${chainFilter}`)
       .all(...chainArgs) as Row[];
     const v = mintedFees - sumBigIntColumn(swept);
-    return v > 0n ? v : 0n;
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
 
   async recordCap(amountMilliViz: bigint, now: number): Promise<void> {
@@ -522,7 +526,7 @@ export class InMemoryGatewayStore implements GatewayStore {
       if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
     }
     const v = minted - swept;
-    return v > 0n ? v : 0n;
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
   async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
     let minted = 0n;
@@ -534,7 +538,7 @@ export class InMemoryGatewayStore implements GatewayStore {
       if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
     }
     const v = minted - swept;
-    return v > 0n ? v : 0n;
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
   async recordCap(amountMilliViz: bigint, now: number): Promise<void> {
     this.caps.push({ ts: now, amount: amountMilliViz });

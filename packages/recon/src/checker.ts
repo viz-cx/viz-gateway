@@ -99,6 +99,18 @@ export class Recon {
       return null;
     }
 
+    // Over-sweep guard (M10): a NEGATIVE unswept fee means confirmed FEE_SWEEPs pulled MORE
+    // than the derived peg-in fees justify — mis-pinning or a double sweep leaking backing.
+    // The store no longer clamps this to 0 (which silently hid it); treat it as a fail-closed
+    // condition and pause, rather than folding a negative into the drift arithmetic.
+    if (unsweptFees < 0n) {
+      const reason = `over-swept fees ${unsweptFees} mVIZ: confirmed FEE_SWEEPs exceed derived peg-in fees (mis-pinning or double sweep)`;
+      await this.store.pause(reason);
+      console.error(`[recon] CRITICAL: OVER-SWEEP DETECTED -> gateway paused: ${reason}`);
+      notifyStaff("drift", reason, { unsweptFees: String(unsweptFees) });
+      return false;
+    }
+
     const circulating = (settled as PromiseFulfilledResult<bigint>[]).reduce((a, s) => a + s.value, 0n);
     const expectedLocked = circulating + unsweptFees;
     const drift = locked - expectedLocked;
