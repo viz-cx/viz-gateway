@@ -190,7 +190,7 @@ Internally:
 **`packages/signer/src/keyedSigner.ts`:**
 - Inject `SourceValidatorDeps` (or a `validateAction` function) into the constructor
 - Call `await validateAction(action, deps)` at the top of `signVizRelease`,
-  `approveTonMint`, and `approveSolanaMint` — before any proposal-vs-action checks
+  `approveGramMint`, and `approveSolanaMint` — before any proposal-vs-action checks
 - The source validator throws on mismatch; the existing checks below it remain as defense-in-depth
 
 **`packages/signer/src/index.ts`:**

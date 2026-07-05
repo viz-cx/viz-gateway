@@ -94,7 +94,7 @@ export interface GatewayConfig {
     intervalMs: number;
     driftToleranceMilliViz: bigint;
     maxConsecutiveFailures: number;
-    // Chain names (e.g. ["TON","SOLANA"]) that MUST be present as recon remotes. If a
+    // Chain names (e.g. ["GRAM","SOLANA"]) that MUST be present as recon remotes. If a
     // listed remote is missing from config, recon refuses to start — closes the gap where
     // dropping a remote's env var while it still has circulating wVIZ would silently stop
     // monitoring its supply. Empty = only the "at least one remote" guard applies.

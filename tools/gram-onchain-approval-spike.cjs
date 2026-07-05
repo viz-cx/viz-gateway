@@ -13,7 +13,7 @@
 // Design: docs/plan-ton-onchain-approval.md.
 //
 // Run (after `npm run build` so contracts/ton/dist exists):
-//   node tools/ton-onchain-approval-spike.cjs
+//   node tools/gram-onchain-approval-spike.cjs
 const assert = require("node:assert");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
@@ -23,7 +23,7 @@ const { JettonMaster } = require("@ton/ton");
 const { Multisig, multisigConfigToCell } = require("../contracts/ton/dist/wrappers/Multisig.js");
 const { Order } = require("../contracts/ton/dist/wrappers/Order.js");
 // Use the SAME pure mint-order builder the live write path uses, so this proof can
-// never drift from production (packages/ton-watcher/src/tonChain.ts).
+// never drift from production (packages/gram-watcher/src/gramChain.ts).
 const { buildMintTransfer } = require("../packages/gram-watcher/dist/gramChain.js");
 
 const BOC = path.join(__dirname, "..", "contracts", "ton", "boc");

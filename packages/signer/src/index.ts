@@ -10,7 +10,7 @@ import {
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
-import { TonApprover } from "@gateway/gram-watcher/dist/gramApprove";
+import { GramApprover } from "@gateway/gram-watcher/dist/gramApprove";
 import { KeyedSigner } from "./keyedSigner";
 import { routeApproval } from "./routeApproval";
 import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
@@ -101,9 +101,9 @@ async function main(): Promise<void> {
   // TON on-chain approver (Phase B): performs this operator's propose/approve from its
   // OWN wallet + node. Wired only when TON is fully configured on this operator; a TON
   // PEG_IN without it is refused (KeyedSigner throws) rather than silently unauthorized.
-  const tonApprover =
+  const gramApprover =
     cfg.gram.jettonMinterAddress && cfg.gram.multisigAddress && cfg.gram.signerMnemonic
-      ? new TonApprover(
+      ? new GramApprover(
           cfg.gram.endpoint,
           cfg.gram.apiKey,
           cfg.gram.jettonMinterAddress,
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
     cfg.solana.signerSecret,
     (action) => validateAction(action, validatorDeps),
     solanaPins,
-    tonApprover,
+    gramApprover,
   );
   const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8090").split(":");
   const port = Number.parseInt(portStr ?? "8090", 10);

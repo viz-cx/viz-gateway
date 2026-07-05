@@ -73,7 +73,7 @@ export class KeyedSigner implements Signer {
     /**
      * RETAINED for constructor-arg stability, no longer used for signing. TON mints
      * are authorized by on-chain multisig approvals: the operator's mnemonic lives in
-     * (and is used only by) the injected `tonApprover`, never here. See approveGramMint.
+     * (and is used only by) the injected `gramApprover`, never here. See approveGramMint.
      */
     private readonly _tonMnemonic: string,
     private readonly fees: GatewayFeeConfig,
@@ -86,7 +86,7 @@ export class KeyedSigner implements Signer {
      * wallet, not off-chain signatures — so the signer delegates the effect here.
      * Null when TON is not wired on this operator (then a TON PEG_IN is refused).
      */
-    private readonly tonApprover: GramApprovalClient | null = null,
+    private readonly gramApprover: GramApprovalClient | null = null,
   ) {
     if (validateSource === undefined) {
       // A forgotten validator must never degrade to "sign without a source check".
@@ -151,13 +151,13 @@ export class KeyedSigner implements Signer {
     // proposal.amountMilliViz is NET; re-derive base fee from gross, accept the
     // pinned destProvisioned flag for the activation surcharge.
     this.assertNet(action, "GRAM", proposal.destProvisioned, proposal.amountMilliViz);
-    if (!this.tonApprover) throw new Error("TON approver not configured on this signer; refusing to approve");
+    if (!this.gramApprover) throw new Error("GRAM approver not configured on this signer; refusing to approve");
     // On-chain effect: propose (if this operator is the designated proposer and the
     // order is absent) or approve, from THIS operator's own wallet. The approver
     // re-derives the order cell and asserts its hash matches proposal.orderHashHex,
     // binding the on-chain action to the recipient/amount validated above.
     const isProposer = proposal.proposerOperatorId === this.operatorId;
-    const receipt = await this.tonApprover.approveMint(proposal, isProposer);
+    const receipt = await this.gramApprover.approveMint(proposal, isProposer);
     return { actionId: action.id, operatorId: this.operatorId, signature: encodeReceipt(receipt) };
   }
 

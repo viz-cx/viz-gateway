@@ -29,8 +29,8 @@ test-only sentinel, not wired to the service.
 
 ## What a TON peg-out source event is (confirmed)
 
-- ton-watcher (`tonChain.ts:finalizedBurnsSince`) watches the **gateway jetton wallet**
-  (`TON_GATEWAY_JETTON_WALLET`) for a TEP-74 `transfer_notification` (0x7362d09c).
+- gram-watcher (`tonChain.ts:finalizedBurnsSince`) watches the **gateway jetton wallet**
+  (`GRAM_GATEWAY_JETTON_WALLET`) for a TEP-74 `transfer_notification` (0x7362d09c).
 - It builds a `RemoteBurn`:
   - `sourceId = tx.hash().toString("hex")` — the burn tx hash (64 hex chars). **This is
     the action.id.**
@@ -53,7 +53,7 @@ the burn, comment, and amount; a compromised coordinator cannot forge it.
 
 ## Tasks (TDD)
 
-1. **`TonHttpChain.getBurn(sourceId): Promise<RemoteBurn | null>`** (`tonChain.ts`).
+1. **`GramHttpChain.getBurn(sourceId): Promise<RemoteBurn | null>`** (`tonChain.ts`).
    - `getTransactions(this.gatewayWallet, { limit: this.maxTransactions })`, find the tx
      with `tx.hash().toString("hex") === sourceId`.
    - Apply the SAME `finalityBufferSec` cutoff as `finalizedBurnsSince` (reject
@@ -74,11 +74,11 @@ the burn, comment, and amount; a compromised coordinator cannot forge it.
 3. **signer/index.ts — wire a read-only TON reader** into `validatorDeps`.
    - Construct from the operator's OWN `cfg.ton` (endpoint, apiKey, jettonMinterAddress,
      gatewayJettonWallet). `getBurn` needs only client + gatewayWallet (no mnemonic).
-   - If `cfg.ton.gatewayJettonWallet` is unset → fail-closed stub (mirror the Solana stub
+   - If `cfg.gram.gatewayJettonWallet` is unset → fail-closed stub (mirror the Solana stub
      at index.ts:40).
    - INDEPENDENCE LINCHPIN comment: the TON endpoint MUST be the operator's own node.
 
-4. **Offline spike `tools/ton-pegout-f2-spike.cjs`** (mirror `signer-f2-spike.cjs`).
+4. **Offline spike `tools/gram-pegout-f2-spike.cjs`** (mirror `signer-f2-spike.cjs`).
    - Construct a `transfer_notification` cell → drive `getBurn` (mock client returning the
      tx) → `validateAction` → assert: (a) matching burn validates, (b) tampered
      amount/recipient/id → SourceMismatchError, (c) not-final → null → refuse.
@@ -95,7 +95,7 @@ the burn, comment, and amount; a compromised coordinator cannot forge it.
   the gateway wallet. A release delayed past that window can't be validated → stall. If
   gateway throughput is high, paginate (getTransactions supports lt/hash cursors) or raise
   the limit. Document the bound; do not silently cap.
-- **tx.hash() consistency:** the signer must hash the tx identically to ton-watcher (same
+- **tx.hash() consistency:** the signer must hash the tx identically to gram-watcher (same
   `@ton/ton` `Transaction.hash()`). Same lib → consistent; assert in the spike.
 - **Finality buffer parity:** reuse the exact cutoff from `finalizedBurnsSince` so the
   signer never validates a burn the watcher wouldn't have treated as final.
@@ -131,8 +131,8 @@ With this, `recon`'s `unswept` drains instead of growing without bound.
 
 ## Files
 
-- `packages/ton-watcher/src/tonChain.ts` — add `getBurn`, factor out the parse.
+- `packages/gram-watcher/src/gramChain.ts` — add `getBurn`, factor out the parse.
 - `packages/signer/src/sourceValidator.ts` — TON branch + `tonChain` dep.
 - `packages/signer/src/index.ts` — wire the read-only TON reader.
-- `tools/ton-pegout-f2-spike.cjs` + `package.json` verify chain.
+- `tools/gram-pegout-f2-spike.cjs` + `package.json` verify chain.
 - (optional) `packages/signer/src/*` FEE_SWEEP validation for the related gap.

@@ -172,7 +172,7 @@ async function expectReject(promise, label) {
 
   // 6c) TON-shaped PEG_OUT id (64-hex burn tx hash) but the operator's TON node has no such
   //     burn (getBurn -> null): the TON branch fails closed. Full TON validation is exercised
-  //     in tools/ton-pegout-f2-spike.cjs; here we just prove the dispatch + fail-closed path.
+  //     in tools/gram-pegout-f2-spike.cjs; here we just prove the dispatch + fail-closed path.
   {
     const tonHash = "a".repeat(64); // 64-hex burn tx hash — routes to the TON branch
     const action = canonicalPegOut({ ...trueBurn, sourceId: tonHash, homeDestination: VIZ_ACCT });

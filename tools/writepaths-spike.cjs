@@ -5,7 +5,7 @@
 //   TON (Phase B): a TON mint approval is an ON-CHAIN effect, not an off-chain
 //        signature. This spike proves the signer's glue: it validates net +
 //        recipient, computes isProposer from proposerOperatorId, delegates the
-//        on-chain effect to the injected TonApprover, and encodes the receipt.
+//        on-chain effect to the injected GramApprover, and encodes the receipt.
 //        The real contract state machine is proven in ton-onchain-approval-spike.
 //
 // Run: node tools/writepaths-spike.cjs
@@ -64,7 +64,7 @@ const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/
   await assert.rejects(opA.signVizRelease(action, { ...proposal, to: "mallory" }), /recipient/);
   console.log("[viz] tampered proposals (wrong amount / recipient) REJECTED OK");
 
-  // ---- TON mint approval path (Phase B: on-chain, delegated to TonApprover) ---
+  // ---- TON mint approval path (Phase B: on-chain, delegated to GramApprover) ---
   const pegIn = canonicalPegIn({
     trxId: "t1",
     opIndex: 0,

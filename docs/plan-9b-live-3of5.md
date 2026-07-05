@@ -6,7 +6,7 @@ green. See RUNBOOK §9b verification record.
 **Milestone:** last "prove it live" item on the Phase B federation track.
 **Predecessor:** Phase B code MERGED (PR #19, `main` @ `df5b5cc`) — coordinator
 keyless on TON, operators approve on-chain from their own wallets, offline 3-of-5
-spike (`tools/ton-onchain-approval-spike.cjs`) green in CI.
+spike (`tools/gram-onchain-approval-spike.cjs`) green in CI.
 **Goal:** prove the Phase B trust boundary *live on TON testnet* — 5 independent
 operator wallets, a keyless coordinator, a mint that only lands once 3 distinct
 operators approve on-chain — through §9b's 4 exit criteria in `RUNBOOK.md`.
@@ -19,11 +19,11 @@ Two code gaps block a live 3-of-5 run (both found 2026-07-03):
 
 1. **The federation harness wires no per-operator TON mnemonic.**
    `tools/e2e/federation-config.ts` threads only `FED_OP<i>_WIF` (VIZ) and an
-   optional `FED_OP<i>_SOLANA_SECRET`. The signer builds its `TonApprover` from
-   `cfg.ton.signerMnemonic` (`TON_SIGNER_MNEMONIC`), which today comes from the
+   optional `FED_OP<i>_SOLANA_SECRET`. The signer builds its `GramApprover` from
+   `cfg.gram.signerMnemonic` (`GRAM_SIGNER_MNEMONIC`), which today comes from the
    *shared* base env — so all N signers would share ONE TON wallet. A real 3-of-5
    needs each signer to approve from its **own** TON wallet.
-   → `packages/signer/src/index.ts:98-107` gates `TonApprover` on
+   → `packages/signer/src/index.ts:98-107` gates `GramApprover` on
    `jettonMinterAddress && multisigAddress && signerMnemonic`; the multisig+minter
    are shared, only the mnemonic must be per-operator.
 
@@ -49,22 +49,22 @@ And one hard human prereq:
 ### Task 1 — Harness: per-operator TON mnemonic (code) — ✅ DONE
 - `tools/e2e/federation-config.ts`:
   - Add `tonMnemonic?: string` to the `operators[]` shape and read
-    `FED_OP<i>_TON_MNEMONIC` (via `opt()`) in `loadFederationConfig`.
+    `FED_OP<i>_GRAM_MNEMONIC` (via `opt()`) in `loadFederationConfig`.
   - In `buildFederationRunEnv`, when `op.tonMnemonic` is set, add
-    `env["TON_SIGNER_MNEMONIC"] = op.tonMnemonic` to that signer's spec (it
-    overrides the shared base-env mnemonic). Leave `TON_MULTISIG_ADDRESS` /
-    `TON_JETTON_MINTER_ADDRESS` coming from shared base env (same for all signers).
-  - Update the header doc comment (env var list) to include `FED_OP<i>_TON_MNEMONIC`.
-- `.env.e2e.example`: add `FED_OP{1..5}_TON_MNEMONIC=""` under the federation
+    `env["GRAM_SIGNER_MNEMONIC"] = op.tonMnemonic` to that signer's spec (it
+    overrides the shared base-env mnemonic). Leave `GRAM_MULTISIG_ADDRESS` /
+    `GRAM_JETTON_MINTER_ADDRESS` coming from shared base env (same for all signers).
+  - Update the header doc comment (env var list) to include `FED_OP<i>_GRAM_MNEMONIC`.
+- `.env.e2e.example`: add `FED_OP{1..5}_GRAM_MNEMONIC=""` under the federation
   section and note it's per-operator (each signer's own TON wallet).
 - **Acceptance:** launching a federation stack with 5 distinct
-  `FED_OP<i>_TON_MNEMONIC` gives each signer a `TonApprover` configured with its
+  `FED_OP<i>_GRAM_MNEMONIC` gives each signer a `GramApprover` configured with its
   own wallet (verify via signer startup log — TON approver wired).
 
 ### Task 2 — Live driver: `tools/e2e/federation-ton-live.ts` (code) — ✅ criteria 1-4 implemented
 Model it on `federation-live.ts` but drive a **TON peg-in** through the keyless
 coordinator + 5 signers. Config: `FED_N=5`, `FED_THRESHOLD=3`. Coordinator runs
-with NO `TON_SIGNER_MNEMONIC` (keyless); it designates the **first** federation
+with NO `GRAM_SIGNER_MNEMONIC` (keyless); it designates the **first** federation
 operator as proposer, so order `SIGNER_ENDPOINTS` with that signer first
 (`launchFederationStack` already assembles endpoints from `signerSpecs` order).
 
@@ -83,7 +83,7 @@ delta via `tools/e2e/ton.ts` helpers (`tonWvizBalance`) + `deltas.ts`:
    (no 2nd `new_order`); remaining approvals complete the SAME order. Assert supply
    +`net` exactly once (no double-mint). (Reuse the crash-recovery pattern in
    `tools/e2e/crash-recovery.ts`.)
-4. **Rotation (step 7):** ✅ implemented in `tools/e2e/ton-rotation.ts`
+4. **Rotation (step 7):** ✅ implemented in `tools/e2e/gram-rotation.ts`
    (`proveRotationLive`). Opt-in via `FED_ROTATION_MODE=live` (default = SKIP, so
    criteria 1-3 still prove out). It drives the full ceremony directly against the
    deployed multisig: proposer (op-1) proposes dropping the highest-indexed operator,
@@ -95,7 +95,7 @@ delta via `tools/e2e/ton.ts` helpers (`tonWvizBalance`) + `deltas.ts`:
    re-running the suite needs a fresh 3-of-5 deploy (step 0-1). Reuses
    `tonRotation.buildUpdateAction`/`sameSignerSet` + the `Multisig`/`Order` wrappers.
 
-- Add npm target `e2e:federation:ton:live` in `package.json` (mirror
+- Add npm target `e2e:federation:gram:live` in `package.json` (mirror
   `e2e:federation:live`: `npm run build && node tools/e2e/dist/federation-ton-live.js`).
 - **Acceptance:** all 4 sub-proofs pass live on testnet; log a clear PASS banner
   per criterion.
@@ -116,16 +116,16 @@ delta via `tools/e2e/ton.ts` helpers (`tonWvizBalance`) + `deltas.ts`:
 ### Task 4 — Operational deploy (human-gated, run last)
 Prereq: fund the 5 operator wallets + the deployer wallet (faucet). Then, per
 `RUNBOOK.md` §9b + `contracts/ton/README.md` steps 3-4:
-1. `DEPLOY_SEND=1 npm run deploy:multisig` → record `TON_MULTISIG_ADDRESS`.
-2. `DEPLOY_SEND=1 npm run deploy:minter` → record `TON_JETTON_MINTER_ADDRESS`.
+1. `DEPLOY_SEND=1 npm run deploy:multisig` → record `GRAM_MULTISIG_ADDRESS`.
+2. `DEPLOY_SEND=1 npm run deploy:minter` → record `GRAM_JETTON_MINTER_ADDRESS`.
 3. `DEPLOY_SEND=1 MINTER_ADDRESS=… MULTISIG_ADDRESS=… npm run set-minter-admin`
    (hand the wVIZ minter admin to the fresh 3-of-5 multisig).
-4. Fill `.env.e2e`: `E2E_TON_MULTISIG_ADDRESS`, `E2E_TON_JETTON_MINTER_ADDRESS`,
-   `FED_N=5`, `FED_THRESHOLD=3`, `FED_OP{1..5}_ID/WIF/TON_MNEMONIC`.
-5. `npm run e2e:federation:ton:live` → run criteria 1-3 (+ criterion 4 if
+4. Fill `.env.e2e`: `E2E_GRAM_MULTISIG_ADDRESS`, `E2E_GRAM_JETTON_MINTER_ADDRESS`,
+   `FED_N=5`, `FED_THRESHOLD=3`, `FED_OP{1..5}_ID/WIF/GRAM_MNEMONIC`.
+5. `npm run e2e:federation:gram:live` → run criteria 1-3 (+ criterion 4 if
    `FED_ROTATION_MODE=live`). To prove ONLY criterion 4 against an
    already-proven multisig (skips the stack, VIZ preflight, and re-mints), run
-   `FED_ROTATION_ONLY=1 FED_ROTATION_MODE=live npm run e2e:federation:ton:live`
+   `FED_ROTATION_ONLY=1 FED_ROTATION_MODE=live npm run e2e:federation:gram:live`
    (needs threshold+1 funded operators — the dropped one must send the rejected approve).
 
 ---
@@ -146,9 +146,9 @@ checklist flipped; SUMMARY + memory updated.
 ## Key references
 - `RUNBOOK.md` §9b (lines ~290-324) — the operational checklist this plan automates.
 - `contracts/ton/README.md` steps 1-4 — deploy multisig/minter, hand admin.
-- `packages/signer/src/index.ts:98-107` — `TonApprover` wiring (gated on mnemonic).
-- `packages/ton-watcher/src/tonApprove.ts` — `TonApprover` (propose/approve from own wallet).
+- `packages/signer/src/index.ts:98-107` — `GramApprover` wiring (gated on mnemonic).
+- `packages/gram-watcher/src/gramApprove.ts` — `GramApprover` (propose/approve from own wallet).
 - `tools/e2e/federation-config.ts` — where the per-op TON mnemonic must be threaded.
 - `tools/e2e/federation-live.ts` — the driver to model `federation-ton-live.ts` on.
-- `tools/ton-onchain-approval-spike.cjs` — offline 3-of-5 proof (the on-chain flow, already green).
+- `tools/gram-onchain-approval-spike.cjs` — offline 3-of-5 proof (the on-chain flow, already green).
 - `docs/plan-ton-onchain-approval.md` — Phase B design (IMPLEMENTED), the trust boundary being proven.

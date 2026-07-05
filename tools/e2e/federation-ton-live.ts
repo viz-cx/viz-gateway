@@ -5,7 +5,7 @@
 // distinct operators approve on-chain. Each signer approves from its OWN TON
 // wallet (FED_OP<i>_GRAM_MNEMONIC) — the coordinator holds no TON key.
 //
-// This is the live counterpart of tools/ton-onchain-approval-spike.cjs (which
+// This is the live counterpart of tools/gram-onchain-approval-spike.cjs (which
 // proves the same threshold gating offline against the vendored contracts).
 //
 // Exit criteria (§9b), each asserted here:
@@ -21,10 +21,10 @@
 //
 // Prereqs (RUNBOOK §9b): a fresh 3-of-5 multisig deployed with the 5 operator
 // wallets as signers, wVIZ minter admin handed to it, and .env.e2e carrying
-// FED_N=5, FED_THRESHOLD=3, FED_OP{1..5}_ID/WIF/TON_MNEMONIC + the shared
+// FED_N=5, FED_THRESHOLD=3, FED_OP{1..5}_ID/WIF/GRAM_MNEMONIC + the shared
 // E2E_GRAM_MULTISIG_ADDRESS / E2E_GRAM_JETTON_MINTER_ADDRESS.
 //
-// Run: npm run e2e:federation:ton:live
+// Run: npm run e2e:federation:gram:live
 import { createStore, loadConfig, type OutboxRecord, type RemoteChainId } from "@gateway/common";
 import { loadE2eConfig, buildRunEnv } from "./config";
 import { loadFederationConfig, buildFederationRunEnv } from "./federation-config";
@@ -33,7 +33,7 @@ import { pollUntil } from "./poll";
 import { launchStack, launchFederationStack, type FederationStack, type LaunchedStack } from "./stack";
 import { submitLock, vizBalanceMilliViz } from "./viz";
 import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists } from "./ton";
-import { proveRotationLive } from "./ton-rotation";
+import { proveRotationLive } from "./gram-rotation";
 
 // Live testnet end-to-end mint latency (VIZ irreversibility lag + 3 SEQUENTIAL
 // on-chain TON approvals + toncenter 504 retries) routinely exceeds 4 min, so the
@@ -109,7 +109,7 @@ async function main() {
     ...baseEnv,
     COORDINATOR_LISTEN: "127.0.0.1:8080",
     COORDINATOR_URL: "http://127.0.0.1:8080",
-    // Each signer's TonApprover waits for its proposed order / approval to land
+    // Each signer's GramApprover waits for its proposed order / approval to land
     // on-chain. Testnet inclusion + toncenter view lag exceed the 60s default
     // (observed: order did not appear within 60s), so widen it for the live run.
     GRAM_APPROVE_MAX_WAIT_MS: String(GRAM_APPROVE_MAX_WAIT_MS),
@@ -341,7 +341,7 @@ async function proveCrashWindow(
 // contract) drives the deployed multisig from its current set to one with an
 // operator dropped, then proves the dropped operator's on-chain `approve` is
 // rejected (err 106 unauthorized_sign) while the retained set still reaches
-// threshold. The full ceremony is automated in ./ton-rotation (proveRotationLive).
+// threshold. The full ceremony is automated in ./gram-rotation (proveRotationLive).
 //
 // SAFETY: this PERMANENTLY rotates the deployed multisig (3-of-5 -> 3-of-4), so it
 // is opt-in via FED_ROTATION_MODE=live and runs last. When unset, it is SKIPPED

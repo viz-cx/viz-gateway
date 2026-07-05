@@ -86,7 +86,7 @@ Two independent custody gates:
 | `packages/signer` | **holds keys** | The only key-holding service. Re-validates each proposal against an independently re-derived action (F2), then signs. One per operator. |
 | `packages/coordinator` | **untrusted** | Builds one shared proposal, collects partials to threshold, broadcasts. Keyless on VIZ and TON. On **Solana** it holds the *submitter* key (`SOLANA_SUBMITTER_SECRET`) = fee payer + durable-nonce authority + ATA funder — **not** mint authority (that is the on-chain SPL multisig). Compromise → liveness stall (nonce grind / SOL drain), not theft. See §8. |
 | `packages/viz-watcher` | read+sign | VIZ head-follow, peg-in detection, VIZ release signing/broadcast. |
-| `packages/ton-watcher` | read+sign | TON finality + burn detection, TON mint-order approval. |
+| `packages/gram-watcher` | read+sign | TON finality + burn detection, TON mint-order approval. |
 | `packages/solana-watcher` | read+sign | Solana adapter + PDA deposit-address derivation, lookup service, peg-out scanner, burn. |
 | `packages/dispatcher` | keyless | Drains QUEUED outbox rows to the coordinator with retry/backoff; spawns FEE_SWEEP/REFUND children. |
 | `packages/recon` | watchdog | `locked == circulating + unswept fees` across all remotes; trips shared pause on under-backing. |
@@ -167,7 +167,7 @@ is full takeover).
 
 | Area | File(s) | Check |
 |---|---|---|
-| Peg-in (burn) detection | `packages/ton-watcher/src/tonChain.ts` (`finalizedBurnsSince`) | Parses TEP-74 `internal_transfer` (op `0x178d4519`); finality via time-buffer from ~5s block cadence. **Scan is limit-windowed (last ~20 tx), not height-ranged** — burst beyond the page is missed (§8, partial). |
+| Peg-in (burn) detection | `packages/gram-watcher/src/gramChain.ts` (`finalizedBurnsSince`) | Parses TEP-74 `internal_transfer` (op `0x178d4519`); finality via time-buffer from ~5s block cadence. **Scan is limit-windowed (last ~20 tx), not height-ranged** — burst beyond the page is missed (§8, partial). |
 | Mint authorization | `tonChain.ts` (`submitMint`), `tonSign.ts` | Multisig-v2 **on-chain** `new_order` + `approve`; off-chain ed25519 sigs collected but **not** the authorization path. 1-of-1 self-approves on init. |
 | Idempotency | `tonChain.ts` (`actionExecuted`, `orderExists`, `nextOrderSeqno`) | Persist-before-send; orphan recovery queries order existence. **Assumes a single proposer** — see risk below. |
 | Deployed bytecode | `contracts/ton/boc/PROVENANCE.md` | Multisig from `multisig-contract-v2 @ 9a4b13d…`, minter/wallet from `token-contract @ 1182ad9`; cell hashes pinned; rebuilt via `blueprint build`. Verify hashes match the deployed contracts. |
@@ -261,7 +261,7 @@ under-rated.
 - **F-1 blast radius (retired):** the old additive scheme's "one child scalar ⇒ master
   compromise" is **gone with the code** (R-6 → PDA, no private key). Verify absence.
 - **TON burn scan** — *resolved (VG-06, main `42b1ca3`):* the scan is now `lt`-paginated from
-  a durable anchor and **fails closed** when a burst exceeds `TON_MAX_SCAN_PAGES`, rather than
+  a durable anchor and **fails closed** when a burst exceeds `GRAM_MAX_SCAN_PAGES`, rather than
   silently truncating. Previously limit-windowed; verify the pagination/anchor logic.
 - **TON single-proposer idempotency assumption** — order-seqno idempotency holds only
   with one proposer; multi-proposer would need action-id embedded in the order payload.

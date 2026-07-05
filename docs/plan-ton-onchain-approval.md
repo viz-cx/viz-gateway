@@ -14,8 +14,8 @@ design decisions and is the implementation spec).
 
 TON is today a **fake M-of-N**. The path:
 
-- `coordinator/index.ts:31-40` constructs `TonHttpChain` **with `cfg.ton.signerMnemonic`**.
-- `TonMintBroadcaster.broadcast()` (`adapters.ts:107`) → `TonHttpChain.submitMint(proposal, signatures)`.
+- `coordinator/index.ts:31-40` constructs `GramHttpChain` **with `cfg.gram.signerMnemonic`**.
+- `GramMintBroadcaster.broadcast()` (`adapters.ts:107`) → `GramHttpChain.submitMint(proposal, signatures)`.
 - `submitMint` (`tonChain.ts:218`) signs `new_order` with `this.signerMnemonic`,
   sends it with `approve_on_init=true`, and **ignores the `signatures` array**
   (docstring `tonChain.ts:205-216`).
@@ -23,7 +23,7 @@ TON is today a **fake M-of-N**. The path:
 Consequences:
 1. The **keyless coordinator holds a TON key** and mints solo — violates the trust
    model VIZ/Solana uphold (coordinator holds nothing that can act on-chain).
-2. Signer approvals (`approveTonMint` → ed25519 over the order hash) are **theater**:
+2. Signer approvals (`approveGramMint` → ed25519 over the order hash) are **theater**:
    the contract never sees them. TON executes 1-of-1 regardless of `threshold`.
 
 **Key-split (parent §1) and approval-routing (parent §2) are one change:** the
@@ -81,7 +81,7 @@ orchestrator.process:
     if set.isMet: break
   broadcast(...)                    # poll getOrderData until executed; return orderAddr
 
-signer.approveTonMint(action, proposal):     # runs in the operator's own process
+signer.approveGramMint(action, proposal):     # runs in the operator's own process
   - F2 validate source (unchanged) + re-derive & verify the order cell == proposal.orderHashHex
   - myIdx = index of THIS operator's wallet in multisig.signers
   - if order does not exist on-chain yet AND I am the designated proposer:
@@ -110,26 +110,26 @@ Order address = `f(multisig, orderSeqno)` — content-independent. Two risks:
    107 `already_approved`); the signer also checks `getOrderData().approvals[myIdx]`
    before sending, so a re-drive is a no-op, not a second gas burn.
 
-The existing persist-before-send in `TonMintBroadcaster` (record `orderAddr` before the
+The existing persist-before-send in `GramMintBroadcaster` (record `orderAddr` before the
 proposer sends) is retained and now paired with the `action.id`-in-order scan.
 
 ## Code changes
 
 | File | Change |
 |---|---|
-| `packages/ton-watcher/src/index.ts` | Construct `TonHttpChain` **read-only** — drop `multisigAddress`/`signerMnemonic` args (already only calls read methods). |
-| `packages/ton-watcher/src/tonChain.ts` | Split write path out of `submitMint`. Add: `buildMintOrderCell(proposal)` (pure, returns cell + hash, embeds action.id), `orderData(orderAddr)`, `hasApproved(orderAddr, idx)`. Keep read path. `submitMint` retired / replaced by the two operator-side calls below. |
-| `packages/ton-watcher/src/tonApprove.ts` (new) | Operator-side on-chain actions: `proposeMintOrder(client, wallet, multisig, orderCell, seqno, myIdx)` (sendNewOrder) and `approveOrder(client, wallet, orderAddr, myIdx)` (Order.sendApprove). Uses the operator's own mnemonic. |
-| `packages/signer/src/keyedSigner.ts` | `approveTonMint` performs the on-chain effect (propose or approve) and returns a receipt. Needs a TON write client + `isProposer` flag + multisig address (operator's own config). |
+| `packages/gram-watcher/src/index.ts` | Construct `GramHttpChain` **read-only** — drop `multisigAddress`/`signerMnemonic` args (already only calls read methods). |
+| `packages/gram-watcher/src/gramChain.ts` | Split write path out of `submitMint`. Add: `buildMintOrderCell(proposal)` (pure, returns cell + hash, embeds action.id), `orderData(orderAddr)`, `hasApproved(orderAddr, idx)`. Keep read path. `submitMint` retired / replaced by the two operator-side calls below. |
+| `packages/gram-watcher/src/gramApprove.ts` (new) | Operator-side on-chain actions: `proposeMintOrder(client, wallet, multisig, orderCell, seqno, myIdx)` (sendNewOrder) and `approveOrder(client, wallet, orderAddr, myIdx)` (Order.sendApprove). Uses the operator's own mnemonic. |
+| `packages/signer/src/keyedSigner.ts` | `approveGramMint` performs the on-chain effect (propose or approve) and returns a receipt. Needs a TON write client + `isProposer` flag + multisig address (operator's own config). |
 | `packages/signer/src/index.ts` | Wire the TON write client (operator's own node + mnemonic + multisig addr) into `KeyedSigner`. |
-| `packages/coordinator/src/adapters.ts` | `TonMintBroadcaster.buildProposal` builds the real order cell + hash + embeds actionId; `broadcast` = poll-until-executed (no key). `HttpSignerClient` unchanged (receipt rides in `signature`). |
-| `packages/coordinator/src/index.ts` | **Remove `signerMnemonic` from the coordinator's `TonHttpChain`.** Coordinator becomes truly keyless on TON. |
-| `packages/common/src/types.ts` | `TonMintProposal`: add `orderAddr`, `actionId`; `orderHashHex` becomes the real order cell hash. |
-| `packages/common/src/config.ts` | No new keys needed. **Implemented:** proposer = `federation.operators[0].id` (the coordinator pins it in `proposal.proposerOperatorId`; each signer computes `isProposer = proposerOperatorId === operatorId`). `TON_MULTISIG_ADDRESS`/`TON_SIGNER_MNEMONIC` already existed. Coordinator no longer *reads* `TON_SIGNER_MNEMONIC` (keyless). |
+| `packages/coordinator/src/adapters.ts` | `GramMintBroadcaster.buildProposal` builds the real order cell + hash + embeds actionId; `broadcast` = poll-until-executed (no key). `HttpSignerClient` unchanged (receipt rides in `signature`). |
+| `packages/coordinator/src/index.ts` | **Remove `signerMnemonic` from the coordinator's `GramHttpChain`.** Coordinator becomes truly keyless on TON. |
+| `packages/common/src/types.ts` | `GramMintProposal`: add `orderAddr`, `actionId`; `orderHashHex` becomes the real order cell hash. |
+| `packages/common/src/config.ts` | No new keys needed. **Implemented:** proposer = `federation.operators[0].id` (the coordinator pins it in `proposal.proposerOperatorId`; each signer computes `isProposer = proposerOperatorId === operatorId`). `GRAM_MULTISIG_ADDRESS`/`GRAM_SIGNER_MNEMONIC` already existed. Coordinator no longer *reads* `GRAM_SIGNER_MNEMONIC` (keyless). |
 
 ## Proof plan
 
-1. **Offline sandbox proof** — `tools/ton-onchain-approval-spike.cjs` using `@ton/sandbox`
+1. **Offline sandbox proof** — `tools/gram-onchain-approval-spike.cjs` using `@ton/sandbox`
    (devDependency) + the vendored `multisig.code.boc` / `minter.code.boc` / `wallet.code.boc`.
    Deploy a real 3-of-5 multisig + minter (admin = multisig), run the flow, assert:
    - mint does NOT execute at 1 or 2 approvals (under threshold → no supply change);

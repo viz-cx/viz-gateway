@@ -12,7 +12,7 @@ import { Multisig, Order } from "@gateway/contracts-ton";
  *
  * It holds NO key and never sends a message. The peg-in mint is authorized by
  * on-chain multisig-v2 approvals sent from each operator's OWN wallet in their
- * signer process (packages/ton-watcher/src/tonApprove.ts, driven by KeyedSigner).
+ * signer process (packages/gram-watcher/src/gramApprove.ts, driven by KeyedSigner).
  * This is what makes TON a genuine M-of-N: the coordinator that constructs the
  * order proposal cannot itself move funds. See docs/plan-ton-onchain-approval.md.
  *
@@ -26,7 +26,7 @@ import { Multisig, Order } from "@gateway/contracts-ton";
  * Verified against toncenter: getMasterchainInfo().latestSeqno and
  * JettonMaster.getJettonData().totalSupply both read live; the inbound-message
  * parser is verified against real on-chain internal_transfer bodies and by a
- * constructed round-trip (tools/ton-notification-spike.cjs).
+ * constructed round-trip (tools/gram-notification-spike.cjs).
  */
 
 // TEP-74 op codes. A jetton wallet RECEIVES internal_transfer (from the sender's
@@ -79,7 +79,7 @@ export function parseJettonDeposit(
  * amount) so every operator rebuilds the byte-identical order and can verify the
  * order hash the proposer shares. This is the single source of truth for both the
  * live write path (submitMint) and the sandbox proof
- * (tools/ton-onchain-approval-spike.cjs) — they MUST NOT drift.
+ * (tools/gram-onchain-approval-spike.cjs) — they MUST NOT drift.
  */
 export function buildMintTransfer(
   minter: Address,
@@ -125,7 +125,7 @@ export function mintOrderCell(
 
 /**
  * Pure lt-pagination core for the peg-out scan (VG-06), factored out so it can be
- * exercised offline against a fake tx source (tools/ton-scan-pagination-spike.cjs).
+ * exercised offline against a fake tx source (tools/gram-scan-pagination-spike.cjs).
  * Walks pages newest→older, skipping the repeated anchor tx, until it drains back
  * to `fromLt` / history end (`drained:true`) or exhausts `maxScanPages`
  * (`drained:false`). Only FINAL txs (`now <= cutoff`) count toward `newestFinalLt`

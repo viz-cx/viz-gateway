@@ -28,7 +28,7 @@ node tools/threshold-calc.mjs
 ```
 packages/common        trust-critical core: canonical mapping, idempotency, caps, threshold
 packages/viz-watcher   follows VIZ irreversible head, detects deposits (peg-in)
-packages/ton-watcher   follows TON finality, detects wVIZ burns (peg-out)
+packages/gram-watcher   follows TON finality, detects wVIZ burns (peg-out)
 packages/signer        the only component with keys; validates + signs (one per operator)
 packages/coordinator   UNTRUSTED; collects approvals, broadcasts once threshold met
 packages/recon         enforces locked-VIZ == circulating-wVIZ; auto-pauses on drift
@@ -59,10 +59,10 @@ implemented and typechecks. Both **read paths are wired**:
 - **VIZ** (`VizJsChain`) — verified against `https://node.viz.cx`: reads the
   irreversible head (~14-block lag), detects and parses real deposits, reads
   balances.
-- **TON** (`TonHttpChain`) — verified against toncenter: reads masterchain
+- **TON** (`GramHttpChain`) — verified against toncenter: reads masterchain
   seqno and Jetton total supply live; the `transfer_notification` parser used
   for peg-out detection round-trips for both payload encodings
-  (`tools/ton-notification-spike.cjs`).
+  (`tools/gram-notification-spike.cjs`).
 
 The **reconciliation job is wired** (`recon`): it computes locked-VIZ vs
 circulating-wVIZ from both live adapters and, on drift, trips the shared pause
@@ -106,9 +106,9 @@ You can self-remove up to **N − T** operators while keeping liveness; below th
 recovery falls to the guardians. VIZ partials must be collected and broadcast within
 one hour (the chain's TaPoS window), so a rotation is a short coordinated ceremony.
 The public `federation.json` (operator ids + pubkeys) is committable; per-operator
-secrets stay in each operator's `.env`. The TON side is on-chain and asynchronous: `rotate:ton submit-ton` posts an
-`update_multisig_params` order, each current signer runs `rotate:ton approve-ton`,
-and `rotate:ton status` confirms once the multisig signer set has changed.
+secrets stay in each operator's `.env`. The TON side is on-chain and asynchronous: `rotate:gram submit-gram` posts an
+`update_multisig_params` order, each current signer runs `rotate:gram approve-gram`,
+and `rotate:gram status` confirms once the multisig signer set has changed.
 
 **Solana is prepped** (`packages/solana-watcher`, `contracts/solana`) as the
 second remote chain via the shared `RemoteChain` interface: the read adapter
@@ -135,7 +135,7 @@ npm run threshold        # prints the 5-of-7 analysis
 Each trusted operator:
 
 ```
-cp .env.example .env     # fill in YOUR secrets (VIZ_SIGNING_WIF, TON_SIGNER_MNEMONIC)
+cp .env.example .env     # fill in YOUR secrets (VIZ_SIGNING_WIF, GRAM_SIGNER_MNEMONIC)
 docker compose up --build
 ```
 

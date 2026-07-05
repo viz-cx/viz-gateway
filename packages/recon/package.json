@@ -8,7 +8,7 @@
     "@gateway/common": "0.1.0",
     "@gateway/log": "0.1.0",
     "@gateway/viz-watcher": "0.1.0",
-    "@gateway/ton-watcher": "0.1.0",
+    "@gateway/gram-watcher": "0.1.0",
     "@gateway/solana-watcher": "0.1.0"
   }
 }

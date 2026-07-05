@@ -92,7 +92,7 @@ const GRAM_EXECUTE_POLL_INTERVAL_MS = 3_000;
  * `new_order` or hold a signer key — it only builds the order proposal (real cell
  * hash + deterministic address) and pins the idempotency key. Each operator's
  * signer performs the actual on-chain propose/approve from its own wallet
- * (KeyedSigner.approveGramMint → TonApprover). `broadcast` therefore does not
+ * (KeyedSigner.approveGramMint → GramApprover). `broadcast` therefore does not
  * submit anything; it confirms the order self-executed once threshold approvals
  * landed. See docs/plan-ton-onchain-approval.md.
  */

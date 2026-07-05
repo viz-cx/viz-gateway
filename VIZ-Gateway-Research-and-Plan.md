@@ -86,7 +86,7 @@ honest-or-offline). The rest of this document deepens that model.
                          │                                            │
    VIZ full node ───────▶│  viz-watcher ─┐                            │
                          │               ├─▶ validator ─▶ signer (HSM)│
-   TON node / API ──────▶│  ton-watcher ─┘                  │  keys   │
+   TON node / API ──────▶│  gram-watcher ─┘                  │  keys   │
                          │                                   │        │
                          └───────────────────────────────────┼────────┘
                                                               │ partial sigs / approvals
@@ -284,7 +284,7 @@ viz-gateway/
 ├─ packages/
 │  ├─ common/                  # types, config, canonical encoding, idempotency, caps
 │  ├─ viz-watcher/             # viz-js-lib: poll blocks, detect gateway deposits/releases
-│  ├─ ton-watcher/             # @ton/ton: detect burns / mints, read finality
+│  ├─ gram-watcher/             # @ton/ton: detect burns / mints, read finality
 │  ├─ signer/                  # per-operator: validate event → sign VIZ partial / approve TON order
 │  ├─ coordinator/             # untrusted: collect T sigs, assemble + broadcast
 │  └─ recon/                   # supply vs locked reconciliation + auto-pause
@@ -301,7 +301,7 @@ multi-stage Dockerfiles, and `docker-compose` for a complete operator node.
 
 - **common** — shared `GatewayConfig` (chain endpoints, gateway addresses, threshold, caps), the `IdempotencyStore` interface (SQLite/Postgres), `canonicalPegIn`/`canonicalPegOut` (deterministic destination-tx builders), and cap/circuit-breaker logic. This is the trust-critical code; keep it small and audited.
 - **viz-watcher** — uses `viz-js-lib` to follow blocks (`get_ops_in_block`) and the irreversible head (`get_dynamic_global_properties.last_irreversible_block_num`); emits `Deposit` (peg-in) and `ReleaseConfirmed` events.
-- **ton-watcher** — uses `@ton/ton` (toncenter/liteclient/TON Access) to follow the Jetton minter + gateway Jetton wallet; emits `Burn` (peg-out) and `MintConfirmed`.
+- **gram-watcher** — uses `@ton/ton` (toncenter/liteclient/TON Access) to follow the Jetton minter + gateway Jetton wallet; emits `Burn` (peg-out) and `MintConfirmed`.
 - **signer** — the only component with keys. Validates an event independently against its own nodes + caps + idempotency, then produces either a VIZ partial signature (secp256k1) or a TON multisig approval (ed25519). Keys behind a `Signer` interface: file-backed for dev, HSM/KMS for prod.
 - **coordinator** — keyless. Holds the canonical tx, collects approvals, broadcasts once `T` reached. Stateless w.r.t. trust; can be self-hosted by any operator.
 - **recon** — recomputes `wVIZ totalSupply` vs `gateway VIZ balance` every N seconds; trips the global pause on drift.
@@ -346,7 +346,7 @@ separate compose file so any operator can run it.
 - **VIZ exact irreversibility count. [MEASURED].** Sampled on `https://node.viz.cx`: `head - last_irreversible_block_num` held steady at **14 blocks (~42 s)** — close to the ~15-block derivation. The wired watcher acts on `last_irreversible_block_num` minus a configurable safety margin (`VIZ_EXTRA_CONFIRMATIONS`, default 2), so it self-adjusts if the lag moves.
 - **viz-js-lib multisig signing path. [RESOLVED — see `tools/viz-multisig-spike.cjs`].** Verified: `auth.signTransaction(trx, keys)` signs a deterministic `chain_id + toBuffer(trx)` buffer and *appends* to `trx.signatures`. Signing is canonical/deterministic, and each operator's independently-produced signature is byte-identical to the one it would produce in a group signing — so operators sign in isolation and a keyless coordinator simply concatenates. The signature also binds to tx content (changing the amount changes the signature), so a malicious coordinator cannot swap the action under collected signatures. **One gotcha:** the returned `signatures` array is *unordered* (the library returned a rotated order); treat it as a set, never rely on position. The fallback (raw-transaction signing) is therefore not needed.
 - **TON multisig-v2 + jetton admin handoff. [SCRIPTS READY].** Deploy scripts exist in `contracts/ton/` (`deploy:multisig`, `deploy:minter`, `set-minter-admin`), dry-run-verified offline (metadata, init data, address calc, change_admin body, wallet derivation). Remaining: build the audited bytecode via Blueprint, deploy on testnet, and confirm the `stablecoin-contract` admin transfers to the multisig and mint/burn execute. The scripts deploy operator-supplied audited bytecode — they do not re-implement the contracts.
-- **TON finality buffer. [PARTIAL].** The wired `TonHttpChain` currently treats a burn as final using a *time* buffer derived from `TON_FINALITY_CONFIRMATIONS` (~5 s/masterchain block + margin). Refinement: gate precisely on masterchain block depth (map seqno → logical time) rather than wall-clock; measure on testnet. Live reads (seqno, jetton supply) and the `transfer_notification` parser are verified.
+- **TON finality buffer. [PARTIAL].** The wired `GramHttpChain` currently treats a burn as final using a *time* buffer derived from `GRAM_FINALITY_CONFIRMATIONS` (~5 s/masterchain block + margin). Refinement: gate precisely on masterchain block depth (map seqno → logical time) rather than wall-clock; measure on testnet. Live reads (seqno, jetton supply) and the `transfer_notification` parser are verified.
 - **Cap calibration.** Set per-tx / 24 h caps against realistic volume once you have it.
 
 ---
@@ -535,7 +535,7 @@ circulatingSupplyMilliViz(): bigint                // for the 1:1 recon invarian
 submitMint(proposal, mintAuth): txid               // authorize + mint wVIZ to the user
 ```
 
-Plus a per-network watcher (like `ton-watcher`) and a chain-specific
+Plus a per-network watcher (like `gram-watcher`) and a chain-specific
 `MintProposal`. The home side (`VizChain`) and everything else stay unchanged.
 
 **Per-network mapping:**

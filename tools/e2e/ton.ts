@@ -64,7 +64,7 @@ export async function submitBurn(
   const opened = c.open(wallet);
   const myJetton = await walletAddressOf(c, cfg.gram.jettonMinterAddress, wallet.address.toString());
 
-  // E2E_TON_GATEWAY_OWNER is the gateway's owner address; the jetton transfer
+  // E2E_GRAM_GATEWAY_OWNER is the gateway's owner address; the jetton transfer
   // destination field is the owner (not the jetton wallet address itself).
   const gatewayOwner = Address.parse(cfg.gram.gatewayOwner);
   const comment = beginCell().storeUint(0, 32).storeStringTail(vizRecipient).endCell();

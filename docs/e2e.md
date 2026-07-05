@@ -30,20 +30,20 @@ Record:
 
 ```bash
 # Deploy the multisig + jetton minter (reuse existing deploy scripts):
-TON_ENDPOINT=https://testnet.toncenter.com/api/v2/jsonRPC TON_API_KEY=<key> \
+GRAM_ENDPOINT=https://testnet.toncenter.com/api/v2/jsonRPC GRAM_API_KEY=<key> \
   npm run deploy:multisig
 
-TON_ENDPOINT=... npm run deploy:minter
-TON_ENDPOINT=... npm run set-minter-admin
+GRAM_ENDPOINT=... npm run deploy:minter
+GRAM_ENDPOINT=... npm run set-minter-admin
 
 # Fund the gateway jetton wallet and the burn wallet from @testgiver_ton_bot
 # (send test TON to both addresses on TON testnet)
 ```
 
 Record:
-- `E2E_TON_GATEWAY_JETTON_WALLET` = gateway's jetton wallet address
-- `E2E_TON_GATEWAY_OWNER` = gateway's owner address (the owner of the jetton wallet above)
-- `E2E_TON_JETTON_MINTER_ADDRESS` = wVIZ jetton minter address
+- `E2E_GRAM_GATEWAY_JETTON_WALLET` = gateway's jetton wallet address
+- `E2E_GRAM_GATEWAY_OWNER` = gateway's owner address (the owner of the jetton wallet above)
+- `E2E_GRAM_JETTON_MINTER_ADDRESS` = wVIZ jetton minter address
 
 ### Burn wallet (peg-out submitter)
 
@@ -73,8 +73,8 @@ mnemonicToPrivateKey(mnemonic).then(k => {
 Fund it with test TON from @testgiver\_ton\_bot, and provision it with a wVIZ jetton wallet by sending a tiny wVIZ transfer to it from any funded address.
 
 Record:
-- `E2E_TON_BURN_MNEMONIC` = the 24-word mnemonic (secret — CI secret only)
-- `E2E_TON_BURN_OWNER` = the derived wallet address (public, used as the wVIZ mint recipient)
+- `E2E_GRAM_BURN_MNEMONIC` = the 24-word mnemonic (secret — CI secret only)
+- `E2E_GRAM_BURN_OWNER` = the derived wallet address (public, used as the wVIZ mint recipient)
 
 ---
 
@@ -91,16 +91,16 @@ Set these as encrypted Actions secrets in the repo settings, or in a local `.env
 | `E2E_VIZ_GATEWAY_WIF` | WIF active key of the gateway account (signs peg-out releases) |
 | `E2E_VIZ_RECIPIENT` | VIZ release recipient account name |
 | `E2E_VIZ_MIN_BALANCE_MILLI_VIZ` | Minimum test account balance floor (e.g. `5000000` = 5 VIZ) |
-| `E2E_TON_ENDPOINT` | TON testnet endpoint URL |
-| `E2E_TON_API_KEY` | TON API key for the testnet endpoint |
-| `E2E_TON_GATEWAY_JETTON_WALLET` | Gateway's wVIZ jetton wallet address |
-| `E2E_TON_GATEWAY_OWNER` | Gateway's owner address (jetton transfer destination) |
-| `E2E_TON_JETTON_MINTER_ADDRESS` | wVIZ jetton minter address |
-| `E2E_TON_MULTISIG_ADDRESS` | Deployed multisig-v2 contract address (the admin of the wVIZ minter) |
-| `E2E_TON_SIGNER_MNEMONIC` | 24-word mnemonic of the TON multisig signer wallet (submits mint orders) |
-| `E2E_TON_BURN_MNEMONIC` | Burn wallet 24-word mnemonic **(most sensitive TON secret)** |
-| `E2E_TON_BURN_OWNER` | Burn wallet address (public, used as peg-in recipient on TON) |
-| `E2E_TON_MIN_GAS_NANO` | Minimum gas reserve in nanoTON (e.g. `100000000` = 0.1 TON) |
+| `E2E_GRAM_ENDPOINT` | TON testnet endpoint URL |
+| `E2E_GRAM_API_KEY` | TON API key for the testnet endpoint |
+| `E2E_GRAM_GATEWAY_JETTON_WALLET` | Gateway's wVIZ jetton wallet address |
+| `E2E_GRAM_GATEWAY_OWNER` | Gateway's owner address (jetton transfer destination) |
+| `E2E_GRAM_JETTON_MINTER_ADDRESS` | wVIZ jetton minter address |
+| `E2E_GRAM_MULTISIG_ADDRESS` | Deployed multisig-v2 contract address (the admin of the wVIZ minter) |
+| `E2E_GRAM_SIGNER_MNEMONIC` | 24-word mnemonic of the TON multisig signer wallet (submits mint orders) |
+| `E2E_GRAM_BURN_MNEMONIC` | Burn wallet 24-word mnemonic **(most sensitive TON secret)** |
+| `E2E_GRAM_BURN_OWNER` | Burn wallet address (public, used as peg-in recipient on TON) |
+| `E2E_GRAM_MIN_GAS_NANO` | Minimum gas reserve in nanoTON (e.g. `100000000` = 0.1 TON) |
 
 ---
 
@@ -128,7 +128,7 @@ On success: `[e2e] ROUND TRIP OK: released <net> mVIZ to <recipient>` and exits 
 
 On failure: inspect per-service logs in `tools/e2e/logs/<runId>/`:
 - `viz-watcher.log`
-- `ton-watcher.log`
+- `gram-watcher.log`
 - `signer.log`
 - `coordinator.log`
 - `dispatcher.log`
@@ -150,6 +150,6 @@ The `concurrency: e2e-live` group ensures two runs can't race on the same test a
 The harness fails fast on preflight if either account is underfunded:
 
 - **VIZ test account**: needs at least `E2E_VIZ_MIN_BALANCE_MILLI_VIZ` milli-VIZ. Default: 5,000,000 (5 VIZ). Top up at any VIZ exchange or from another account. A round trip consumes ~20 VIZ principal + the fee (~10 VIZ floor); the principal returns, only the fee stays in `fees.gate`.
-- **TON burn wallet**: needs test TON for gas. Default floor: `E2E_TON_MIN_GAS_NANO` = 100,000,000 nanoTON (0.1 TON). Top up from @testgiver\_ton\_bot on TON testnet. The harness does not yet check this automatically; the preflight will fail at the TON `submitBurn` step if the wallet has insufficient gas.
+- **TON burn wallet**: needs test TON for gas. Default floor: `E2E_GRAM_MIN_GAS_NANO` = 100,000,000 nanoTON (0.1 TON). Top up from @testgiver\_ton\_bot on TON testnet. The harness does not yet check this automatically; the preflight will fail at the TON `submitBurn` step if the wallet has insufficient gas.
 
 If preflight fails with `top up <account>`, the error message states the account name and current/required balance.

@@ -1,10 +1,10 @@
-// tools/e2e/ton-rotation.ts — LIVE criterion 4 for RUNBOOK §9b: multisig signer-set
+// tools/e2e/gram-rotation.ts — LIVE criterion 4 for RUNBOOK §9b: multisig signer-set
 // rotation drops an operator, and the dropped operator's on-chain `approve` is
 // rejected (err 106 unauthorized_sign) while the retained set still reaches
 // threshold.
 //
 // This is the live counterpart of the sandbox rejection proof in
-// tools/ton-onchain-approval-spike.cjs. It drives the full rotation ceremony
+// tools/gram-onchain-approval-spike.cjs. It drives the full rotation ceremony
 // directly against the deployed multisig (the same primitives as
 // contracts/ton/src/rotateTon.ts), then creates a fresh order under the rotated
 // set to prove the dropped operator can no longer authorize it.

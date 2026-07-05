@@ -7,7 +7,7 @@
 // TON needs no deposit-address registry: the VIZ recipient is the on-chain transfer comment,
 // which the operator's node returns directly in the burn.
 //
-// Run (after `npm run build`): node tools/ton-pegout-f2-spike.cjs
+// Run (after `npm run build`): node tools/gram-pegout-f2-spike.cjs
 const assert = require("node:assert");
 const { beginCell, Address } = require("@ton/ton");
 const { canonicalPegOut } = require("@gateway/common");

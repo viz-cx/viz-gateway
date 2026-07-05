@@ -397,10 +397,10 @@ verify`.
 **Fix (PR #26, main `42b1ca3`):** the burn scan now does real `lt` pagination —
 `paginateBurnsByLt` walks the `{lt, hash}` anchor persisted via the shared `getCursor`/`setCursor`
 primitive (same as VG-03) so every burn since the last processed anchor is enumerated rather than
-just the last N transactions. A burst exceeding `TON_MAX_SCAN_PAGES` (default 50) **fails closed**
+just the last N transactions. A burst exceeding `GRAM_MAX_SCAN_PAGES` (default 50) **fails closed**
 instead of silently truncating, surfacing an alert rather than dropping burns.
 
-- **Component:** `packages/ton-watcher/src/tonChain.ts` · `packages/ton-watcher/src/index.ts`
+- **Component:** `packages/gram-watcher/src/gramChain.ts` · `packages/gram-watcher/src/index.ts`
 - **Location:** `finalizedBurnsSince(_fromHeight, ...)` ignores `_fromHeight` and fetches the last `maxTransactions` (default 20) (`tonChain.ts:~192-201`); cursor advanced regardless (`index.ts:~80`)
 - **Breaks:** **T4 / liveness** (a burn maps to a VIZ release; a dropped burn strands the user's wVIZ).
 - **Relationship to accepted risk §8:** this confirms and, in our view, **under-rates** the documented "limit-windowed scan."
@@ -424,13 +424,13 @@ returned** (possible truncation). Elevate this above "partially addressed" in
 **Remediation status — FIXED** (`fix/vg-watcher-cursors`). The scan is now genuinely
 `lt`-ranged. `paginateBurnsByLt` pages the gateway wallet's transactions
 newest→older via the `{lt, hash}` anchor until it drains back to the persisted
-cursor (`store.getCursor("cursor:ton-watcher")`, the last-processed `lt`) or history
+cursor (`store.getCursor("cursor:gram-watcher")`, the last-processed `lt`) or history
 end. The cursor advances only to the newest **final** `lt` after a complete drain;
 the not-yet-final tail is re-scanned next tick, so no burn is skipped. Truncation is
-no longer silent: if a burst exceeds `TON_MAX_SCAN_PAGES` (default 50) × page size,
+no longer silent: if a burst exceeds `GRAM_MAX_SCAN_PAGES` (default 50) × page size,
 the scan returns `drained:false` and the watcher **fails closed** — it does NOT
 advance the cursor past the unscanned older burns, `notifyStaff(...)`, and
-`store.pause(...)`. Verified by `tools/ton-scan-pagination-spike.cjs` (multi-page
+`store.pause(...)`. Verified by `tools/gram-scan-pagination-spike.cjs` (multi-page
 drain collects all burns, truncation holds the cursor + fails closed, not-yet-final
 tail excluded then re-scanned, `lt` cursor persists), wired into `npm run verify`.
 (The signer-side `getBurn` page-bound noted above is a separate F2 liveness item,
@@ -461,7 +461,7 @@ program's authority is scoped to exactly the asset it is meant to govern.
 
 ### VG-08 — Low — TON single-proposer seqno idempotency: consumed seqno can strand an action
 
-- **Component:** `packages/coordinator/src/adapters.ts` · `packages/ton-watcher/src/tonApprove.ts`
+- **Component:** `packages/coordinator/src/adapters.ts` · `packages/gram-watcher/src/gramApprove.ts`
 - **Location:** order address persisted from `nextOrderSeqno` before send (`adapters.ts:~130-134`); proposer drift guard aborts on seqno advance (`tonApprove.ts:~133-139`)
 - **Breaks:** **T4** liveness (confirms accepted risk §8 "single-proposer assumption").
 

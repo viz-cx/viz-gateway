@@ -6,7 +6,7 @@
 
 ## Problem
 
-`TonMintBroadcaster.actionExecuted` ([`coordinator/src/adapters.ts:108`](../packages/coordinator/src/adapters.ts)) is a stub that unconditionally returns `{ executed: false }`. This disables the idempotency short-circuit in `Orchestrator.process` ([`coordinator/src/orchestrator.ts:63`](../packages/coordinator/src/orchestrator.ts)) for TON only.
+`GramMintBroadcaster.actionExecuted` ([`coordinator/src/adapters.ts:108`](../packages/coordinator/src/adapters.ts)) is a stub that unconditionally returns `{ executed: false }`. This disables the idempotency short-circuit in `Orchestrator.process` ([`coordinator/src/orchestrator.ts:63`](../packages/coordinator/src/orchestrator.ts)) for TON only.
 
 The dispatcher deliberately creates an at-least-once delivery boundary: it marks a row `BROADCAST` *before* calling the coordinator, and its orphan-recovery requeues any stale `BROADCAST` row back to `QUEUED` ([`dispatcher/src/index.ts:83-96`, `104-114`](../packages/dispatcher/src/index.ts)). The comment there explicitly relies on `actionExecuted` to prevent a double-mint. For TON that backstop is absent.
 
@@ -15,7 +15,7 @@ The dispatcher deliberately creates an at-least-once delivery boundary: it marks
 2. Coordinator orchestrates → `submitMint()` sends a `new_order` to the TON multisig (returns the order address; on 1-of-1 with `approve_on_init=true` it self-approves and executes async).
 3. **Crash** before the dispatcher records the coordinator's response (row stuck `BROADCAST`).
 4. Orphan recovery requeues → re-POST `/submit`.
-5. Coordinator calls `TonMintBroadcaster.actionExecuted` → **always `false`** → full re-orchestration → **second `new_order` → second mint** of wVIZ.
+5. Coordinator calls `GramMintBroadcaster.actionExecuted` → **always `false`** → full re-orchestration → **second `new_order` → second mint** of wVIZ.
 
 The `orderSeqno: "0"` stub in `buildProposal` ([`adapters.ts:95`](../packages/coordinator/src/adapters.ts)) was placed when the multisig-v2 contract was undeployed. It is now deployed on testnet (see memory `ton-testnet-deployed-2026-07-01`), so the real order-status query is now implementable.
 
@@ -25,7 +25,7 @@ Mirror the **persist-before-send + on-chain lookup** pattern that `VizReleaseBro
 
 ### 1. New TON chain read — order existence/execution
 
-Add to `TonHttpChain` ([`ton-watcher/src/tonChain.ts`](../packages/ton-watcher/src/tonChain.ts)):
+Add to `GramHttpChain` ([`gram-watcher/src/gramChain.ts`](../packages/gram-watcher/src/gramChain.ts)):
 
 ```ts
 /** True if a multisig order at `orderAddr` is deployed on-chain (i.e. new_order landed). */
@@ -45,9 +45,9 @@ async nextOrderAddress(): Promise<{ orderAddr: string; seqno: string }>
 
 `submitMint` continues to send `sendNewOrder`; the broadcaster persists the address first.
 
-### 3. `TonMintBroadcaster` — add store + persist-before-send
+### 3. `GramMintBroadcaster` — add store + persist-before-send
 
-- Add `store: IdempotencyStore` to the constructor (mirror `SolanaMintBroadcaster`) and wire it in the coordinator entrypoint (`coordinator/src/index.ts` — find the `new TonMintBroadcaster(...)` site and pass the shared store).
+- Add `store: IdempotencyStore` to the constructor (mirror `SolanaMintBroadcaster`) and wire it in the coordinator entrypoint (`coordinator/src/index.ts` — find the `new GramMintBroadcaster(...)` site and pass the shared store).
 - Replace the `orderSeqno: "0"` stub in `buildProposal` with the real seqno from `nextOrderAddress()` (or defer seqno resolution to `broadcast`).
 - `broadcast`: call `nextOrderAddress()`, `store.setStatus(action.id, "BROADCAST", { txid: orderAddr })` **before** `submitMint`, then send. This makes recovery point at the intended order address even if the send crashes.
 - `actionExecuted`:
@@ -85,13 +85,13 @@ Embedding `action.id`/digest into the TON order payload (analog of the Solana me
    - relaunches the stack with a shortened `DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS` so orphan recovery fires in seconds; waits for the row to reach `CONFIRMED`;
    - **primary oracle:** `nextOrderSeqno` is unchanged across recovery → no second `new_order` (a double-mint would advance it). **Confirmation:** recipient wVIZ delta `== net` exactly once, not `2×net`.
 
-   Driver: [`tools/e2e/crash-recovery.ts`](../tools/e2e/crash-recovery.ts); on-chain reads reuse the production `Multisig` wrapper + the same `state === "active"` predicate as `TonHttpChain.orderExists`. It does not burn the minted wVIZ back — a normal `npm run e2e:ton` round trip can sweep it afterwards.
+   Driver: [`tools/e2e/crash-recovery.ts`](../tools/e2e/crash-recovery.ts); on-chain reads reuse the production `Multisig` wrapper + the same `state === "active"` predicate as `GramHttpChain.orderExists`. It does not burn the minted wVIZ back — a normal `npm run e2e:ton` round trip can sweep it afterwards.
 
 ## Files
 
-- `packages/coordinator/src/adapters.ts` — `TonMintBroadcaster` (store, `buildProposal`, `broadcast`, `actionExecuted`)
-- `packages/coordinator/src/index.ts` — wire the store into `new TonMintBroadcaster(...)`
-- `packages/ton-watcher/src/tonChain.ts` — `orderExists`, `nextOrderAddress`
+- `packages/coordinator/src/adapters.ts` — `GramMintBroadcaster` (store, `buildProposal`, `broadcast`, `actionExecuted`)
+- `packages/coordinator/src/index.ts` — wire the store into `new GramMintBroadcaster(...)`
+- `packages/gram-watcher/src/gramChain.ts` — `orderExists`, `nextOrderAddress`
 - `tools/idempotent-delivery-spike.cjs` (or new spike) — regression case; register in `npm run verify`
 - `tools/e2e/crash-recovery.ts` — live crash-window proof driver; `tools/e2e/ton.ts` — `nextOrderInfo`/`nextOrderSeqno`/`orderExists` helpers; `package.json` — `e2e:ton:crash` script; `tools/e2e/tsconfig.json` — `contracts/ton` reference
 - `docs/improvements.md` — mark this follow-up as done once merged
