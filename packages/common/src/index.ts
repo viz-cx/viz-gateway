@@ -9,3 +9,4 @@ export * from "./threshold";
 export * from "./config";
 export * from "./adapters";
 export * from "./rotation";
+export * from "./gatewayAccounts";
