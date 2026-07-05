@@ -19,3 +19,4 @@ logs/
 contracts/ton/boc/*.data.boc
 docs/federation-keys.md
 docs/federation-ton-keys.md
+.worktrees/
