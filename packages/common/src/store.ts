@@ -9,6 +9,7 @@ import type {
   OutboxRemoteChain,
   StatusPatch,
 } from "./idempotency";
+import type { RemoteChainId } from "./types";
 
 /**
  * Persistent, cross-process gateway state:
@@ -47,7 +48,7 @@ export interface GatewayStore {
    * = sum(PEG_IN fee, minted) − sum(FEE_SWEEP amount, confirmed). recon adds this
    * to circulating to keep `locked == circulating + unswept` exact between sweeps.
    */
-  unsweptFeesMilliViz(): Promise<bigint>;
+  unsweptFeesMilliViz(chain?: RemoteChainId): Promise<bigint>;
 
   // --- rolling 24h cap window (shared) ---
   recordCap(amountMilliViz: bigint, now: number): Promise<void>;
@@ -309,17 +310,19 @@ export class SqliteGatewayStore implements GatewayStore {
     return rows.map(rowToRecord);
   }
 
-  async unsweptFeesMilliViz(): Promise<bigint> {
+  async unsweptFeesMilliViz(chain?: RemoteChainId): Promise<bigint> {
     // Sum in JS with BigInt, NOT SQLite SUM(CAST(... AS INTEGER)): a running total
     // past 2^63 makes SQLite fall back to a REAL, and BigInt("…e+18") throws. Milli-VIZ
     // amounts are unbounded 2^64-plus, so the SUM must live outside SQLite's int64.
     const ph = MINTED_STATUSES.map(() => "?").join(",");
+    const chainFilter = chain ? " AND remote_chain = ?" : "";
+    const chainArgs: string[] = chain ? [chain] : [];
     const minted = this.db
-      .prepare(`SELECT fee_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})`)
-      .all(...MINTED_STATUSES) as Row[];
+      .prepare(`SELECT fee_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})${chainFilter}`)
+      .all(...MINTED_STATUSES, ...chainArgs) as Row[];
     const swept = this.db
-      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'`)
-      .all() as Row[];
+      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'${chainFilter}`)
+      .all(...chainArgs) as Row[];
     const v = sumBigIntColumn(minted) - sumBigIntColumn(swept);
     return v > 0n ? v : 0n;
   }
@@ -452,12 +455,12 @@ export class InMemoryGatewayStore implements GatewayStore {
     const set = new Set(statuses);
     return [...this.rows.values()].filter((r) => set.has(r.status) && r.updatedAt < now - ageMs).map((r) => ({ ...r }));
   }
-  async unsweptFeesMilliViz(): Promise<bigint> {
+  async unsweptFeesMilliViz(chain?: RemoteChainId): Promise<bigint> {
     let minted = 0n;
     let swept = 0n;
     for (const r of this.rows.values()) {
-      if (r.direction === "PEG_IN" && (r.status === "BROADCAST" || r.status === "CONFIRMED")) minted += r.feeMilliViz;
-      if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED") swept += r.amountMilliViz;
+      if (r.direction === "PEG_IN" && (r.status === "BROADCAST" || r.status === "CONFIRMED") && (!chain || r.remoteChain === chain)) minted += r.feeMilliViz;
+      if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
     }
     const v = minted - swept;
     return v > 0n ? v : 0n;
