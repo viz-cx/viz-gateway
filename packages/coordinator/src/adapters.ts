@@ -82,8 +82,8 @@ export class VizReleaseBroadcaster implements Broadcaster {
 }
 
 /** Max time the keyless coordinator waits for the on-chain order to self-execute. */
-const TON_EXECUTE_POLL_MAX_MS = 90_000;
-const TON_EXECUTE_POLL_INTERVAL_MS = 3_000;
+const GRAM_EXECUTE_POLL_MAX_MS = 90_000;
+const GRAM_EXECUTE_POLL_INTERVAL_MS = 3_000;
 
 /**
  * PEG_IN (TON): DESCRIBE the mint order for the operators to approve on-chain.
@@ -154,15 +154,15 @@ export class TonMintBroadcaster implements Broadcaster {
     // so confirm the order executed and return its address as the txid. `_signatures`
     // are the operators' on-chain approval receipts, carried only for the audit trail.
     const orderAddr = (proposal as TonMintProposal).orderAddr;
-    const deadline = Date.now() + TON_EXECUTE_POLL_MAX_MS;
+    const deadline = Date.now() + GRAM_EXECUTE_POLL_MAX_MS;
     for (;;) {
       if (await this.chain.orderExecuted(orderAddr)) return orderAddr;
       if (Date.now() >= deadline) {
         throw new Error(
-          `TON order ${orderAddr} for ${action.id} not executed within ${TON_EXECUTE_POLL_MAX_MS}ms (approvals below threshold?)`,
+          `GRAM order ${orderAddr} for ${action.id} not executed within ${GRAM_EXECUTE_POLL_MAX_MS}ms (approvals below threshold?)`,
         );
       }
-      await new Promise((r) => setTimeout(r, TON_EXECUTE_POLL_INTERVAL_MS));
+      await new Promise((r) => setTimeout(r, GRAM_EXECUTE_POLL_INTERVAL_MS));
     }
   }
 

@@ -232,7 +232,7 @@ async function runKeyIsolationCheck(signerSpecs: Array<{ operatorId: string; wif
 
 async function main() {
   const fedCfg = loadFederationConfig(process.env);
-  const baseCfg = loadE2eConfig(process.env, "ton");
+  const baseCfg = loadE2eConfig(process.env, "gram");
   const baseEnv = buildRunEnv(baseCfg);
   const { signerSpecs, coordinatorEnv } = buildFederationRunEnv(fedCfg, {
     ...baseEnv,

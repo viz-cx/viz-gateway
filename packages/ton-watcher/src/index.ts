@@ -12,20 +12,20 @@ const CURSOR = "cursor:ton-watcher";
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  if (!cfg.ton.jettonMinterAddress) {
+  if (!cfg.gram.jettonMinterAddress) {
     throw new Error(
-      "TON_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
+      "GRAM_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
     );
   }
   const chain = new TonHttpChain(
-    cfg.ton.endpoint,
-    cfg.ton.apiKey,
-    cfg.ton.jettonMinterAddress,
-    cfg.ton.gatewayJettonWallet,
-    cfg.ton.multisigAddress,
-    cfg.ton.finalityConfirmations,
-    cfg.ton.scanMaxTransactions,
-    cfg.ton.maxScanPages,
+    cfg.gram.endpoint,
+    cfg.gram.apiKey,
+    cfg.gram.jettonMinterAddress,
+    cfg.gram.gatewayJettonWallet,
+    cfg.gram.multisigAddress,
+    cfg.gram.finalityConfirmations,
+    cfg.gram.scanMaxTransactions,
+    cfg.gram.maxScanPages,
   );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", stop);
 
   console.log(
-    `[ton-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} minter=${cfg.ton.jettonMinterAddress || "unset"}`,
+    `[ton-watcher] operator=${cfg.operatorId} federation=${cfg.federation.threshold}-of-${cfg.federation.n} minter=${cfg.gram.jettonMinterAddress || "unset"}`,
   );
 
   while (running) {
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
           // A burst larger than maxScanPages*scanMaxTransactions: older burns lie
           // beyond what we could scan. Fail closed — do NOT advance past them; pause
           // + alert so an operator raises the scan window rather than silently drop.
-          const reason = `TON peg-out scan truncated at lt ${cursor}: burst exceeds scan window (maxScanPages=${cfg.ton.maxScanPages})`;
+          const reason = `TON peg-out scan truncated at lt ${cursor}: burst exceeds scan window (maxScanPages=${cfg.gram.maxScanPages})`;
           console.error(`[ton-watcher] ${reason}`);
           notifyStaff("withdraws", reason, { cursorLt: cursor, newestFinalLt });
           await store.pause(reason); // shared, cross-process

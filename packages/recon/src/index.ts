@@ -25,14 +25,14 @@ async function main(): Promise<void> {
   // Sum circulating wVIZ across EVERY configured remote chain — a single-remote
   // recon would mask an over-mint on the other chain (§6.2).
   const remotes: Array<{ name: string; supply: () => Promise<bigint> }> = [];
-  if (cfg.ton.jettonMinterAddress) {
+  if (cfg.gram.jettonMinterAddress) {
     const ton = new TonHttpChain(
-      cfg.ton.endpoint,
-      cfg.ton.apiKey,
-      cfg.ton.jettonMinterAddress,
-      cfg.ton.gatewayJettonWallet,
-      cfg.ton.multisigAddress,
-      cfg.ton.finalityConfirmations,
+      cfg.gram.endpoint,
+      cfg.gram.apiKey,
+      cfg.gram.jettonMinterAddress,
+      cfg.gram.gatewayJettonWallet,
+      cfg.gram.multisigAddress,
+      cfg.gram.finalityConfirmations,
     );
     remotes.push({ name: "TON", supply: () => ton.circulatingSupplyMilliViz() });
   }

@@ -43,19 +43,19 @@ async function main(): Promise<void> {
   // operators approve it on-chain from their own wallets. The designated proposer (the
   // one operator that sends `new_order`) is the first federation operator — the signer
   // list must be ordered so this operator is contacted first (harness + deploy invariant).
-  if (cfg.ton.jettonMinterAddress && !tonProposerId) {
+  if (cfg.gram.jettonMinterAddress && !tonProposerId) {
     throw new Error("TON minter configured but no federation operators to designate as proposer");
   }
   const tonBroadcaster =
-    cfg.ton.jettonMinterAddress && tonProposerId
+    cfg.gram.jettonMinterAddress && tonProposerId
       ? new TonMintBroadcaster(
           new TonHttpChain(
-            cfg.ton.endpoint,
-            cfg.ton.apiKey,
-            cfg.ton.jettonMinterAddress,
-            cfg.ton.gatewayJettonWallet,
-            cfg.ton.multisigAddress,
-            cfg.ton.finalityConfirmations,
+            cfg.gram.endpoint,
+            cfg.gram.apiKey,
+            cfg.gram.jettonMinterAddress,
+            cfg.gram.gatewayJettonWallet,
+            cfg.gram.multisigAddress,
+            cfg.gram.finalityConfirmations,
           ),
           cfg.fees,
           store,

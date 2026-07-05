@@ -1,5 +1,5 @@
 export interface E2eConfig {
-  chain: "ton" | "solana";
+  chain: "gram" | "solana";
   runId: string;
   freshStore: boolean;
   viz: {
@@ -11,7 +11,7 @@ export interface E2eConfig {
     recipient: string;
     minBalanceMilliViz: bigint;
   };
-  ton: {
+  gram: {
     endpoint: string;
     apiKey: string;
     gatewayJettonWallet: string;
@@ -37,7 +37,7 @@ function makeRunId(): string {
   return `e2e-${ts}-${rand}`;
 }
 
-export function loadE2eConfig(env: NodeJS.ProcessEnv, chain: "ton" | "solana"): E2eConfig {
+export function loadE2eConfig(env: NodeJS.ProcessEnv, chain: "gram" | "solana"): E2eConfig {
   const viz = {
     nodeUrl: req(env, "E2E_VIZ_NODE_URL"),
     testWif: req(env, "E2E_VIZ_TEST_WIF"),
@@ -47,19 +47,19 @@ export function loadE2eConfig(env: NodeJS.ProcessEnv, chain: "ton" | "solana"): 
     recipient: req(env, "E2E_VIZ_RECIPIENT"),
     minBalanceMilliViz: BigInt(req(env, "E2E_VIZ_MIN_BALANCE_MILLI_VIZ")),
   };
-  const ton = {
-    endpoint: req(env, "E2E_TON_ENDPOINT"),
-    apiKey: req(env, "E2E_TON_API_KEY"),
-    gatewayJettonWallet: req(env, "E2E_TON_GATEWAY_JETTON_WALLET"),
-    gatewayOwner: req(env, "E2E_TON_GATEWAY_OWNER"),
-    jettonMinterAddress: req(env, "E2E_TON_JETTON_MINTER_ADDRESS"),
-    multisigAddress: req(env, "E2E_TON_MULTISIG_ADDRESS"),
-    signerMnemonic: req(env, "E2E_TON_SIGNER_MNEMONIC"),
-    burnMnemonic: req(env, "E2E_TON_BURN_MNEMONIC"),
-    burnOwner: req(env, "E2E_TON_BURN_OWNER"),
-    minGasNano: BigInt(req(env, "E2E_TON_MIN_GAS_NANO")),
+  const gram = {
+    endpoint: req(env, "E2E_GRAM_ENDPOINT"),
+    apiKey: req(env, "E2E_GRAM_API_KEY"),
+    gatewayJettonWallet: req(env, "E2E_GRAM_GATEWAY_JETTON_WALLET"),
+    gatewayOwner: req(env, "E2E_GRAM_GATEWAY_OWNER"),
+    jettonMinterAddress: req(env, "E2E_GRAM_JETTON_MINTER_ADDRESS"),
+    multisigAddress: req(env, "E2E_GRAM_MULTISIG_ADDRESS"),
+    signerMnemonic: req(env, "E2E_GRAM_SIGNER_MNEMONIC"),
+    burnMnemonic: req(env, "E2E_GRAM_BURN_MNEMONIC"),
+    burnOwner: req(env, "E2E_GRAM_BURN_OWNER"),
+    minGasNano: BigInt(req(env, "E2E_GRAM_MIN_GAS_NANO")),
   };
-  return { chain, runId: makeRunId(), freshStore: env.E2E_FRESH_STORE === "1", viz, ton };
+  return { chain, runId: makeRunId(), freshStore: env.E2E_FRESH_STORE === "1", viz, gram };
 }
 
 export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
@@ -69,13 +69,13 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     VIZ_GATEWAY_ACCOUNT: cfg.viz.gatewayAccount,
     VIZ_SIGNING_WIF: cfg.viz.gatewayWif,
     VIZ_EXTRA_CONFIRMATIONS: "2",
-    // TON
-    TON_ENDPOINT: cfg.ton.endpoint,
-    TON_API_KEY: cfg.ton.apiKey,
-    TON_JETTON_MINTER_ADDRESS: cfg.ton.jettonMinterAddress,
-    TON_GATEWAY_JETTON_WALLET: cfg.ton.gatewayJettonWallet,
-    TON_MULTISIG_ADDRESS: cfg.ton.multisigAddress,
-    TON_SIGNER_MNEMONIC: cfg.ton.signerMnemonic,
+    // GRAM (TON network)
+    GRAM_ENDPOINT: cfg.gram.endpoint,
+    GRAM_API_KEY: cfg.gram.apiKey,
+    GRAM_JETTON_MINTER_ADDRESS: cfg.gram.jettonMinterAddress,
+    GRAM_GATEWAY_JETTON_WALLET: cfg.gram.gatewayJettonWallet,
+    GRAM_MULTISIG_ADDRESS: cfg.gram.multisigAddress,
+    GRAM_SIGNER_MNEMONIC: cfg.gram.signerMnemonic,
     // Federation: solo 1-of-1
     FEDERATION_N: "1",
     FEDERATION_THRESHOLD: "1",

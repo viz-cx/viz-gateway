@@ -38,7 +38,7 @@ const MINT_SETTLE_TIMEOUT_MS = 3 * 60_000; // async mint execution credits the b
 const POLL_MS = 4_000;
 
 async function main() {
-  const cfg = loadE2eConfig(process.env, "ton");
+  const cfg = loadE2eConfig(process.env, "gram");
   // Recover fast: shrink the peg-in signing timeout so an orphaned BROADCAST row is
   // requeued seconds (not 5 min) after the crash, and tighten the tick interval.
   const baseEnv = buildRunEnv(cfg);
@@ -53,7 +53,7 @@ async function main() {
   const fees = loadConfig().fees;
   const store = createStore(baseEnv.STORE_URL!);
 
-  const tonOwner = cfg.ton.burnOwner; // wVIZ mint recipient
+  const tonOwner = cfg.gram.burnOwner; // wVIZ mint recipient
   const gross = uniqueGrossMilliViz(20_000n, cfg.runId);
   const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
 

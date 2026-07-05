@@ -74,8 +74,8 @@ export class TonApprover implements TonApprovalClient {
     opts: TonApproverOpts = {},
   ) {
     if (!minterAddress) throw new Error("TonApprover: minter address is required");
-    if (!multisigAddress) throw new Error("TonApprover: TON_MULTISIG_ADDRESS is required");
-    if (!mnemonic) throw new Error("TonApprover: TON_SIGNER_MNEMONIC is required to approve on-chain");
+    if (!multisigAddress) throw new Error("TonApprover: GRAM_MULTISIG_ADDRESS is required");
+    if (!mnemonic) throw new Error("TonApprover: GRAM_SIGNER_MNEMONIC is required to approve on-chain");
     this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
     this.minter = Address.parse(minterAddress);
     this.multisigAddr = Address.parse(multisigAddress);

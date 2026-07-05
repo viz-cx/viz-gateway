@@ -36,7 +36,7 @@ export interface GatewayConfig {
     signingWif: string;
     extraConfirmations: number;
   };
-  ton: {
+  gram: {
     endpoint: string;
     apiKey: string;
     multisigAddress: string;
@@ -221,29 +221,29 @@ export function loadConfig(): GatewayConfig {
       signingWif: opt("VIZ_SIGNING_WIF", ""),
       extraConfirmations: int("VIZ_EXTRA_CONFIRMATIONS", 2),
     },
-    ton: {
-      endpoint: opt("TON_ENDPOINT", "https://toncenter.com/api/v2/jsonRPC"),
-      apiKey: opt("TON_API_KEY", ""),
-      multisigAddress: opt("TON_MULTISIG_ADDRESS", ""),
-      jettonMinterAddress: opt("TON_JETTON_MINTER_ADDRESS", ""),
-      gatewayJettonWallet: opt("TON_GATEWAY_JETTON_WALLET", ""),
-      signerMnemonic: opt("TON_SIGNER_MNEMONIC", ""),
-      finalityConfirmations: int("TON_FINALITY_CONFIRMATIONS", 1),
-      scanMaxTransactions: int("TON_MAX_TRANSACTIONS", 20),
+    gram: {
+      endpoint: opt("GRAM_ENDPOINT", "https://toncenter.com/api/v2/jsonRPC"),
+      apiKey: opt("GRAM_API_KEY", ""),
+      multisigAddress: opt("GRAM_MULTISIG_ADDRESS", ""),
+      jettonMinterAddress: opt("GRAM_JETTON_MINTER_ADDRESS", ""),
+      gatewayJettonWallet: opt("GRAM_GATEWAY_JETTON_WALLET", ""),
+      signerMnemonic: opt("GRAM_SIGNER_MNEMONIC", ""),
+      finalityConfirmations: int("GRAM_FINALITY_CONFIRMATIONS", 1),
+      scanMaxTransactions: int("GRAM_MAX_TRANSACTIONS", 20),
       // Page ceiling for the lt-paginated peg-out scan. If a burst needs more than
       // maxScanPages * scanMaxTransactions txs to drain back to the cursor, the scan
       // fails closed (pause + alert) rather than silently skipping older burns (VG-06).
-      maxScanPages: int("TON_MAX_SCAN_PAGES", 50),
+      maxScanPages: int("GRAM_MAX_SCAN_PAGES", 50),
       // The proposer sends new_order then waits for the Order contract to deploy; an
       // approver waits for its vote to reflect. Testnet inclusion + toncenter view lag
       // can exceed the 60s default, so this is tunable for live runs.
-      approveMaxWaitMs: int("TON_APPROVE_MAX_WAIT_MS", 60000),
-      approvePollIntervalMs: int("TON_APPROVE_POLL_INTERVAL_MS", 3000),
+      approveMaxWaitMs: int("GRAM_APPROVE_MAX_WAIT_MS", 60000),
+      approvePollIntervalMs: int("GRAM_APPROVE_POLL_INTERVAL_MS", 3000),
       // TON (nano) the proposer attaches to a new_order. Funds the Order contract:
       // deploy gas + the mint action's own value (~0.1) + margin; surplus flows to the
       // multisig on execution, not back to the proposer. 1 TON default is conservative;
       // lower it to reduce proposer drain when funding is tight (each order costs ~this).
-      orderValueNano: int("TON_ORDER_VALUE_NANO", 1_000_000_000),
+      orderValueNano: int("GRAM_ORDER_VALUE_NANO", 1_000_000_000),
     },
     solana: {
       rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
@@ -314,11 +314,11 @@ export function loadConfig(): GatewayConfig {
       bps: federation.fees?.bps ?? int("FEE_BPS", 20),
       activationSurchargeMilliViz: {
         SOLANA: federation.fees?.activationSurchargeMilliViz.SOLANA ?? big("FEE_ACTIVATION_SOLANA_MILLI_VIZ", "10000"),
-        GRAM: federation.fees?.activationSurchargeMilliViz.GRAM ?? big("FEE_ACTIVATION_TON_MILLI_VIZ", "10000"),
+        GRAM: federation.fees?.activationSurchargeMilliViz.GRAM ?? big("FEE_ACTIVATION_GRAM_MILLI_VIZ", "10000"),
       },
       mintGasFloorMilliViz: {
         SOLANA: federation.fees?.mintGasFloorMilliViz.SOLANA ?? big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"),
-        GRAM: federation.fees?.mintGasFloorMilliViz.GRAM ?? big("MINT_GAS_FLOOR_TON_MILLI_VIZ", "1000"),
+        GRAM: federation.fees?.mintGasFloorMilliViz.GRAM ?? big("MINT_GAS_FLOOR_GRAM_MILLI_VIZ", "1000"),
       },
     },
     storeUrl: opt("STORE_URL", "sqlite:./data/gateway.sqlite"),

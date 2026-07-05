@@ -57,20 +57,20 @@ async function main(): Promise<void> {
   // OWN TON node — no mnemonic/multisig needed, so pass "" for the write-path fields. If the
   // gateway jetton wallet is not configured, a TON peg-out can never be validated, so fail
   // closed if one ever arrives (mirrors the Solana stub above).
-  const tonReader: BurnReader = cfg.ton.gatewayJettonWallet
+  const tonReader: BurnReader = cfg.gram.gatewayJettonWallet
     ? new TonHttpChain(
-        cfg.ton.endpoint,
-        cfg.ton.apiKey,
-        cfg.ton.jettonMinterAddress,
-        cfg.ton.gatewayJettonWallet,
+        cfg.gram.endpoint,
+        cfg.gram.apiKey,
+        cfg.gram.jettonMinterAddress,
+        cfg.gram.gatewayJettonWallet,
         "", // multisigAddress (read-only reader; order reads not needed here)
-        cfg.ton.finalityConfirmations,
-        cfg.ton.scanMaxTransactions,
+        cfg.gram.finalityConfirmations,
+        cfg.gram.scanMaxTransactions,
       )
     : {
         async getBurn() {
           throw new Error(
-            "TON not configured on this signer (TON_GATEWAY_JETTON_WALLET unset); refusing TON peg-out",
+            "GRAM not configured on this signer (GRAM_GATEWAY_JETTON_WALLET unset); refusing GRAM peg-out",
           );
         },
       };
@@ -102,17 +102,17 @@ async function main(): Promise<void> {
   // OWN wallet + node. Wired only when TON is fully configured on this operator; a TON
   // PEG_IN without it is refused (KeyedSigner throws) rather than silently unauthorized.
   const tonApprover =
-    cfg.ton.jettonMinterAddress && cfg.ton.multisigAddress && cfg.ton.signerMnemonic
+    cfg.gram.jettonMinterAddress && cfg.gram.multisigAddress && cfg.gram.signerMnemonic
       ? new TonApprover(
-          cfg.ton.endpoint,
-          cfg.ton.apiKey,
-          cfg.ton.jettonMinterAddress,
-          cfg.ton.multisigAddress,
-          cfg.ton.signerMnemonic,
+          cfg.gram.endpoint,
+          cfg.gram.apiKey,
+          cfg.gram.jettonMinterAddress,
+          cfg.gram.multisigAddress,
+          cfg.gram.signerMnemonic,
           {
-            maxWaitMs: cfg.ton.approveMaxWaitMs,
-            pollIntervalMs: cfg.ton.approvePollIntervalMs,
-            orderValueNano: BigInt(cfg.ton.orderValueNano),
+            maxWaitMs: cfg.gram.approveMaxWaitMs,
+            pollIntervalMs: cfg.gram.approvePollIntervalMs,
+            orderValueNano: BigInt(cfg.gram.orderValueNano),
           },
         )
       : null;
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   const signer = new KeyedSigner(
     cfg.operatorId,
     cfg.viz.signingWif,
-    cfg.ton.signerMnemonic,
+    cfg.gram.signerMnemonic,
     cfg.fees,
     cfg.solana.signerSecret,
     (action) => validateAction(action, validatorDeps),

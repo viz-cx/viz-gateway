@@ -346,7 +346,7 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
    * order already landed, so we never propose a second (double-mint) order.
    */
   async nextOrderAddress(): Promise<{ orderAddr: string; seqno: string }> {
-    if (!this.multisigAddress) throw new Error("TON_MULTISIG_ADDRESS is required for nextOrderAddress");
+    if (!this.multisigAddress) throw new Error("GRAM_MULTISIG_ADDRESS is required for nextOrderAddress");
     const dataMultisig = this.client.open(Multisig.createFromAddress(Address.parse(this.multisigAddress)));
     const data = await dataMultisig.getMultisigData();
     const orderAddr = await dataMultisig.getOrderAddress(data.nextOrderSeqno);

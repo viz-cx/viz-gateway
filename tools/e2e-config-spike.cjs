@@ -4,7 +4,7 @@ const { loadE2eConfig, buildRunEnv } = require("../tools/e2e/dist/config.js");
 
 // 1) missing required var throws naming the var
 assert.throws(
-  () => loadE2eConfig({}, "ton"),
+  () => loadE2eConfig({}, "gram"),
   /missing required E2E var: E2E_VIZ_NODE_URL/,
 );
 
@@ -17,19 +17,19 @@ const env = {
   E2E_VIZ_GATEWAY_WIF: "5JgatewayWIF",
   E2E_VIZ_RECIPIENT: "e2e.recv",
   E2E_VIZ_MIN_BALANCE_MILLI_VIZ: "5000000",
-  E2E_TON_ENDPOINT: "https://testnet.toncenter.com/api/v2/jsonRPC",
-  E2E_TON_API_KEY: "k",
-  E2E_TON_GATEWAY_JETTON_WALLET: "EQgw",
-  E2E_TON_GATEWAY_OWNER: "EQowner",
-  E2E_TON_JETTON_MINTER_ADDRESS: "EQmint",
-  E2E_TON_MULTISIG_ADDRESS: "EQmultisig",
-  E2E_TON_SIGNER_MNEMONIC: "word1 word2 word3",
-  E2E_TON_BURN_MNEMONIC: "word1 word2",
-  E2E_TON_BURN_OWNER: "EQburn",
-  E2E_TON_MIN_GAS_NANO: "100000000",
+  E2E_GRAM_ENDPOINT: "https://testnet.toncenter.com/api/v2/jsonRPC",
+  E2E_GRAM_API_KEY: "k",
+  E2E_GRAM_GATEWAY_JETTON_WALLET: "EQgw",
+  E2E_GRAM_GATEWAY_OWNER: "EQowner",
+  E2E_GRAM_JETTON_MINTER_ADDRESS: "EQmint",
+  E2E_GRAM_MULTISIG_ADDRESS: "EQmultisig",
+  E2E_GRAM_SIGNER_MNEMONIC: "word1 word2 word3",
+  E2E_GRAM_BURN_MNEMONIC: "word1 word2",
+  E2E_GRAM_BURN_OWNER: "EQburn",
+  E2E_GRAM_MIN_GAS_NANO: "100000000",
 };
-const cfg = loadE2eConfig(env, "ton");
-assert.equal(cfg.chain, "ton");
+const cfg = loadE2eConfig(env, "gram");
+assert.equal(cfg.chain, "gram");
 assert.equal(cfg.viz.testAccount, "e2e.test");
 assert.equal(cfg.viz.minBalanceMilliViz, 5000000n);
 assert.ok(/^e2e-\d+-[a-z0-9]+$/.test(cfg.runId), "runId shape");
@@ -37,16 +37,16 @@ assert.ok(/^e2e-\d+-[a-z0-9]+$/.test(cfg.runId), "runId shape");
 // 3) buildRunEnv maps to service-facing names + persistent store by default
 const runEnv = buildRunEnv(cfg);
 assert.equal(runEnv.VIZ_NODE_URL, "https://node.viz.cx");
-assert.equal(runEnv.TON_ENDPOINT, env.E2E_TON_ENDPOINT);
+assert.equal(runEnv.GRAM_ENDPOINT, env.E2E_GRAM_ENDPOINT);
 assert.equal(runEnv.FEDERATION_N, "1");
 assert.equal(runEnv.FEDERATION_THRESHOLD, "1");
 assert.equal(cfg.freshStore, false, "persistent store is the default");
 assert.equal(runEnv.STORE_URL, "sqlite:./data/e2e.sqlite", "stable store path so idempotency survives runs");
-assert.equal(runEnv.TON_MULTISIG_ADDRESS, "EQmultisig");
-assert.equal(runEnv.TON_SIGNER_MNEMONIC, "word1 word2 word3");
+assert.equal(runEnv.GRAM_MULTISIG_ADDRESS, "EQmultisig");
+assert.equal(runEnv.GRAM_SIGNER_MNEMONIC, "word1 word2 word3");
 
 // 3b) E2E_FRESH_STORE=1 opts back into a per-run store (clean idempotency slate)
-const freshCfg = loadE2eConfig({ ...env, E2E_FRESH_STORE: "1" }, "ton");
+const freshCfg = loadE2eConfig({ ...env, E2E_FRESH_STORE: "1" }, "gram");
 assert.equal(freshCfg.freshStore, true, "E2E_FRESH_STORE=1 sets the flag");
 assert.match(
   buildRunEnv(freshCfg).STORE_URL,

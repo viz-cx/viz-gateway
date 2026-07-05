@@ -37,7 +37,7 @@ export class Recon {
     if (remotes.length === 0) {
       throw new Error(
         "[recon] no remote chain configured — configure at least one of " +
-          "TON_JETTON_MINTER_ADDRESS / SOLANA_WVIZ_MINT. " +
+          "GRAM_JETTON_MINTER_ADDRESS / SOLANA_WVIZ_MINT. " +
           "A recon with no supply visibility must not run.",
       );
     }
