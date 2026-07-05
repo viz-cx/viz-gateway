@@ -9,10 +9,19 @@ the last open item before real value moves on mainnet. All prior audits (the int
 ed25519 review, R-4/R-6 hardening) are *internal* and are **not** a substitute for
 independent third-party review.
 
-**Commit under review:** `01bd1ad` (main). Pin the exact hash with the auditor before
+**Commit under review:** `a25f425` (main). Pin the exact hash with the auditor before
 work starts; re-pin on any change.
 
-**Prepared:** 2026-07-02.
+**Prepared:** 2026-07-02. **Last refreshed:** 2026-07-05 — re-pinned `01bd1ad`→`a25f425`
+to cover the pre-audit hardening sweep (#30), the TON→GRAM internal rename (#31), and
+per-network backing accounts (#32). See §9 for the delta.
+
+> **Naming note (read first):** the codebase uses **`GRAM`** as the internal
+> `RemoteChainId` for the **TON** network — a historical rename (#31) of the chain
+> identifier only. The **@ton/* SDK and `contracts/ton/` are unchanged**. So
+> `packages/gram-watcher`, the `GRAM_*` env vars, and `RemoteChainId.GRAM` all refer to
+> the live **TON** remote. This document says "TON" for the network and "GRAM" only when
+> naming a code symbol.
 
 ---
 
@@ -42,9 +51,15 @@ finalized, correctly-attributed source event — that is the headline finding.
   - **Solana** has no usable memo, so routing is by a deterministic per-VIZ-account
     **PDA deposit address** (see §5.C). The address a burn originates from *is* the
     routing identity.
-- **Fee:** taken on the VIZ side, held in VIZ, swept to a `fees.gate` account; mint is
-  net. Peg-out and refunds are free. Money math is integer **milli-VIZ** (`bigint`),
-  no floats.
+- **Backing (per-network, #32):** locked VIZ is held in a **distinct gateway account per
+  remote** — `gram.gate` (TON) and `solana.gate` (Solana) — an injective chain↔account
+  registry (`packages/common/src/gatewayAccounts.ts`, fail-closed at construction on a
+  duplicate or missing mapping). Each remote's circulating wVIZ is backed by its own
+  account, and recon checks the peg **per chain** so a surplus on one remote can never mask
+  under-backing on another (§5.D, T7).
+- **Fee:** taken on the VIZ side, held in VIZ, swept to a single `fees.gate` account
+  (`FEES_GATE_ACCOUNT`); mint is net. Peg-out and refunds are free. Money math is integer
+  **milli-VIZ** (`bigint`), no floats.
 - **Federation:** default target **5-of-7** (BFT-clean for f=2); bootstraps at **1-of-1**
   and grows with no redeploy.
 
@@ -82,14 +97,14 @@ Two independent custody gates:
 
 | Package | Trust | Role |
 |---|---|---|
-| `packages/common` | **critical** | Chain-agnostic core: canonical digest, types, caps, fees, durable outbox + cap window + deposit-address registry (`store.ts`), threshold accumulation, operator rotation. |
+| `packages/common` | **critical** | Chain-agnostic core: canonical digest, types, caps, fees, durable outbox + cap window + deposit-address registry (`store.ts`), per-network backing-account registry (`gatewayAccounts.ts`), threshold accumulation, operator rotation. |
 | `packages/signer` | **holds keys** | The only key-holding service. Re-validates each proposal against an independently re-derived action (F2), then signs. One per operator. |
 | `packages/coordinator` | **untrusted** | Builds one shared proposal, collects partials to threshold, broadcasts. Keyless on VIZ and TON. On **Solana** it holds the *submitter* key (`SOLANA_SUBMITTER_SECRET`) = fee payer + durable-nonce authority + ATA funder — **not** mint authority (that is the on-chain SPL multisig). Compromise → liveness stall (nonce grind / SOL drain), not theft. See §8. |
 | `packages/viz-watcher` | read+sign | VIZ head-follow, peg-in detection, VIZ release signing/broadcast. |
 | `packages/gram-watcher` | read+sign | TON finality + burn detection, TON mint-order approval. |
 | `packages/solana-watcher` | read+sign | Solana adapter + PDA deposit-address derivation, lookup service, peg-out scanner, burn. |
 | `packages/dispatcher` | keyless | Drains QUEUED outbox rows to the coordinator with retry/backoff; spawns FEE_SWEEP/REFUND children. |
-| `packages/recon` | watchdog | `locked == circulating + unswept fees` across all remotes; trips shared pause on under-backing. |
+| `packages/recon` | watchdog | Per-remote `locked(gate account) == circulating + unswept fees` (one `Recon` per chain, `checker.ts`); trips shared pause on under-backing. |
 | `contracts/solana` | on-chain | `gateway_deposit` burn-only Anchor program (§5.C). |
 | `contracts/ton` | on-chain | Multisig-v2 + Jetton minter BOCs + rotation (§5.B). |
 | `setup-viz` | tooling | VIZ account setup + operator-rotation CLI. |
@@ -139,7 +154,7 @@ Two independent custody gates:
 | T4 | Every source event maps to exactly one action id; re-submission and crash-replay cannot double-mint/double-release. | `store.ts`, `sourceValidator.ts`, dispatcher recovery | double-mint / double-release |
 | T5 | Funds at a Solana deposit PDA can only be **burned**, never transferred — no private key exists. | `gateway_deposit` program | single-party theft of in-transit peg-out funds |
 | T6 | Active-set rotation changes only `active`/`regular` authority via a validated `account_update`; a co-signer never signs an authority other than the one claimed. | `rotation.ts`, `setup-viz/rotate.ts` | silent takeover via a malicious rotation |
-| T7 | `locked VIZ == circulating wVIZ (all remotes) + unswept fees`; under-backing trips a shared pause. | `recon` | undetected over-mint / under-backing |
+| T7 | **Per-remote** `locked VIZ (that chain's gate account) == circulating wVIZ (that remote) + unswept fees`, checked independently per chain so a cross-chain surplus can't mask a shortfall; under-backing trips a shared pause. | `recon/checker.ts`, `recon/index.ts`, `gatewayAccounts.ts` | undetected over-mint / under-backing |
 | T8 | Fee is a pure function of gross (operators agree independently); mint is net; below the gas floor → refund. | `fees.ts`, F2 fee re-derivation | fee disagreement stalls signing, or wrong net minted |
 
 ---
@@ -168,8 +183,8 @@ is full takeover).
 | Area | File(s) | Check |
 |---|---|---|
 | Peg-in (burn) detection | `packages/gram-watcher/src/gramChain.ts` (`finalizedBurnsSince`) | Parses TEP-74 `internal_transfer` (op `0x178d4519`); finality via time-buffer from ~5s block cadence. **Scan is limit-windowed (last ~20 tx), not height-ranged** — burst beyond the page is missed (§8, partial). |
-| Mint authorization | `tonChain.ts` (`submitMint`), `tonSign.ts` | Multisig-v2 **on-chain** `new_order` + `approve`; off-chain ed25519 sigs collected but **not** the authorization path. 1-of-1 self-approves on init. |
-| Idempotency | `tonChain.ts` (`actionExecuted`, `orderExists`, `nextOrderSeqno`) | Persist-before-send; orphan recovery queries order existence. **Assumes a single proposer** — see risk below. |
+| Mint authorization | `gram-watcher/src/gramApprove.ts` (`GramApprover.approveMint`), `gramChain.ts` (`submitMint`), `gramSign.ts` | Multisig-v2 **on-chain** `new_order` + `approve` from each operator's own wallet (keyless coordinator, Phase B); off-chain ed25519 sigs collected but **not** the authorization path. 1-of-1 self-approves on init. |
+| Idempotency | `gramChain.ts` (`orderExists`, `nextOrderSeqno`), coordinator `adapters.ts` (`actionExecuted`) | Persist-before-send; orphan recovery queries order existence. **Assumes a single proposer** — see risk below. |
 | Deployed bytecode | `contracts/ton/boc/PROVENANCE.md` | Multisig from `multisig-contract-v2 @ 9a4b13d…`, minter/wallet from `token-contract @ 1182ad9`; cell hashes pinned; rebuilt via `blueprint build`. Verify hashes match the deployed contracts. |
 | Rotation | `contracts/ton/src/rotateTon.ts` | `update_multisig_params` as a multisig order; each signer re-validates the order cell byte-for-byte before `approve`. No master/active split on TON. |
 
@@ -212,7 +227,7 @@ blast radius.
 | F2 all action types | `packages/signer/src/sourceValidator.ts` | PEG_IN (re-read VIZ deposit), Solana/TON PEG_OUT (re-read burn), FEE_SWEEP (recipient == own `feesGateAccount`, amount within `[base, base+surcharge]`), REFUND (recipient == `deposit.from`, exact amount). Dispatch by source-id **shape**, not coordinator field. All failures → `SourceMismatchError`, fail-closed. |
 | Fees | `packages/common/src/fees.ts`; `setFee`/`persistFee` | `base = max(10 VIZ, 0.20%)` + per-chain activation surcharge; net = gross − fee; below gas floor → refund. Fee persisted at proposal-build time (survives lost response). BigInt sums (no 2⁶³ overflow). |
 | Caps / pause | `packages/common/src/caps.ts`, `store.ts` | Per-tx + rolling-24h in shared `cap_window` (cross-process, survives restart); 24h breach trips pause. Pause 1-of-N to trip, deliberate to clear; signer returns HTTP 423. |
-| Recon | `packages/recon/src/index.ts` | Sums circulating across **all** remotes + unswept fees vs locked; under-backing → `store.pause()`; SOL reserve monitor pages. Attack T7. |
+| Recon | `packages/recon/src/{index,checker}.ts` | **One `Recon` per remote**: `locked(gatewayAccountₖ) ≥ circulating(k) + unswept fees(k)`; per-chain split so a surplus on one remote can't mask under-backing on another. Fatal on zero/missing expected remotes (VG-02); indeterminate (VIZ node or store down) fails closed after `maxConsecutiveFailures`; under-backing → `store.pause()`; SOL reserve monitor pages. Attack T7. |
 
 **Focus for auditor:** T3 (any canonical-encoding ambiguity or field a malicious
 coordinator can vary while keeping the same digest); T4 (the crash windows between
@@ -328,9 +343,21 @@ as new (challenge the fixes if you disagree):
 **VG-07…VG-17 (8 Low / 3 Info) remain open** as an accepted hardening backlog — see the
 report's §3 for details.
 
+### Changes since the dry-run (`2cfb7cc` → `a25f425`, this package's pin)
+
+Beyond the six VG fixes above, three PRs landed after the internal dry-run and are covered
+by this refreshed package — review them against the pinned head, not the dry-run commit:
+
+| PR | Change | Audit-relevant effect |
+|---|---|---|
+| #30 (`41ec8c6`) | Pre-audit readiness sweep | T1 wording corrected (Solana submitter key = liveness, not "keyless"); lookup rejects >16-byte VIZ names at issuance (`MAX_VIZ_ACCOUNT_BYTES`); `feePayer` pinned when `SOLANA_SUBMITTER_PUBKEY` set; recon `RECON_EXPECTED_REMOTES`. All reflected in §5/§8. |
+| #31 (`41a6244`) | TON→GRAM internal rename | `RemoteChainId`, env vars (`GRAM_*`), package `gram-watcher`, and symbols renamed. **@ton/* SDK and `contracts/ton/` unchanged.** See the naming note at the top. |
+| #32 (`a25f425`) | Per-network backing accounts | Locked VIZ split into `gram.gate` / `solana.gate` via the injective `gatewayAccounts.ts` registry; recon is now per-chain (T7). New surface: `gatewayAccounts.ts` and its tests. |
+
 ---
 
 _This package supersedes the whole-system scope of R-1. The retired-crypto internal
 review remains at `docs/audit-ed25519-additive-derivation.md` for historical context
 only. Re-pin the commit hash with the auditor before the engagement begins (the internal
-pre-audit above is at `2cfb7cc`; the current head includes the six fixes)._
+pre-audit above is at `2cfb7cc`; the current head `a25f425` includes the six VG fixes plus
+PRs #30/#31/#32 above)._
