@@ -1,4 +1,4 @@
-import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gateway/common";
+import { buildGatewayAccounts, canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { Keypair } from "@solana/web3.js";
@@ -37,6 +37,7 @@ async function main(): Promise<void> {
     { maxSignatures: cfg.solana.scanMaxSignatures, txDelayMs: cfg.solana.scanTxDelayMs },
     cfg.solana.depositProgramId,
   );
+  const accounts = buildGatewayAccounts(cfg);
   const store = createStore(cfg.storeUrl);
   // Same shared rolling-24h caps the watchers apply, so a large deposit-address
   // peg-out can't burn + release uncapped.
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
   // Read-only VIZ node, used ONLY to confirm the release target exists before the
   // irreversible burn. A release to a non-existent account would never land and,
   // with PEG_OUT never refunding, would lose the user's wVIZ permanently.
-  const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
+  const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
 
   let running = true;
   const stop = () => {

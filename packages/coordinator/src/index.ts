@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { actionFromWire, createStore, loadConfig, type CanonicalAction } from "@gateway/common";
+import { actionFromWire, buildGatewayAccounts, createStore, loadConfig, type CanonicalAction } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
@@ -34,7 +34,8 @@ async function main(): Promise<void> {
     (ep, i) => new HttpSignerClient(`signer-${i + 1}`, ep),
   );
 
-  const vizChain = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
+  const accounts = buildGatewayAccounts(cfg);
+  const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
   const vizBroadcaster = new VizReleaseBroadcaster(vizChain, cfg.viz.gatewayAccount, store);
 
   // The single designated TON proposer = first federation operator (see GramMintBroadcaster).

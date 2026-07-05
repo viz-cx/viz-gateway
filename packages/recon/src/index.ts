@@ -1,4 +1,4 @@
-import { createStore, loadConfig } from "@gateway/common";
+import { buildGatewayAccounts, createStore, loadConfig } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
@@ -21,7 +21,8 @@ export { Recon } from "./checker";
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  const viz = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
+  const accounts = buildGatewayAccounts(cfg);
+  const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
   // Sum circulating wVIZ across EVERY configured remote chain — a single-remote
   // recon would mask an over-mint on the other chain (§6.2).
   const remotes: Array<{ name: string; supply: () => Promise<bigint> }> = [];
