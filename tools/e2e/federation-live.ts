@@ -87,7 +87,7 @@ async function main() {
   console.log(`[fed-live] wVIZ before: ${wvizBefore}`);
 
   const soloStack = await launchStack(
-    ["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"],
+    ["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"],
     soloEnv,
     `${logDir}-phase1`,
   );
@@ -130,7 +130,7 @@ async function main() {
     COORDINATOR_URL: "http://127.0.0.1:8080",
   };
   const watcherStack = await launchStack(
-    ["viz-watcher", "ton-watcher", "dispatcher"],
+    ["viz-watcher", "gram-watcher", "dispatcher"],
     watcherEnv,
     `${logDir}-phase2`,
   );

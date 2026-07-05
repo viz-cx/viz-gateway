@@ -74,7 +74,7 @@ async function main() {
   const stop = async () => { if (stack) { await stack.stop(); stack = null; } };
   try {
     // ── Round 1: drive the peg-in until the order lands, then CRASH ──────────────
-    stack = await launchStack(["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
+    stack = await launchStack(["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
     const lockAt = Date.now();
     const lockTx = await submitLock(cfg, gross, `ton:${tonOwner}`);
     console.log(`[crash] peg-in lock submitted: ${lockTx}`);
@@ -117,7 +117,7 @@ async function main() {
     console.log(`[crash] confirmed exactly one order created (seqno ${seqnoBefore} -> ${seqnoAfterMint})`);
 
     // ── Round 2: relaunch — orphan recovery must short-circuit, NOT re-mint ──────
-    stack = await launchStack(["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
+    stack = await launchStack(["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"], runEnv, logDir);
     console.log(`[crash] stack relaunched — awaiting orphan recovery + actionExecuted short-circuit`);
     const recovered = await pollUntil(async () => {
       const r = await store.get(row.id);

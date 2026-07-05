@@ -5,7 +5,7 @@ export interface ReconCfg {
   driftToleranceMilliViz: bigint;
   maxConsecutiveFailures: number;
   /**
-   * Chain names that MUST be present as remotes (e.g. ["TON","SOLANA"]). If any is
+   * Chain names that MUST be present as remotes (e.g. ["GRAM","SOLANA"]). If any is
    * missing, the constructor throws. Closes the gap where dropping a remote's config
    * env var while it still has circulating wVIZ silently stops monitoring its supply
    * (the length===0 guard only catches ALL remotes missing, not a subset). Empty =

@@ -69,7 +69,7 @@ const GRAM_APPROVE_MAX_WAIT_MS = 150_000;
 // proposer can still cover the whole suite. Overrides the 1 TON default.
 const GRAM_ORDER_VALUE_NANO = 300_000_000;
 
-const WATCHERS = ["viz-watcher", "ton-watcher", "dispatcher"] as const;
+const WATCHERS = ["viz-watcher", "gram-watcher", "dispatcher"] as const;
 
 async function main() {
   const cfg = loadE2eConfig(process.env, "gram");

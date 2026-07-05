@@ -34,7 +34,7 @@ async function main(): Promise<void> {
       cfg.gram.multisigAddress,
       cfg.gram.finalityConfirmations,
     );
-    remotes.push({ name: "TON", supply: () => ton.circulatingSupplyMilliViz() });
+    remotes.push({ name: "GRAM", supply: () => ton.circulatingSupplyMilliViz() });
   }
   if (cfg.solana.wvizMint) {
     const sol = new SolanaChain(cfg.solana.rpcUrl, cfg.solana.wvizMint, cfg.solana.gatewayTokenAccount, cfg.solana.finalitySlots);

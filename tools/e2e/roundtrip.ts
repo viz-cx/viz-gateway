@@ -41,7 +41,7 @@ async function main() {
 
   // 3) Bring up the stack
   const stack = await launchStack(
-    ["viz-watcher", "ton-watcher", "signer", "coordinator", "dispatcher"],
+    ["viz-watcher", "gram-watcher", "signer", "coordinator", "dispatcher"],
     runEnv,
     logDir,
   );
