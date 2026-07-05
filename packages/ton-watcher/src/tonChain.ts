@@ -123,6 +123,67 @@ export function mintOrderCell(
   return { cell, hashHex: cell.hash().toString("hex") };
 }
 
+/**
+ * Pure lt-pagination core for the peg-out scan (VG-06), factored out so it can be
+ * exercised offline against a fake tx source (tools/ton-scan-pagination-spike.cjs).
+ * Walks pages newest→older, skipping the repeated anchor tx, until it drains back
+ * to `fromLt` / history end (`drained:true`) or exhausts `maxScanPages`
+ * (`drained:false`). Only FINAL txs (`now <= cutoff`) count toward `newestFinalLt`
+ * and are parsed as burns; the fresher tail is left for a later tick.
+ */
+export async function paginateBurnsByLt(params: {
+  fromLt: bigint;
+  cutoff: number;
+  height: number;
+  limit: number;
+  maxScanPages: number;
+  fetchPage: (anchor: { lt: string; hash: string } | null) => Promise<Transaction[]>;
+  toBurn: (tx: Transaction, height: number) => RemoteBurn | null;
+}): Promise<{ burns: RemoteBurn[]; newestFinalLt: bigint; drained: boolean }> {
+  const { fromLt, cutoff, height, limit, maxScanPages, fetchPage, toBurn } = params;
+  const burns: RemoteBurn[] = [];
+  let newestFinalLt = fromLt;
+  let anchor: { lt: string; hash: string } | null = null;
+  let drained = false;
+  let pages = 0;
+
+  while (pages < maxScanPages && !drained) {
+    const page = await fetchPage(anchor);
+    pages++;
+    if (page.length === 0) {
+      drained = true; // no history at/under the anchor
+      break;
+    }
+    const anchorLt = anchor ? BigInt(anchor.lt) : null;
+    let sawFresh = false;
+    for (const tx of page) {
+      if (anchorLt !== null && tx.lt >= anchorLt) continue; // repeated anchor tx
+      if (tx.lt <= fromLt) {
+        drained = true; // reached the cursor: fully caught up
+        break;
+      }
+      sawFresh = true;
+      if (tx.now <= cutoff) {
+        // Final => processed. The not-yet-final tail (higher lt) is intentionally
+        // excluded so the cursor never advances past a tx we haven't finalized.
+        if (tx.lt > newestFinalLt) newestFinalLt = tx.lt;
+        const burn = toBurn(tx, height);
+        if (burn) burns.push(burn);
+      }
+    }
+    if (drained) break;
+    // A short page (fewer than a full limit of txs) means we hit the end of history.
+    const last = page[page.length - 1];
+    if (!sawFresh || page.length < limit || !last) {
+      drained = true;
+      break;
+    }
+    anchor = { lt: last.lt.toString(), hash: last.hash().toString("hex") };
+  }
+
+  return { burns, newestFinalLt, drained };
+}
+
 export class TonHttpChain implements RemoteChain<TonMintProposal> {
   private readonly client: TonClient;
   private readonly minter: Address;
@@ -130,6 +191,7 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
   private readonly multisigAddress: string;
   private readonly finalityBufferSec: number;
   private readonly maxTransactions: number;
+  private readonly maxScanPages: number;
 
   constructor(
     endpoint: string,
@@ -139,6 +201,7 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     multisigAddress: string,
     finalityConfirmations: number,
     maxTransactions = 20,
+    maxScanPages = 50,
   ) {
     this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
     this.minter = Address.parse(minterAddress);
@@ -147,6 +210,7 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     // ~5s per masterchain block; convert the confirmation count to a time buffer.
     this.finalityBufferSec = Math.max(6, finalityConfirmations * 5 + 5);
     this.maxTransactions = Math.max(1, maxTransactions);
+    this.maxScanPages = Math.max(1, maxScanPages);
   }
 
   async finalizedHeight(): Promise<number> {
@@ -189,16 +253,63 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
     };
   }
 
-  async finalizedBurnsSince(_fromHeight: number, toHeight: number): Promise<RemoteBurn[]> {
-    if (!this.gatewayWallet) return [];
+  /**
+   * The newest tx's logical time on the gateway wallet, or 0 if it has no history.
+   * Used for the watcher's cold start: begin at the current tip's `lt` so we don't
+   * replay all history (backfill before first-ever run is a separate operation).
+   */
+  async newestLt(): Promise<number> {
+    if (!this.gatewayWallet) return 0;
+    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: 1 });
+    const tip = txs[0];
+    return tip ? Number(tip.lt) : 0;
+  }
+
+  /**
+   * Range-based peg-out scan keyed on logical time (`lt`) — the correct cursor for
+   * an account's own tx stream (VG-06). Pages the gateway wallet's transactions
+   * newest→older via getTransactions' {lt, hash} anchor, collecting final burns with
+   * `lt > fromLt`, until it either drains back to the cursor / history end
+   * (`drained: true`) or hits `maxScanPages` with more to scan (`drained: false` —
+   * a burst we cannot fully see this tick; the caller MUST fail closed and not
+   * advance the cursor past the unscanned older burns).
+   *
+   * `newestFinalLt` is the highest lt among FINAL txs seen (the cursor's next value
+   * after a complete drain). The not-yet-final tail (higher lt) is left for a later
+   * tick and never advances the cursor past it, so no burn is skipped.
+   */
+  async finalizedBurnsPaginated(
+    fromLt: number,
+  ): Promise<{ burns: RemoteBurn[]; newestFinalLt: number; drained: boolean }> {
+    if (!this.gatewayWallet) return { burns: [], newestFinalLt: fromLt, drained: true };
+    const wallet = this.gatewayWallet;
     const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
-    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: this.maxTransactions });
-    const burns: RemoteBurn[] = [];
-    for (const tx of txs) {
-      const burn = this.burnFromTx(tx, cutoff, toHeight);
-      if (burn) burns.push(burn);
-    }
-    return burns;
+    const height = (await this.client.getMasterchainInfo()).latestSeqno;
+    const res = await paginateBurnsByLt({
+      fromLt: BigInt(fromLt),
+      cutoff,
+      height,
+      limit: this.maxTransactions,
+      maxScanPages: this.maxScanPages,
+      fetchPage: (anchor) =>
+        this.client.getTransactions(
+          wallet,
+          anchor
+            ? { limit: this.maxTransactions, lt: anchor.lt, hash: anchor.hash, inclusive: true }
+            : { limit: this.maxTransactions },
+        ),
+      toBurn: (tx, h) => this.burnFromTx(tx, cutoff, h),
+    });
+    return { burns: res.burns, newestFinalLt: Number(res.newestFinalLt), drained: res.drained };
+  }
+
+  /**
+   * Interface conformance (RemoteChain). The TON watcher drives the lt-ranged
+   * finalizedBurnsPaginated directly (for its truncation signal); this thin wrapper
+   * treats `fromHeight` as the lt cursor and returns just the burns.
+   */
+  async finalizedBurnsSince(fromLt: number, _toHeight: number): Promise<RemoteBurn[]> {
+    return (await this.finalizedBurnsPaginated(fromLt)).burns;
   }
 
   /**

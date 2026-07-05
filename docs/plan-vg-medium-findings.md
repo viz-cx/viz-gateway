@@ -6,12 +6,16 @@ already fixed and merged / in-branch.
 
 **Status legend:** ☐ not started · ◐ in progress · ☑ done
 
-- ☑ **VG-05** — canonical encoding injectivity (this branch: length-prefixed
-  encoding + `tools/canonical-spike.cjs`, wired into `npm run verify`).
+- ☑ **VG-05** — canonical encoding injectivity (merged PR #25, main `5387d6b`).
 - ☐ VG-02 — recon fails open
-- ☐ VG-03 — VIZ peg-in detection gap (in-memory cursor + scan-cap)
-- ☐ VG-06 — TON burn scan not height-ranged (silent truncation)
+- ☑ **VG-03** — VIZ peg-in detection gap: durable cursor (`getCursor`/`setCursor`)
+  + cap-bounded advance via `nextScanWindow`; `tools/viz-scan-cursor-spike.cjs`.
+- ☑ **VG-06** — TON burn scan lt-paginated (`paginateBurnsByLt`) + fail-closed on
+  truncation (pause + `notifyStaff`); `tools/ton-scan-pagination-spike.cjs`.
 - ☐ VG-04 — fee amount coordinator-authoritative for the sweep
+
+VG-03 + VG-06 (+ the shared cursor primitive) shipped together on
+`fix/vg-watcher-cursors`. Both spikes wired into `npm run verify` (full suite green).
 
 Common theme for VG-02/03/06: **fail-closed detectors**. A custody bridge's
 detectors must never silently advance past unseen work or report "healthy" when

@@ -1,5 +1,9 @@
-import { canonicalPegOut, CircuitBreaker, createStore, loadConfig, type TonChain } from "@gateway/common";
+import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gateway/common";
+import { notifyStaff } from "@gateway/log";
 import { TonHttpChain } from "./tonChain";
+
+/** Durable scan-cursor name; value is the last-processed logical time (lt). */
+const CURSOR = "cursor:ton-watcher";
 
 /**
  * ton-watcher: follows TON masterchain finality, detects wVIZ burns, and
@@ -13,7 +17,7 @@ async function main(): Promise<void> {
       "TON_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
     );
   }
-  const chain: TonChain = new TonHttpChain(
+  const chain = new TonHttpChain(
     cfg.ton.endpoint,
     cfg.ton.apiKey,
     cfg.ton.jettonMinterAddress,
@@ -21,11 +25,14 @@ async function main(): Promise<void> {
     cfg.ton.multisigAddress,
     cfg.ton.finalityConfirmations,
     cfg.ton.scanMaxTransactions,
+    cfg.ton.maxScanPages,
   );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
 
-  let cursor = 0;
+  // Last-processed logical time, resumed from the durable store so downtime never
+  // silently skips burns (VG-06). Cold start (0) begins at the wallet tip's lt.
+  let cursor = await store.getCursor(CURSOR);
   let running = true;
   const stop = () => {
     running = false;
@@ -44,13 +51,14 @@ async function main(): Promise<void> {
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
-      const mc = await chain.finalizedHeight();
-      const finalHead = mc - cfg.ton.finalityConfirmations;
       if (cursor === 0) {
-        cursor = finalHead;
-        console.log(`[ton-watcher] starting at masterchain head ${cursor} (mc ${mc})`);
-      } else if (finalHead > cursor) {
-        const burns = await chain.finalizedBurnsSince(cursor, finalHead);
+        // Cold start: begin at the wallet tip's lt so we don't replay all history
+        // (backfill before first-ever run is a separate, deliberate operation).
+        cursor = await chain.newestLt();
+        await store.setCursor(CURSOR, cursor);
+        console.log(`[ton-watcher] starting at lt ${cursor}`);
+      } else {
+        const { burns, newestFinalLt, drained } = await chain.finalizedBurnsPaginated(cursor);
         for (const burn of burns) {
           const action = canonicalPegOut(burn);
           const first = await store.enqueue({
@@ -77,7 +85,20 @@ async function main(): Promise<void> {
             `[ton-watcher] peg-out ${action.id} QUEUED -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
           );
         }
-        cursor = finalHead;
+        if (drained) {
+          // Only advance the cursor once the tick fully drained back to it; the
+          // not-yet-final tail (lt > newestFinalLt) is re-scanned next tick.
+          cursor = newestFinalLt;
+          await store.setCursor(CURSOR, cursor);
+        } else {
+          // A burst larger than maxScanPages*scanMaxTransactions: older burns lie
+          // beyond what we could scan. Fail closed — do NOT advance past them; pause
+          // + alert so an operator raises the scan window rather than silently drop.
+          const reason = `TON peg-out scan truncated at lt ${cursor}: burst exceeds scan window (maxScanPages=${cfg.ton.maxScanPages})`;
+          console.error(`[ton-watcher] ${reason}`);
+          notifyStaff("withdraws", reason, { cursorLt: cursor, newestFinalLt });
+          await store.pause(reason); // shared, cross-process
+        }
       }
     } catch (err) {
       console.error("[ton-watcher] loop error:", err);

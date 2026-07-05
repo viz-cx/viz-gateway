@@ -44,7 +44,8 @@ export interface GatewayConfig {
     gatewayJettonWallet: string;
     signerMnemonic: string;
     finalityConfirmations: number;
-    scanMaxTransactions: number; // txs fetched per peg-out scan (RPC rate-limit tuning)
+    scanMaxTransactions: number; // txs fetched per getTransactions page (RPC rate-limit tuning)
+    maxScanPages: number; // page ceiling per peg-out scan; hit before draining => fail closed
     approveMaxWaitMs: number; // max wait for a proposed order / approval to land on-chain
     approvePollIntervalMs: number; // poll cadence while waiting for the above
     orderValueNano: number; // TON (nano) the proposer attaches to new_order
@@ -215,6 +216,10 @@ export function loadConfig(): GatewayConfig {
       signerMnemonic: opt("TON_SIGNER_MNEMONIC", ""),
       finalityConfirmations: int("TON_FINALITY_CONFIRMATIONS", 1),
       scanMaxTransactions: int("TON_MAX_TRANSACTIONS", 20),
+      // Page ceiling for the lt-paginated peg-out scan. If a burst needs more than
+      // maxScanPages * scanMaxTransactions txs to drain back to the cursor, the scan
+      // fails closed (pause + alert) rather than silently skipping older burns (VG-06).
+      maxScanPages: int("TON_MAX_SCAN_PAGES", 50),
       // The proposer sends new_order then waits for the Order contract to deploy; an
       // approver waits for its vote to reflect. Testnet inclusion + toncenter view lag
       // can exceed the 60s default, so this is tunable for live runs.
