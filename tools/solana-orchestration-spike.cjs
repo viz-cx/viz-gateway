@@ -1,17 +1,16 @@
 // SPIKE: a Solana peg-in driven end-to-end through the REAL live-service routing,
 // fully offline (no RPC).
-//   - parseRemoteTarget maps the "solana:"/"ton:" memo prefix; bare memo rejected.
-//   - canonicalPegIn commits the chain into the digest (SOLANA != TON).
+//   - canonicalPegIn commits the chain into the digest (SOLANA != GRAM).
 //   - routeApproval dispatches PEG_IN by proposal shape to approveSolanaMint.
 //   - the real Orchestrator collects M operator approvals at 2-of-2 and a fake
 //     SolanaMintBroadcaster assembles the merged tx (buildSignedMintTx verifies).
-//   - cross-checks reject a TON-shaped proposal on a SOLANA action and an
+//   - cross-checks reject a GRAM-shaped proposal on a SOLANA action and an
 //     unrecognized PEG_IN shape.
 //
 // Run (after `npm run build`): node tools/solana-orchestration-spike.cjs
 const assert = require("node:assert");
 const { Keypair } = require("@solana/web3.js");
-const { canonicalPegIn, parseRemoteTarget, quotePegIn, pegInFeePolicyFor } = require("@gateway/common");
+const { canonicalPegIn, quotePegIn, pegInFeePolicyFor } = require("@gateway/common");
 const FEES = {
   floorMilliViz: 10000n,
   bps: 20,
@@ -27,13 +26,6 @@ const { routeApproval } = require("../packages/signer/dist/routeApproval.js");
 const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js");
 
 (async () => {
-  // ---- memo parsing -------------------------------------------------------
-  assert.deepStrictEqual(parseRemoteTarget("solana:9xRecipient"), { chain: "SOLANA", destination: "9xRecipient" });
-  assert.deepStrictEqual(parseRemoteTarget("gram:EQabc"), { chain: "GRAM", destination: "EQabc" });
-  assert.throws(() => parseRemoteTarget("9xNoPrefix"), /missing chain prefix/);
-  assert.throws(() => parseRemoteTarget("doge:9x"), /unknown chain prefix/);
-  console.log("[memo] solana:/gram: parsed; bare + unknown-prefix REJECTED OK");
-
   // ---- key material + proposal --------------------------------------------
   const submitter = Keypair.generate();
   const opA = Keypair.generate();
@@ -45,16 +37,15 @@ const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js")
   const recipient = Keypair.generate().publicKey.toBase58();
   const signers = [opA.publicKey.toBase58(), opB.publicKey.toBase58()].sort();
 
-  const target = parseRemoteTarget(`solana:${recipient}`);
   const action = canonicalPegIn({
     trxId: "t1",
     opIndex: 0,
     blockNum: 1,
     from: "viz-user",
-    to: "viz-gateway",
+    to: "solana.gate",
     amountMilliViz: 1068237n,
-    remoteChain: target.chain,
-    remoteDestination: target.destination,
+    remoteChain: "SOLANA",
+    remoteDestination: recipient,
   });
   assert.strictEqual(action.remoteChain, "SOLANA", "action must carry the SOLANA tag");
 
