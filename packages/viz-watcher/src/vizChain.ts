@@ -6,7 +6,7 @@ import viz, {
   type OpWrapper,
 } from "viz-js-lib";
 import {
-  parseRemoteTarget,
+  validateRemoteAddress,
   type CanonicalAction,
   type RemoteChainId,
   type VizChain,
@@ -26,6 +26,21 @@ import { buildReleaseTx, releaseTxId } from "./vizSign";
  * and a transfer payload is { from, to, amount:"X.XXX VIZ", memo }.
  */
 const ZERO_TRX = "0000000000000000000000000000000000000000";
+
+/** @internal Shim: parse legacy "<chain>:<address>" memo until Task 2.1 replaces callers. */
+const CHAIN_PREFIX_MAP: Record<string, RemoteChainId> = { gram: "GRAM", solana: "SOLANA" };
+function parseMemoTarget(memo: string): { chain: RemoteChainId; destination: string } {
+  const trimmed = memo.trim();
+  const sep = trimmed.indexOf(":");
+  if (sep <= 0) throw new Error(`peg-in memo missing chain prefix: "${memo}"`);
+  const prefix = trimmed.slice(0, sep).toLowerCase();
+  const destination = trimmed.slice(sep + 1).trim();
+  const chain = CHAIN_PREFIX_MAP[prefix];
+  if (!chain) throw new Error(`peg-in memo has unknown chain prefix "${prefix}": "${memo}"`);
+  if (!destination) throw new Error(`peg-in memo has empty destination: "${memo}"`);
+  validateRemoteAddress(chain, destination);
+  return { chain, destination };
+}
 
 /**
  * Bound the per-call block scan so a watcher tick can't accidentally scan the
@@ -103,7 +118,7 @@ export class VizJsChain implements VizChain {
         try {
           // Memo is "<chain>:<address>"; the target chain is committed in the digest.
           // Remote address-format validation happens before signing (signer-side).
-          target = parseRemoteTarget(memo);
+          target = parseMemoTarget(memo);
         } catch (err) {
           // Unparseable/prefixless memo: not a valid peg-in target. Skip and warn
           // (flag for manual refund); never silently default the destination chain.
@@ -174,7 +189,7 @@ export class VizJsChain implements VizChain {
       );
     }
     // Memo "<chain>:<address>"; throws on a missing/unknown prefix (no silent default).
-    const target = parseRemoteTarget(String(payload["memo"] ?? ""));
+    const target = parseMemoTarget(String(payload["memo"] ?? ""));
     return {
       trxId,
       opIndex,
