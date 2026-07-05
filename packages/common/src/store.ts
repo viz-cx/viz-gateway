@@ -263,7 +263,22 @@ export class SqliteGatewayStore implements GatewayStore {
         now,
         input.parentId ?? null,
       );
-    return Number(res.changes) === 1;
+    const inserted = Number(res.changes) === 1;
+    if (!inserted) {
+      // The id already exists. A REPLAY of the same event carries the same digest (silent,
+      // correct idempotency). A DIFFERENT digest under the same id means two DISTINCT events
+      // collided on one idempotency key (e.g. a cross-chain sourceId clash) — the second would
+      // otherwise be silently dropped and its output lost. Fail closed: halt for review (M5).
+      const existing = this.db.prepare("SELECT digest FROM action_outbox WHERE id = ?").get(input.id) as
+        | { digest?: string }
+        | undefined;
+      if (existing && existing.digest !== input.digest) {
+        const reason = `idempotency-key collision on ${input.id}: stored digest ${existing.digest} != incoming ${input.digest} (two distinct events mapped to one id)`;
+        console.error(`[store] CRITICAL: ${reason} -> pausing`);
+        await this.pause(reason);
+      }
+    }
+    return inserted;
   }
 
   async get(id: string): Promise<OutboxRecord | undefined> {
@@ -460,7 +475,17 @@ export class InMemoryGatewayStore implements GatewayStore {
   private reason = "";
 
   async enqueue(input: EnqueueInput): Promise<boolean> {
-    if (this.rows.has(input.id)) return false;
+    const existing = this.rows.get(input.id);
+    if (existing) {
+      // Same digest = idempotent replay (silent). Different digest = two distinct events on
+      // one id — fail closed rather than silently drop the second (M5; mirrors the sqlite path).
+      if (existing.digest !== input.digest) {
+        const reason = `idempotency-key collision on ${input.id}: stored digest ${existing.digest} != incoming ${input.digest} (two distinct events mapped to one id)`;
+        console.error(`[store] CRITICAL: ${reason} -> pausing`);
+        await this.pause(reason);
+      }
+      return false;
+    }
     const now = Date.now();
     this.rows.set(input.id, {
       id: input.id,
