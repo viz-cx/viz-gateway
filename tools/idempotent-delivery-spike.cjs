@@ -38,6 +38,7 @@ const { mintMessageB64 } = require("../packages/solana-watcher/dist/solanaSign.j
 const { InMemoryGatewayStore, SqliteGatewayStore } = require("../packages/common/dist/store.js");
 const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
 const { VizReleaseBroadcaster, GramMintBroadcaster } = require("../packages/coordinator/dist/adapters.js");
+const { GatewayAccounts } = require("../packages/common/dist/gatewayAccounts.js");
 const { releaseTxId } = require("../packages/viz-watcher/dist/vizSign.js");
 const { mkdtempSync } = require("node:fs");
 const { tmpdir } = require("node:os");
@@ -481,7 +482,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     await store.enqueue({ id: action.id, direction: "PEG_OUT", recipient: "alice",
       amountMilliViz: 5000n, digest: action.digest, status: "QUEUED" });
     const chain = mockVizChain();
-    const b = new VizReleaseBroadcaster(chain, "viz-gateway", store);
+    const b = new VizReleaseBroadcaster(chain, new GatewayAccounts({ GRAM: "viz-gateway" }), store);
 
     const pre = await b.actionExecuted(action);
     assert.strictEqual(pre.executed, false, "fresh row (no txid) -> not executed");
@@ -503,7 +504,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     await store.enqueue({ id: action.id, direction: "PEG_OUT", recipient: "alice",
       amountMilliViz: 5000n, digest: action.digest, status: "QUEUED" });
     const chain = mockVizChain();
-    const b = new VizReleaseBroadcaster(chain, "viz-gateway", store);
+    const b = new VizReleaseBroadcaster(chain, new GatewayAccounts({ GRAM: "viz-gateway" }), store);
     const { proposal } = await b.buildProposal(action);
     await b.broadcast(action, proposal, ["sigA"]); // lands on-chain + persists txid
     const rec = await b.actionExecuted(action);
@@ -521,7 +522,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     await store.enqueue({ id: action.id, direction: "PEG_OUT", recipient: "alice",
       amountMilliViz: 5000n, digest: action.digest, status: "QUEUED" });
     const chain = mockVizChain();
-    const b = new VizReleaseBroadcaster(chain, "viz-gateway", store);
+    const b = new VizReleaseBroadcaster(chain, new GatewayAccounts({ GRAM: "viz-gateway" }), store);
     // Simulate persist-before-send where the send never reached the chain.
     await store.setStatus(action.id, "BROADCAST", { txid: `VTX_${action.id}` });
     const rec = await b.actionExecuted(action);

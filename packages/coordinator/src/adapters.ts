@@ -9,6 +9,7 @@ import {
   type SolanaMintProposal,
   type GramMintProposal,
   type VizReleaseProposal,
+  GatewayAccounts,
 } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
@@ -46,13 +47,15 @@ type IdempotencyStore = Pick<GatewayStore, "get" | "setStatus">;
 export class VizReleaseBroadcaster implements Broadcaster {
   constructor(
     private readonly chain: VizJsChain,
-    private readonly gatewayAccount: string,
+    private readonly accounts: GatewayAccounts,
     private readonly store: IdempotencyStore,
   ) {}
 
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
+    if (!action.remoteChain) throw new Error(`release ${action.id} missing remoteChain — cannot select backing account`);
+    const from = this.accounts.accountFor(action.remoteChain);
     // PEG_OUT / FEE_SWEEP / REFUND are all fee-free VIZ releases.
-    return { proposal: await this.chain.buildReleaseProposal(action, this.gatewayAccount), feeMilliViz: 0n };
+    return { proposal: await this.chain.buildReleaseProposal(action, from), feeMilliViz: 0n };
   }
 
   async broadcast(action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {

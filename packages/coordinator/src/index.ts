@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   const accounts = buildGatewayAccounts(cfg);
   const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
-  const vizBroadcaster = new VizReleaseBroadcaster(vizChain, cfg.viz.gatewayAccount, store);
+  const vizBroadcaster = new VizReleaseBroadcaster(vizChain, accounts, store);
 
   // The single designated TON proposer = first federation operator (see GramMintBroadcaster).
   const tonProposerId = cfg.federation.operators[0]?.id;
