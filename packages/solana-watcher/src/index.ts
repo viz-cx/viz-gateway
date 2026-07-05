@@ -31,7 +31,12 @@ async function main(): Promise<void> {
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
 
-  let cursor = 0;
+  // Durable scan-cursor. On restart, resume from the last processed slot instead of jumping to
+  // the current finalized head — an in-memory cursor silently dropped every burn that landed
+  // during downtime (peg-out never released = lost funds). viz/gram-watcher persist theirs for
+  // exactly this reason.
+  const CURSOR = "cursor:solana-watcher";
+  let cursor = await store.getCursor(CURSOR);
   let running = true;
   const stop = () => {
     running = false;
@@ -53,6 +58,7 @@ async function main(): Promise<void> {
       const slot = await chain.finalizedHeight();
       if (cursor === 0) {
         cursor = slot;
+        await store.setCursor(CURSOR, cursor);
         console.log(`[solana-watcher] starting at finalized slot ${cursor}`);
       } else if (slot > cursor) {
         const burns = await chain.finalizedBurnsSince(cursor, slot);
@@ -85,6 +91,7 @@ async function main(): Promise<void> {
           );
         }
         cursor = slot;
+        await store.setCursor(CURSOR, cursor);
       }
     } catch (err) {
       console.error("[solana-watcher] loop error:", err);
