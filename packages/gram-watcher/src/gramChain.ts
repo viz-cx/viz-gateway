@@ -2,7 +2,7 @@ import { Address, JettonMaster, TonClient, internal, SendMode, toNano } from "@t
 import { beginCell } from "@ton/core";
 import type { Cell, Slice, Transaction } from "@ton/core";
 import type { TransferRequest } from "@gateway/contracts-ton";
-import type { RemoteBurn, RemoteChain, TonMintProposal } from "@gateway/common";
+import type { RemoteBurn, RemoteChain, GramMintProposal } from "@gateway/common";
 import { Multisig, Order } from "@gateway/contracts-ton";
 
 /**
@@ -184,7 +184,7 @@ export async function paginateBurnsByLt(params: {
   return { burns, newestFinalLt, drained };
 }
 
-export class TonHttpChain implements RemoteChain<TonMintProposal> {
+export class GramHttpChain implements RemoteChain<GramMintProposal> {
   private readonly client: TonClient;
   private readonly minter: Address;
   private readonly gatewayWallet: Address | null;
@@ -413,13 +413,13 @@ export class TonHttpChain implements RemoteChain<TonMintProposal> {
   /**
    * RETIRED (Phase B): the coordinator is keyless on TON and never sends a message.
    * The mint is authorized by on-chain multisig approvals from each operator's own
-   * wallet (KeyedSigner.approveTonMint → tonApprove.ts). Kept only to satisfy the
+   * wallet (KeyedSigner.approveGramMint → tonApprove.ts). Kept only to satisfy the
    * RemoteChain interface; calling it is a wiring bug (a would-be keyed coordinator).
    */
-  async submitMint(_proposal: TonMintProposal, _mintAuth: string[]): Promise<string> {
+  async submitMint(_proposal: GramMintProposal, _mintAuth: string[]): Promise<string> {
     throw new Error(
-      "TonHttpChain.submitMint is retired: TON mints are authorized by on-chain operator approvals " +
-        "(TonMintBroadcaster polls orderExecuted; operators propose/approve from their own wallets).",
+      "GramHttpChain.submitMint is retired: TON mints are authorized by on-chain operator approvals " +
+        "(GramMintBroadcaster polls orderExecuted; operators propose/approve from their own wallets).",
     );
   }
 }

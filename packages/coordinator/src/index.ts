@@ -1,10 +1,10 @@
 import { createServer } from "node:http";
 import { actionFromWire, createStore, loadConfig, type CanonicalAction } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
-import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { Orchestrator } from "./orchestrator";
-import { HttpSignerClient, SolanaMintBroadcaster, TonMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
+import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
 
 /**
  * coordinator: UNTRUSTED. On POST /submit { action } it builds the one shared
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   const vizChain = new VizJsChain(cfg.viz.nodeUrl, cfg.viz.gatewayAccount);
   const vizBroadcaster = new VizReleaseBroadcaster(vizChain, cfg.viz.gatewayAccount, store);
 
-  // The single designated TON proposer = first federation operator (see TonMintBroadcaster).
+  // The single designated TON proposer = first federation operator (see GramMintBroadcaster).
   const tonProposerId = cfg.federation.operators[0]?.id;
   // Keyless on TON: no signer mnemonic. The coordinator only DESCRIBES the mint order;
   // operators approve it on-chain from their own wallets. The designated proposer (the
@@ -48,8 +48,8 @@ async function main(): Promise<void> {
   }
   const tonBroadcaster =
     cfg.gram.jettonMinterAddress && tonProposerId
-      ? new TonMintBroadcaster(
-          new TonHttpChain(
+      ? new GramMintBroadcaster(
+          new GramHttpChain(
             cfg.gram.endpoint,
             cfg.gram.apiKey,
             cfg.gram.jettonMinterAddress,

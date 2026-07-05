@@ -111,7 +111,7 @@ export interface VizReleaseProposal {
  * `proposerOperatorId` is the single operator the coordinator designates to send
  * `new_order` (single-proposer seqno ordering); the rest send `approve`.
  */
-export interface TonMintProposal {
+export interface GramMintProposal {
   orderSeqno: string; // multisig nextOrderSeqno at build time ("" if reused on recovery)
   orderAddr: string; // deterministic order address f(multisig, orderSeqno) — the idempotency key
   toAddress: string; // recipient TON address

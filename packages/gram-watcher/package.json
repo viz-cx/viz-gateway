@@ -1,5 +1,5 @@
 {
-  "name": "@gateway/ton-watcher",
+  "name": "@gateway/gram-watcher",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",

@@ -7,7 +7,7 @@
 // Run: node tools/ton-notification-spike.cjs
 const assert = require("node:assert");
 const { beginCell, Address } = require("@ton/ton");
-const { parseJettonDeposit } = require("../packages/ton-watcher/dist/tonChain.js");
+const { parseJettonDeposit } = require("../packages/gram-watcher/dist/gramChain.js");
 
 const SENDER = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs";
 const AMOUNT = 1068237n; // base units == milli-VIZ at 3 decimals (1068.237 wVIZ)

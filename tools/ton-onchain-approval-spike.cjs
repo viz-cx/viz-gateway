@@ -24,7 +24,7 @@ const { Multisig, multisigConfigToCell } = require("../contracts/ton/dist/wrappe
 const { Order } = require("../contracts/ton/dist/wrappers/Order.js");
 // Use the SAME pure mint-order builder the live write path uses, so this proof can
 // never drift from production (packages/ton-watcher/src/tonChain.ts).
-const { buildMintTransfer } = require("../packages/ton-watcher/dist/tonChain.js");
+const { buildMintTransfer } = require("../packages/gram-watcher/dist/gramChain.js");
 
 const BOC = path.join(__dirname, "..", "contracts", "ton", "boc");
 const cell = (f) => Cell.fromBoc(readFileSync(path.join(BOC, f)))[0];

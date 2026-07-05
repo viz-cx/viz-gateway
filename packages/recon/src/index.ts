@@ -3,7 +3,7 @@ import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
-import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
+import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain, pubkeyOf } from "@gateway/solana-watcher/dist/solanaChain";
 import { Recon } from "./checker";
 
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   // recon would mask an over-mint on the other chain (§6.2).
   const remotes: Array<{ name: string; supply: () => Promise<bigint> }> = [];
   if (cfg.gram.jettonMinterAddress) {
-    const ton = new TonHttpChain(
+    const ton = new GramHttpChain(
       cfg.gram.endpoint,
       cfg.gram.apiKey,
       cfg.gram.jettonMinterAddress,

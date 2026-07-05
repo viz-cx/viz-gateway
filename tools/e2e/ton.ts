@@ -10,7 +10,7 @@ function client(cfg: E2eConfig): TonClient {
 
 /**
  * Deterministic address of the NEXT multisig order (peg-in mint). Mirrors
- * `TonHttpChain.nextOrderAddress`: the address is a pure function of
+ * `GramHttpChain.nextOrderAddress`: the address is a pure function of
  * (multisig, nextOrderSeqno), and the seqno only advances when an order is
  * actually created — so it is a durable idempotency key and, across a crash,
  * a reliable "was a second order created?" counter.
@@ -30,7 +30,7 @@ export async function nextOrderSeqno(cfg: E2eConfig): Promise<bigint> {
 
 /**
  * True if a multisig order contract is deployed on-chain (i.e. a new_order landed).
- * Same predicate as `TonHttpChain.orderExists` — existence, not the executed flag.
+ * Same predicate as `GramHttpChain.orderExists` — existence, not the executed flag.
  */
 export async function orderExists(cfg: E2eConfig, orderAddr: string): Promise<boolean> {
   const state = await client(cfg).getContractState(Address.parse(orderAddr));

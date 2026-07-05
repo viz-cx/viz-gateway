@@ -3,11 +3,11 @@ import type {
   CanonicalAction,
   Signer,
   SolanaMintProposal,
-  TonMintProposal,
+  GramMintProposal,
   VizReleaseProposal,
 } from "@gateway/common";
 
-type AnyProposal = VizReleaseProposal | TonMintProposal | SolanaMintProposal;
+type AnyProposal = VizReleaseProposal | GramMintProposal | SolanaMintProposal;
 
 /** A Solana mint proposal carries the compiled message + mint + multisig. */
 export function isSolanaMintProposal(p: unknown): p is SolanaMintProposal {
@@ -21,7 +21,7 @@ export function isSolanaMintProposal(p: unknown): p is SolanaMintProposal {
 }
 
 /** A TON mint proposal carries the order hash operators sign. */
-export function isTonMintProposal(p: unknown): p is TonMintProposal {
+export function isGramMintProposal(p: unknown): p is GramMintProposal {
   return typeof p === "object" && p !== null && "orderHashHex" in p;
 }
 
@@ -45,11 +45,11 @@ export async function routeApproval(
     }
     return signer.approveSolanaMint(action, proposal);
   }
-  if (isTonMintProposal(proposal)) {
+  if (isGramMintProposal(proposal)) {
     if (action.remoteChain && action.remoteChain !== "GRAM") {
       throw new Error(`GRAM proposal for a ${action.remoteChain} action (${action.id})`);
     }
-    return signer.approveTonMint(action, proposal);
+    return signer.approveGramMint(action, proposal);
   }
   throw new Error(`PEG_IN proposal shape not recognized (neither GRAM nor Solana) for ${action.id}`);
 }

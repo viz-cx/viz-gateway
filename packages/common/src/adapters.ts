@@ -3,7 +3,7 @@ import type {
   CanonicalAction,
   RemoteBurn,
   SolanaMintProposal,
-  TonMintProposal,
+  GramMintProposal,
   VizDeposit,
   VizReleaseProposal,
 } from "./types";
@@ -93,14 +93,14 @@ export interface RemoteChain<MintProposal = unknown> {
 }
 
 /** Back-compat alias for the current TON implementation. */
-export type TonChain = RemoteChain<TonMintProposal>;
+export type TonChain = RemoteChain<GramMintProposal>;
 
 export interface Signer {
   readonly operatorId: string;
   /** Validate the proposal against the action, then secp256k1-sign the VIZ release. */
   signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval>;
   /** Validate the proposal against the action, then approve the remote mint. */
-  approveTonMint(action: CanonicalAction, proposal: TonMintProposal): Promise<Approval>;
+  approveGramMint(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval>;
   /** Validate the proposal against the action, then approve the remote Solana mint. */
   approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval>;
 }

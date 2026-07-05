@@ -3,7 +3,7 @@
   "references": [
     { "path": "packages/common" },
     { "path": "packages/viz-watcher" },
-    { "path": "packages/ton-watcher" },
+    { "path": "packages/gram-watcher" },
     { "path": "packages/signer" },
     { "path": "packages/coordinator" },
     { "path": "packages/recon" },

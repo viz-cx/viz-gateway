@@ -11,7 +11,7 @@
 const assert = require("node:assert");
 const { beginCell, Address } = require("@ton/ton");
 const { canonicalPegOut } = require("@gateway/common");
-const { TonHttpChain } = require("../packages/ton-watcher/dist/tonChain.js");
+const { GramHttpChain } = require("../packages/gram-watcher/dist/gramChain.js");
 const { validateAction, SourceMismatchError } = require("../packages/signer/dist/sourceValidator.js");
 
 let failures = 0;
@@ -73,9 +73,9 @@ function mockClient(txs) {
   };
 }
 
-// Construct a read-only TonHttpChain (no mnemonic/multisig) and swap in the mock client.
+// Construct a read-only GramHttpChain (no mnemonic/multisig) and swap in the mock client.
 function tonChainWith(txs) {
-  const chain = new TonHttpChain(
+  const chain = new GramHttpChain(
     "https://example.invalid", // endpoint (unused; client is mocked)
     "", // apiKey
     MINTER,

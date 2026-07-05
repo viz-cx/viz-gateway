@@ -4,20 +4,20 @@ import {
   createStore,
   loadConfig,
   type SolanaMintProposal,
-  type TonMintProposal,
+  type GramMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
-import { TonHttpChain } from "@gateway/ton-watcher/dist/tonChain";
-import { TonApprover } from "@gateway/ton-watcher/dist/tonApprove";
+import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
+import { TonApprover } from "@gateway/gram-watcher/dist/gramApprove";
 import { KeyedSigner } from "./keyedSigner";
 import { routeApproval } from "./routeApproval";
 import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
 
 interface ApproveRequest {
   action: Record<string, unknown>;
-  proposal: VizReleaseProposal | TonMintProposal | SolanaMintProposal;
+  proposal: VizReleaseProposal | GramMintProposal | SolanaMintProposal;
 }
 
 /**
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   // gateway jetton wallet is not configured, a TON peg-out can never be validated, so fail
   // closed if one ever arrives (mirrors the Solana stub above).
   const tonReader: BurnReader = cfg.gram.gatewayJettonWallet
-    ? new TonHttpChain(
+    ? new GramHttpChain(
         cfg.gram.endpoint,
         cfg.gram.apiKey,
         cfg.gram.jettonMinterAddress,

@@ -3,11 +3,11 @@ import {
   type Approval,
   type CanonicalAction,
   type SolanaMintProposal,
-  type TonMintProposal,
+  type GramMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
 
-export type Proposal = VizReleaseProposal | TonMintProposal | SolanaMintProposal;
+export type Proposal = VizReleaseProposal | GramMintProposal | SolanaMintProposal;
 
 /** Asks one operator's signer to validate + sign a proposal. */
 export interface SignerClient {

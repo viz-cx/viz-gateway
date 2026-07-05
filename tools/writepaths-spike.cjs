@@ -101,7 +101,7 @@ const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/
     },
   };
   const opTon = new KeyedSigner("op-1", "", "", FEES, null, DISABLED_SOURCE_VALIDATION, null, fakeApprover);
-  const tonAppr = await opTon.approveTonMint(pegIn, mintProposal);
+  const tonAppr = await opTon.approveGramMint(pegIn, mintProposal);
   assert.strictEqual(seenIsProposer, true, "op-1 is the designated proposer");
   assert.ok(tonAppr.signature.startsWith("ton:EQorder_addr:0:propose"), "on-chain receipt encoded into approval");
   assert.strictEqual(tonAppr.operatorId, "op-1");
@@ -109,14 +109,14 @@ const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/
 
   // a non-proposer operator must compute isProposer=false
   const opTon2 = new KeyedSigner("op-2", "", "", FEES, null, DISABLED_SOURCE_VALIDATION, null, fakeApprover);
-  await opTon2.approveTonMint(pegIn, mintProposal);
+  await opTon2.approveGramMint(pegIn, mintProposal);
   assert.strictEqual(seenIsProposer, false, "op-2 is not the designated proposer -> approve, not propose");
 
   // net mismatch must be rejected BEFORE any on-chain effect
-  await assert.rejects(opTon.approveTonMint(pegIn, { ...mintProposal, amountMilliViz: "1" }), /net/);
+  await assert.rejects(opTon.approveGramMint(pegIn, { ...mintProposal, amountMilliViz: "1" }), /net/);
   // a signer with NO approver configured must refuse (never silently unauthorized)
   const opNoTon = new KeyedSigner("op-1", "", "", FEES, null, DISABLED_SOURCE_VALIDATION);
-  await assert.rejects(opNoTon.approveTonMint(pegIn, mintProposal), /approver not configured/);
+  await assert.rejects(opNoTon.approveGramMint(pegIn, mintProposal), /approver not configured/);
   console.log("[ton] non-proposer role + net mismatch + missing-approver all handled OK");
 
   console.log("\nRESULT: VIZ release signing+merge works; TON mint approval delegates the");

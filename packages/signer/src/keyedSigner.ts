@@ -4,13 +4,13 @@ import type {
   GatewayFeeConfig,
   Signer,
   SolanaMintProposal,
-  TonMintProposal,
+  GramMintProposal,
   VizReleaseProposal,
 } from "@gateway/common";
 import { baseFee, pegInFeePolicyFor } from "@gateway/common";
 import { milliToViz } from "@gateway/viz-watcher/dist/vizChain";
 import { signRelease } from "@gateway/viz-watcher/dist/vizSign";
-import { encodeReceipt, type TonApprovalClient } from "@gateway/ton-watcher/dist/tonApprove";
+import { encodeReceipt, type GramApprovalClient } from "@gateway/gram-watcher/dist/gramApprove";
 import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
 
 /**
@@ -73,7 +73,7 @@ export class KeyedSigner implements Signer {
     /**
      * RETAINED for constructor-arg stability, no longer used for signing. TON mints
      * are authorized by on-chain multisig approvals: the operator's mnemonic lives in
-     * (and is used only by) the injected `tonApprover`, never here. See approveTonMint.
+     * (and is used only by) the injected `tonApprover`, never here. See approveGramMint.
      */
     private readonly _tonMnemonic: string,
     private readonly fees: GatewayFeeConfig,
@@ -86,7 +86,7 @@ export class KeyedSigner implements Signer {
      * wallet, not off-chain signatures — so the signer delegates the effect here.
      * Null when TON is not wired on this operator (then a TON PEG_IN is refused).
      */
-    private readonly tonApprover: TonApprovalClient | null = null,
+    private readonly tonApprover: GramApprovalClient | null = null,
   ) {
     if (validateSource === undefined) {
       // A forgotten validator must never degrade to "sign without a source check".
@@ -142,8 +142,8 @@ export class KeyedSigner implements Signer {
     return { actionId: action.id, operatorId: this.operatorId, signature };
   }
 
-  async approveTonMint(action: CanonicalAction, proposal: TonMintProposal): Promise<Approval> {
-    if (action.direction !== "PEG_IN") throw new Error("approveTonMint expects a PEG_IN action");
+  async approveGramMint(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval> {
+    if (action.direction !== "PEG_IN") throw new Error("approveGramMint expects a PEG_IN action");
     await this.assertSource(action);
     if (proposal.toAddress !== action.recipient) {
       throw new Error(`proposal.toAddress (${proposal.toAddress}) != action.recipient (${action.recipient})`);

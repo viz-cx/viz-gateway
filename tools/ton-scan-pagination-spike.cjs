@@ -12,7 +12,7 @@
 // Run: node tools/ton-scan-pagination-spike.cjs   (after npm run build)
 const assert = require("node:assert");
 const { InMemoryGatewayStore } = require("../packages/common/dist/store");
-const { paginateBurnsByLt } = require("../packages/ton-watcher/dist/tonChain");
+const { paginateBurnsByLt } = require("../packages/gram-watcher/dist/gramChain");
 const CURSOR = "cursor:ton-watcher";
 
 // A minimal Transaction stand-in: paginateBurnsByLt only touches .lt, .now, .hash().

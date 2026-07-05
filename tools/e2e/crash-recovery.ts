@@ -2,7 +2,7 @@
 // crash in the BROADCAST window WITHOUT double-minting wVIZ.
 //
 // This is the live counterpart to spike cases 21-24 (tools/idempotent-delivery-spike.cjs):
-// the spike proves the TonMintBroadcaster logic against a mocked chain; this driver
+// the spike proves the GramMintBroadcaster logic against a mocked chain; this driver
 // proves the same guarantee end-to-end against a real TON testnet + the full stack.
 //
 // The double-mint sequence it reproduces (see docs/plan-ton-peg-in-idempotency.md):

@@ -1,6 +1,6 @@
 import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
-import { TonHttpChain } from "./tonChain";
+import { GramHttpChain } from "./gramChain";
 
 /** Durable scan-cursor name; value is the last-processed logical time (lt). */
 const CURSOR = "cursor:ton-watcher";
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
       "GRAM_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
     );
   }
-  const chain = new TonHttpChain(
+  const chain = new GramHttpChain(
     cfg.gram.endpoint,
     cfg.gram.apiKey,
     cfg.gram.jettonMinterAddress,
