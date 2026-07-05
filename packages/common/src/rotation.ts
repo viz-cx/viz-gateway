@@ -166,6 +166,12 @@ export function buildProposal(a: BuildProposalArgs): RotationProposal {
  * and assert it is byte-identical to the op in the file, so a co-signer never
  * signs an authority other than the one the proposal claims. Also checks chainId
  * and non-expiry. memo_key/json_metadata are non-authority fields taken as-is.
+ *
+ * The transaction MUST carry exactly one operation and no extensions: a co-signer
+ * signs the WHOLE vizTx, so any additional operation (e.g. a `transfer`) would be
+ * authorized under the collected T-of-N even though only operations[0] is
+ * validated here. Rejecting length != 1 / non-empty extensions closes that
+ * multi-op injection path (audit VG-01).
  */
 export function validateProposal(
   p: RotationProposal,
@@ -174,6 +180,15 @@ export function validateProposal(
   if (p.version !== 1) throw new Error(`unsupported proposal version ${p.version}`);
   if (p.chainId !== ctx.chainId) {
     throw new Error(`proposal chainId '${p.chainId}' != expected '${ctx.chainId}'`);
+  }
+  if (!Array.isArray(p.vizTx.operations) || p.vizTx.operations.length !== 1) {
+    throw new Error(
+      `proposal must contain exactly one operation (got ${p.vizTx.operations?.length ?? 0}) — ` +
+        "a rotation tx carries only the account_update; extra operations would be co-signed too",
+    );
+  }
+  if (!Array.isArray(p.vizTx.extensions) || p.vizTx.extensions.length !== 0) {
+    throw new Error("proposal vizTx.extensions must be empty");
   }
   const fileOp = p.vizTx.operations[0];
   if (!fileOp || fileOp[0] !== "account_update") throw new Error("proposal op is not account_update");

@@ -124,6 +124,30 @@ assert.throws(
 );
 console.log("[proposal] tamper/chainId/expiry rejection OK");
 
+// VG-01: multi-op injection — a proposer appends a `transfer` after the faithful
+// account_update. operations[0] still validates, but the co-signer signs the WHOLE
+// vizTx, so an unguarded validator would authorize the transfer under T-of-N.
+// validateProposal must reject any operations.length != 1.
+const injected = JSON.parse(JSON.stringify(proposal));
+injected.vizTx.operations.push([
+  "transfer",
+  { from: "viz-gateway", to: "attacker", amount: "999999.000 VIZ", memo: "" },
+]);
+assert.throws(
+  () => validateProposal(injected, { chainId: "viz-gateway", nowMs: 0 }),
+  /exactly one operation/,
+  "multi-op injection must be rejected (VG-01)",
+);
+// zero operations -> rejected
+const empty = JSON.parse(JSON.stringify(proposal));
+empty.vizTx.operations = [];
+assert.throws(() => validateProposal(empty, { chainId: "viz-gateway", nowMs: 0 }), /exactly one operation/);
+// non-empty extensions -> rejected
+const ext = JSON.parse(JSON.stringify(proposal));
+ext.vizTx.extensions = [[0, {}]];
+assert.throws(() => validateProposal(ext, { chainId: "viz-gateway", nowMs: 0 }), /extensions must be empty/);
+console.log("[proposal] VG-01 multi-op / empty-ops / extensions rejection OK");
+
 // merge round-trip: each operator signs the SAME tx independently; merged set
 // must equal one-party-signs-all (order-independent), exactly like releases.
 // Sign a clone with EMPTY signatures so the lone result IS this operator's
