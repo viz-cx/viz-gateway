@@ -6,5 +6,5 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "references": [{ "path": "../common" }, { "path": "../../contracts/ton" }]
+  "references": [{ "path": "../common" }, { "path": "../log" }, { "path": "../../contracts/ton" }]
 }

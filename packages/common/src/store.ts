@@ -63,6 +63,18 @@ export interface GatewayStore {
   /** Stamp scan_time after scanning a VIZ account's address. */
   touchDepositScan(vizAccount: string, now: number): Promise<void>;
 
+  // --- durable scan cursors (watcher restart-safety) ---
+  /**
+   * A named, persisted scan cursor (survives restart). Watchers resume from here
+   * so downtime never silently skips unseen work. Returns 0 if unset.
+   */
+  getCursor(name: string): Promise<number>;
+  /**
+   * Advance a scan cursor. Monotonic: a write that would move the cursor backward
+   * is ignored (guards against a racing/stale writer re-scanning old ground).
+   */
+  setCursor(name: string, value: number): Promise<void>;
+
   // --- global pause ---
   isPaused(): Promise<boolean>;
   pause(reason: string): Promise<void>;
@@ -342,6 +354,17 @@ export class SqliteGatewayStore implements GatewayStore {
     return r ? (r["value"] as string | null) : null;
   }
 
+  async getCursor(name: string): Promise<number> {
+    // Cursor keys share the gateway_state KV; the caller-supplied "cursor:*" name
+    // namespaces them away from the pause flag.
+    const v = this.getKey(name);
+    return v ? Number(v) : 0;
+  }
+  async setCursor(name: string, value: number): Promise<void> {
+    if (value <= (await this.getCursor(name))) return; // monotonic
+    this.setKey(name, String(value));
+  }
+
   async isPaused(): Promise<boolean> {
     return this.getKey("paused") === "1";
   }
@@ -366,6 +389,7 @@ export class InMemoryGatewayStore implements GatewayStore {
   private readonly rows = new Map<string, OutboxRecord>();
   private readonly caps: Array<{ ts: number; amount: bigint }> = [];
   private readonly deposits = new Map<string, DepositAddressRecord>();
+  private readonly cursors = new Map<string, number>();
   private paused = false;
   private reason = "";
 
@@ -463,6 +487,12 @@ export class InMemoryGatewayStore implements GatewayStore {
   async touchDepositScan(vizAccount: string, now: number): Promise<void> {
     const d = this.deposits.get(vizAccount);
     if (d) d.scanTime = now;
+  }
+  async getCursor(name: string): Promise<number> {
+    return this.cursors.get(name) ?? 0;
+  }
+  async setCursor(name: string, value: number): Promise<void> {
+    if (value > (this.cursors.get(name) ?? 0)) this.cursors.set(name, value); // monotonic
   }
   async isPaused(): Promise<boolean> {
     return this.paused;

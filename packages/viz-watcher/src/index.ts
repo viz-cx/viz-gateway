@@ -5,7 +5,10 @@ import {
   loadConfig,
   type VizChain,
 } from "@gateway/common";
-import { VizJsChain } from "./vizChain";
+import { nextScanWindow, VizJsChain } from "./vizChain";
+
+/** Durable scan-cursor name (persisted in the shared store; survives restart). */
+const CURSOR = "cursor:viz-watcher";
 
 /**
  * viz-watcher: follows the VIZ irreversible head, detects deposits to the gateway
@@ -22,9 +25,10 @@ async function main(): Promise<void> {
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
 
-  // Last processed block. Cold start (0) begins at the current safe head;
-  // historical backfill is a separate, deliberate operation.
-  let cursor = 0;
+  // Last processed block, resumed from the durable store so downtime doesn't skip
+  // deposits (VG-03). Cold start (0) begins at the current safe head and persists
+  // it once; historical backfill before first-ever run is a separate operation.
+  let cursor = await store.getCursor(CURSOR);
   let running = true;
   const stop = () => {
     running = false;
@@ -37,6 +41,9 @@ async function main(): Promise<void> {
   );
 
   while (running) {
+    // A backlog larger than one scan window means catch up on the next tick
+    // immediately (no block sleep), so downtime is drained fast, not one cap/3s.
+    let caughtUp = true;
     try {
       if (await store.isPaused()) {
         console.warn(`[viz-watcher] gateway paused (${await store.pauseReason()}); skipping scan`);
@@ -47,9 +54,13 @@ async function main(): Promise<void> {
       const safeHead = lib - cfg.viz.extraConfirmations;
       if (cursor === 0) {
         cursor = safeHead;
+        await store.setCursor(CURSOR, cursor); // make the "start here" decision once
         console.log(`[viz-watcher] starting at irreversible head ${cursor} (LIB ${lib})`);
       } else if (safeHead > cursor) {
-        const deposits = await chain.irreversibleDepositsSince(cursor, safeHead);
+        // Advance only to what a single irreversibleDepositsSince call can scan; a
+        // larger backlog is caught over successive ticks, never skipped (VG-03).
+        const { scannedTo, caughtUp: reached } = nextScanWindow(cursor, safeHead);
+        const deposits = await chain.irreversibleDepositsSince(cursor, scannedTo);
         for (const dep of deposits) {
           const action = canonicalPegIn(dep);
           const first = await store.enqueue({
@@ -80,12 +91,14 @@ async function main(): Promise<void> {
             `[viz-watcher] peg-in ${action.id} QUEUED -> mint to ${action.recipient} on ${action.remoteChain} (gross ${action.amountMilliViz} mVIZ)`,
           );
         }
-        cursor = safeHead;
+        cursor = scannedTo;
+        await store.setCursor(CURSOR, cursor);
+        caughtUp = reached;
       }
     } catch (err) {
       console.error("[viz-watcher] loop error:", err);
     }
-    await new Promise((r) => setTimeout(r, 3000)); // VIZ block interval
+    if (caughtUp) await new Promise((r) => setTimeout(r, 3000)); // VIZ block interval
   }
 
   await store.close();

@@ -7,6 +7,7 @@
   "dependencies": {
     "@gateway/common": "0.1.0",
     "@gateway/contracts-ton": "0.1.0",
+    "@gateway/log": "0.1.0",
     "@ton/ton": "^15.0.0",
     "@ton/core": "^0.62.0",
     "@ton/crypto": "^3.3.0"

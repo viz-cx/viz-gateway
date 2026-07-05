@@ -27,8 +27,25 @@ import { buildReleaseTx, releaseTxId } from "./vizSign";
  */
 const ZERO_TRX = "0000000000000000000000000000000000000000";
 
-/** Bound the per-call block scan so a watcher tick can't accidentally scan the chain. */
-const MAX_BLOCKS_PER_SCAN = 200;
+/**
+ * Bound the per-call block scan so a watcher tick can't accidentally scan the
+ * chain. Exported so the watcher advances its cursor only to what a single call
+ * actually scanned (`min(safeHead, cursor + MAX_BLOCKS_PER_SCAN)`), never past it
+ * — a backlog larger than the cap must not be silently skipped (VG-03).
+ */
+export const MAX_BLOCKS_PER_SCAN = 200;
+
+/**
+ * The block window a single watcher tick should scan+commit, given the current
+ * cursor and safe head. `scannedTo` is capped at one MAX_BLOCKS_PER_SCAN stride so
+ * a large backlog is caught over successive ticks rather than skipped (VG-03);
+ * `caughtUp` is false while a backlog remains (the watcher then skips its sleep to
+ * drain fast). Pure — shared by the watcher and its spike so they can't drift.
+ */
+export function nextScanWindow(cursor: number, safeHead: number): { scannedTo: number; caughtUp: boolean } {
+  const scannedTo = Math.min(safeHead, cursor + MAX_BLOCKS_PER_SCAN);
+  return { scannedTo, caughtUp: scannedTo >= safeHead };
+}
 
 function call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {

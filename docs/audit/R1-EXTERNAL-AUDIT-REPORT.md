@@ -226,6 +226,18 @@ configurable max-backfill), and when the scan is capped set
 `cursor = end` (the last block actually scanned), not `safeHead`. Add a recon/
 alert path for peg-ins observed on-chain but never enqueued.
 
+**Remediation status — FIXED** (`fix/vg-watcher-cursors`). The cursor is now durable:
+the watcher resumes from `store.getCursor("cursor:viz-watcher")` and persists after
+every scan via the new monotonic `getCursor`/`setCursor` store primitive, so a
+restart no longer cold-starts at head. The scan-cap gap is closed by
+`nextScanWindow(cursor, safeHead)` — the cursor advances only to
+`min(safeHead, cursor + MAX_BLOCKS_PER_SCAN)` (the blocks actually scanned), and a
+larger backlog is drained over successive ticks (sleep skipped while behind), never
+past unscanned blocks. Verified by `tools/viz-scan-cursor-spike.cjs`
+(resume-from-persisted, monotonicity, gap-free 512-block backlog drain), wired into
+`npm run verify`. (The recon "observed-but-never-enqueued" alert path is out of
+scope here; the silent-skip root cause is eliminated.)
+
 ---
 
 ### VG-04 — Medium — Fee amount is coordinator-authoritative for the sweep; FEE_SWEEP validated by range, not exact
@@ -320,6 +332,21 @@ persisting `(lt, hash)` of the last processed transaction; at minimum, raise the
 default page size and **emit a CRITICAL log/metric whenever a full page is
 returned** (possible truncation). Elevate this above "partially addressed" in
 `docs/overview.md §6.5`.
+
+**Remediation status — FIXED** (`fix/vg-watcher-cursors`). The scan is now genuinely
+`lt`-ranged. `paginateBurnsByLt` pages the gateway wallet's transactions
+newest→older via the `{lt, hash}` anchor until it drains back to the persisted
+cursor (`store.getCursor("cursor:ton-watcher")`, the last-processed `lt`) or history
+end. The cursor advances only to the newest **final** `lt` after a complete drain;
+the not-yet-final tail is re-scanned next tick, so no burn is skipped. Truncation is
+no longer silent: if a burst exceeds `TON_MAX_SCAN_PAGES` (default 50) × page size,
+the scan returns `drained:false` and the watcher **fails closed** — it does NOT
+advance the cursor past the unscanned older burns, `notifyStaff(...)`, and
+`store.pause(...)`. Verified by `tools/ton-scan-pagination-spike.cjs` (multi-page
+drain collects all burns, truncation holds the cursor + fails closed, not-yet-final
+tail excluded then re-scanned, `lt` cursor persists), wired into `npm run verify`.
+(The signer-side `getBurn` page-bound noted above is a separate F2 liveness item,
+not covered by this change.)
 
 ---
 
