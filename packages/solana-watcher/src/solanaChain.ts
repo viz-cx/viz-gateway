@@ -157,6 +157,7 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
       const parsed = parseGatewayDeposit(tx, this.gatewayTokenAccount.toBase58());
       if (!parsed) continue;
       burns.push({
+        chain: "SOLANA",
         sourceId: s.signature,
         height: s.slot,
         from: parsed.from,
@@ -189,6 +190,7 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     const burn = parseBurn(tx, this.mint.toBase58());
     if (!burn) return null;
     return {
+      chain: "SOLANA",
       sourceId,
       height: tx.slot,
       from: burn.authority,

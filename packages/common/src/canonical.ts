@@ -70,6 +70,7 @@ export function canonicalPegOut(b: RemoteBurn): CanonicalAction {
   const body = canonicalString([
     ["v", "1"],
     ["dir", "PEG_OUT"],
+    ["chain", b.chain],
     ["src", id],
     ["recipient", b.homeDestination],
     ["amount_milli_viz", b.amountMilliViz.toString()],
@@ -79,6 +80,7 @@ export function canonicalPegOut(b: RemoteBurn): CanonicalAction {
     id,
     recipient: b.homeDestination,
     amountMilliViz: b.amountMilliViz,
+    remoteChain: b.chain,
     digest: digestOf(body),
   };
 }

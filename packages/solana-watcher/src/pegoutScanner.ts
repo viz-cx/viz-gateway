@@ -106,6 +106,7 @@ async function main(): Promise<void> {
         const transfers = await chain.incomingTransfersTo(dep.wvizAta, slot);
         for (const t of transfers) {
           const action = canonicalPegOut({
+            chain: "SOLANA",
             sourceId: t.signature,
             height: t.slot,
             from: dep.solAddress,

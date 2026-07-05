@@ -119,6 +119,7 @@ async function expectReject(promise, label) {
   // The TRUE burn the operator's own Solana node would return (homeDestination filled
   // by the validator after the binding check, so the adapter leaves it "").
   const trueBurn = {
+    chain: "SOLANA",
     sourceId: SOL_SIG,
     height: 1234,
     from: ALICE_DEPOSIT, // burn authority = alice's PDA deposit address

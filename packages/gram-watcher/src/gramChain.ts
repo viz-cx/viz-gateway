@@ -245,6 +245,7 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     const parsed = parseJettonDeposit(inMsg.body.beginParse());
     if (!parsed) return null;
     return {
+      chain: "GRAM",
       sourceId: tx.hash().toString("hex"),
       height,
       from: parsed.sender,

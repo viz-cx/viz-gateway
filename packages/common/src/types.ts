@@ -34,6 +34,8 @@ export interface VizDeposit {
  *   Solana -> sourceId = tx signature, height = slot
  */
 export interface RemoteBurn {
+  /** Source chain identifier — determines which backing account releases VIZ. */
+  chain: RemoteChainId;
   /** Unique source-event id on the remote chain (idempotency key). */
   sourceId: string;
   /** Remote-chain height/seqno/slot at which it was observed final. */

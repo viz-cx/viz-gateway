@@ -43,6 +43,7 @@ console.log("[canonical] separator-injection does not forge a field boundary OK"
 
 // --- direction domain separation: peg-in vs peg-out never collide ---
 const burn = {
+  chain: "GRAM",
   sourceId: "abc123:0",
   homeDestination: "EQCuW98IexampleAddr",
   amountMilliViz: 10_000n,
@@ -51,8 +52,8 @@ assert.notStrictEqual(canonicalPegIn(dep).digest, canonicalPegOut(burn).digest);
 console.log("[canonical] PEG_IN vs PEG_OUT domain-separated OK");
 
 // --- cross-field boundary shift on peg-out (src vs recipient) ---
-const p = canonicalPegOut({ sourceId: "AB", homeDestination: "C", amountMilliViz: 1n });
-const q = canonicalPegOut({ sourceId: "A", homeDestination: "BC", amountMilliViz: 1n });
+const p = canonicalPegOut({ chain: "GRAM", sourceId: "AB", homeDestination: "C", amountMilliViz: 1n });
+const q = canonicalPegOut({ chain: "GRAM", sourceId: "A", homeDestination: "BC", amountMilliViz: 1n });
 assert.notStrictEqual(p.digest, q.digest);
 console.log("[canonical] peg-out src/recipient boundary shift -> distinct digests OK");
 

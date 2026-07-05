@@ -52,6 +52,7 @@ const FEES = {
 
 function makePegOutAction() {
   return canonicalPegOut({
+    chain: "GRAM",
     sourceId: "aa".repeat(32),
     height: 1,
     from: "EQx",

@@ -49,6 +49,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false } = {}) {
 
 (async () => {
   const action = canonicalPegOut({
+    chain: "GRAM",
     sourceId: "aa".repeat(32),
     height: 1,
     from: "EQx",
