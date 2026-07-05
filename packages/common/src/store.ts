@@ -53,6 +53,13 @@ export interface GatewayStore {
   // --- rolling 24h cap window (shared) ---
   recordCap(amountMilliViz: bigint, now: number): Promise<void>;
   capSumMilliViz(sinceMs: number, now: number): Promise<bigint>;
+  /**
+   * Atomic reserve: prune, sum the live window, and record `amountMilliViz` ONLY if the
+   * post-record total stays within `capMilliViz` — all in one transaction. Returns true if
+   * reserved, false if it would breach the cap (nothing recorded). Closes the cross-process
+   * TOCTOU where two watchers both read the sum, both pass, then both record over the cap.
+   */
+  tryReserveCap(amountMilliViz: bigint, capMilliViz: bigint, sinceMs: number, now: number): Promise<boolean>;
 
   // --- peg-out deposit addresses (Variant A registry) ---
   /** Register (idempotently) a derived deposit address for a VIZ account. */
@@ -343,6 +350,31 @@ export class SqliteGatewayStore implements GatewayStore {
     return sumBigIntColumn(rows);
   }
 
+  async tryReserveCap(amountMilliViz: bigint, capMilliViz: bigint, sinceMs: number, now: number): Promise<boolean> {
+    // BEGIN IMMEDIATE takes the write lock up front, so concurrent processes serialize here and
+    // the prune+sum+insert is a single atomic read-modify-write (busy_timeout makes losers wait,
+    // not fail). Without it, two watchers could both read the sum, both pass, both insert -> cap
+    // bypassed AND the per-deposit pause never trips (neither breaches on its own).
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM cap_window WHERE ts < ?").run(sinceMs);
+      const rows = this.db
+        .prepare("SELECT amount_milli_viz AS v FROM cap_window WHERE ts <= ?")
+        .all(now) as Row[];
+      const sum = sumBigIntColumn(rows);
+      if (sum + amountMilliViz > capMilliViz) {
+        this.db.exec("COMMIT"); // keep the prune; record nothing
+        return false;
+      }
+      this.db.prepare("INSERT INTO cap_window(ts, amount_milli_viz) VALUES(?, ?)").run(now, amountMilliViz.toString());
+      this.db.exec("COMMIT");
+      return true;
+    } catch (e) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back / no tx */ }
+      throw e;
+    }
+  }
+
   private setKey(key: string, value: string): void {
     this.db
       .prepare(
@@ -470,6 +502,13 @@ export class InMemoryGatewayStore implements GatewayStore {
   }
   async capSumMilliViz(sinceMs: number, now: number): Promise<bigint> {
     return this.caps.filter((e) => e.ts >= sinceMs && e.ts <= now).reduce((a, e) => a + e.amount, 0n);
+  }
+  async tryReserveCap(amountMilliViz: bigint, capMilliViz: bigint, sinceMs: number, now: number): Promise<boolean> {
+    // Single-process store: JS is single-threaded, so sum+push is already atomic.
+    const sum = this.caps.filter((e) => e.ts >= sinceMs && e.ts <= now).reduce((a, e) => a + e.amount, 0n);
+    if (sum + amountMilliViz > capMilliViz) return false;
+    this.caps.push({ ts: now, amount: amountMilliViz });
+    return true;
   }
   async registerDepositAddress(rec: { vizAccount: string; solAddress: string; wvizAta: string }): Promise<void> {
     if (this.deposits.has(rec.vizAccount)) return;

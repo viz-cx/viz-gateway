@@ -76,7 +76,9 @@ async function main(): Promise<void> {
             status: "SEEN",
           });
           if (!first) continue; // already handled
-          const decision = await breaker.check(action.amountMilliViz);
+          // Atomic check+record: the 24h window slot is reserved in the same transaction as the
+          // check, so concurrent watchers cannot both slip past the cap (see checkAndRecord).
+          const decision = await breaker.checkAndRecord(action.amountMilliViz);
           if (!decision.ok) {
             // Caps are on the GROSS deposit. Hold (do not drop) — the deposit is
             // recoverable: an operator can release the cap or refund.
@@ -87,7 +89,6 @@ async function main(): Promise<void> {
             }
             continue;
           }
-          await breaker.record(action.amountMilliViz);
           await store.setStatus(action.id, "QUEUED");
           console.log(
             `[viz-watcher] peg-in ${action.id} QUEUED -> mint to ${action.recipient} on ${action.remoteChain} (gross ${action.amountMilliViz} mVIZ)`,

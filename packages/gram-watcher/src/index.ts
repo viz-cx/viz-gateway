@@ -71,7 +71,9 @@ async function main(): Promise<void> {
             status: "SEEN",
           });
           if (!first) continue;
-          const decision = await breaker.check(action.amountMilliViz);
+          // Atomic check+record (see checkAndRecord): reserves the 24h window slot in the same
+          // transaction as the check so concurrent watchers cannot both slip past the cap.
+          const decision = await breaker.checkAndRecord(action.amountMilliViz);
           if (!decision.ok) {
             console.warn(`[gram-watcher] burn ${action.id} held: ${decision.reason}`);
             await store.setStatus(action.id, "HELD", { lastError: decision.reason });
@@ -80,7 +82,6 @@ async function main(): Promise<void> {
             }
             continue;
           }
-          await breaker.record(action.amountMilliViz);
           await store.setStatus(action.id, "QUEUED");
           console.log(
             `[gram-watcher] peg-out ${action.id} QUEUED -> release ${action.amountMilliViz} mVIZ to ${action.recipient}`,
