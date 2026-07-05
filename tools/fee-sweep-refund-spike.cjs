@@ -77,6 +77,7 @@ async function expectReject(promise, label) {
     recipient: FEES_GATE,
     amountMilliViz: base,
     digest: `${parent.digest}:fee`,
+    remoteChain: deposit.remoteChain, // inherited from parent (Task 3.2/3.4)
     ...over,
   });
   const refund = (over = {}) => ({
@@ -85,6 +86,7 @@ async function expectReject(promise, label) {
     recipient: deposit.from, // back to the original sender
     amountMilliViz: deposit.amountMilliViz, // gross, no fee
     digest: `${parent.digest}:refund`,
+    remoteChain: deposit.remoteChain, // inherited from parent (Task 3.2/3.4)
     ...over,
   });
 

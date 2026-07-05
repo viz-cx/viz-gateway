@@ -7,7 +7,7 @@ import type {
   GramMintProposal,
   VizReleaseProposal,
 } from "@gateway/common";
-import { baseFee, pegInFeePolicyFor } from "@gateway/common";
+import { baseFee, GatewayAccounts, pegInFeePolicyFor } from "@gateway/common";
 import { milliToViz } from "@gateway/viz-watcher/dist/vizChain";
 import { signRelease } from "@gateway/viz-watcher/dist/vizSign";
 import { encodeReceipt, type GramApprovalClient } from "@gateway/gram-watcher/dist/gramApprove";
@@ -87,6 +87,7 @@ export class KeyedSigner implements Signer {
      * Null when TON is not wired on this operator (then a TON PEG_IN is refused).
      */
     private readonly gramApprover: GramApprovalClient | null = null,
+    private readonly accounts: GatewayAccounts | null = null,
   ) {
     if (validateSource === undefined) {
       // A forgotten validator must never degrade to "sign without a source check".
@@ -129,6 +130,13 @@ export class KeyedSigner implements Signer {
   async signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval> {
     if (action.direction !== "PEG_OUT") throw new Error("signVizRelease expects a PEG_OUT action");
     await this.assertSource(action);
+    if (this.accounts) {
+      if (!action.remoteChain) throw new Error(`release ${action.id} missing remoteChain — cannot verify from-account`);
+      const expectedFrom = this.accounts.accountFor(action.remoteChain);
+      if (proposal.from !== expectedFrom) {
+        throw new Error(`proposal.from (${proposal.from}) != expected backing account ${expectedFrom} for ${action.remoteChain} (${action.id})`);
+      }
+    }
     if (proposal.to !== action.recipient) {
       throw new Error(`proposal.to (${proposal.to}) != action.recipient (${action.recipient})`);
     }

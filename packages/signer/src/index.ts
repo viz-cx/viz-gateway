@@ -86,6 +86,7 @@ async function main(): Promise<void> {
     // never coordinator-fed, so a swept fee can only ever land at this operator's fees.gate.
     fees: cfg.fees,
     feesGateAccount: cfg.feesGateAccount,
+    accounts,
   };
 
   // Pin the Solana accounts to this operator's own config so a compromised coordinator
@@ -128,6 +129,7 @@ async function main(): Promise<void> {
     (action) => validateAction(action, validatorDeps),
     solanaPins,
     gramApprover,
+    accounts,
   );
   const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8090").split(":");
   const port = Number.parseInt(portStr ?? "8090", 10);
