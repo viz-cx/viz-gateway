@@ -7,12 +7,24 @@ import { Orchestrator } from "./orchestrator";
 import { HttpSignerClient, SolanaMintBroadcaster, TonMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
 
 /**
- * coordinator: UNTRUSTED, keyless. On POST /submit { action } it builds the one
- * shared proposal, asks each signer to validate+sign it, and broadcasts once the
+ * coordinator: UNTRUSTED. On POST /submit { action } it builds the one shared
+ * proposal, asks each signer to validate+sign it, and broadcasts once the
  * threshold is met. Works at 1-of-1 (solo) and unchanged at 7-of-11.
  *
- * It cannot cause theft: it holds no keys, and each signer re-validates the
- * proposal against the action. Worst case is a liveness stall.
+ * KEY CUSTODY — precise statement (do not simplify to "keyless"):
+ *   - VIZ:    keyless. Release authority is the operators' secp256k1 M-of-N; the
+ *             coordinator only merges partials and broadcasts.
+ *   - TON:    keyless. Operators approve the mint order on-chain from their OWN
+ *             wallets; the coordinator holds no TON mnemonic.
+ *   - Solana: holds the SUBMITTER key (SOLANA_SUBMITTER_SECRET) = fee payer +
+ *             durable-nonce authority + ATA funder. This is NOT mint authority:
+ *             the mint authority is the on-chain SPL M-of-N multisig, and each
+ *             signer pins mint/multisig/nonceAccount/feePayer and re-derives NET.
+ *
+ * It cannot cause theft on ANY chain: the mint/release authority is always the
+ * on-chain M-of-N, and each signer re-validates the proposal against the action it
+ * independently derived. The Solana submitter key's worst case is a LIVENESS attack
+ * (grind the durable nonce / drain the submitter's SOL) — never fund theft.
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();

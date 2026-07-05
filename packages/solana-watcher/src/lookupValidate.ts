@@ -2,20 +2,34 @@
  * Pure request-resolution for the deposit-address lookup (peg-out Variant A),
  * factored out of the HTTP server in `lookup.ts` so it can be tested offline.
  *
- * Two gates, in order:
+ * Three gates, in order:
  *   1. format pre-filter (`VIZ_ACCOUNT_RE`) — a cheap reject before any RPC;
- *   2. on-chain existence (`accountExists`) — the real gate. wVIZ sent to a
+ *   2. on-chain length bound (`MAX_VIZ_ACCOUNT_BYTES`) — the burn-only deposit program
+ *      guards `viz_account.len() <= 16` (Graphene name limit). A name longer than that
+ *      can be *issued* a deposit address here but its release burn would revert on-chain
+ *      (AccountNameTooLong) with no refund path → funds stranded forever. So we reject
+ *      over-length names at issuance, keeping the TS layer consistent with the program;
+ *   3. on-chain existence (`accountExists`) — the real gate. wVIZ sent to a
  *      deposit address for a typo'd/non-existent VIZ account would be burned on
  *      release with no valid target and no refund (peg-out never refunds), so a
  *      non-existent account must never be issued/registered an address.
  *
  * The regex is deliberately loose (it lets e.g. "a." or "a..b" through); it only
- * screens the obvious junk to save an RPC round-trip. Correctness rests on the
- * existence gate, not the regex.
+ * screens the obvious junk to save an RPC round-trip. Correctness rests on the length
+ * bound + existence gate, not the regex.
  */
 
 /** VIZ/Graphene account-name charset: leading letter + 1..31 of [a-z0-9.-] (len 2..32). */
 export const VIZ_ACCOUNT_RE = /^[a-z][a-z0-9.-]{1,31}$/;
+
+/**
+ * Max deposit-account name length in BYTES, mirroring the on-chain guard
+ * `require!(viz_account.len() <= 16)` in the gateway-deposit program. Bytes (not chars)
+ * because the Anchor program measures `String::len()` (UTF-8 bytes) and derives the PDA
+ * from `viz_account.as_bytes()`. Names longer than this can never be burned, so the
+ * lookup must never issue an address for them.
+ */
+export const MAX_VIZ_ACCOUNT_BYTES = 16;
 
 /** Trim + lowercase, then format-check. Returns the normalized name or null. */
 export function normalizeVizAccount(raw: string | null | undefined): string | null {
@@ -46,6 +60,11 @@ export async function resolveDepositAddress(
 ): Promise<LookupResolution> {
   const vizAccount = normalizeVizAccount(raw);
   if (!vizAccount) return { status: 400, body: { error: "invalid viz_account" } };
+  // Reject names the burn-only program will refuse (viz_account.len() <= 16), BEFORE the
+  // RPC — issuing such an address would strand any wVIZ sent to it (unburnable, no refund).
+  if (Buffer.byteLength(vizAccount, "utf8") > MAX_VIZ_ACCOUNT_BYTES) {
+    return { status: 400, body: { error: `viz_account exceeds ${MAX_VIZ_ACCOUNT_BYTES} bytes (on-chain deposit limit)` } };
+  }
   if (!(await deps.accountExists(vizAccount))) {
     return { status: 404, body: { error: "viz_account does not exist on VIZ" } };
   }

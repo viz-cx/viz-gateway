@@ -5,6 +5,8 @@
 //      after maxConsecutiveFailures consecutive failures → store.isPaused() true.
 //   3) healthy check resets the failure counter (no pause after a transient blip + recovery).
 //   4) genuine under-backing (circulating > locked) still pauses (regression guard).
+//   5) an EXPECTED remote missing from config → constructor throws (finding D): a dropped
+//      remote that still has circulating wVIZ must never silently leave the invariant.
 //
 // Run: node tools/recon-failclosed-spike.cjs   (after npm run build)
 const assert = require("node:assert");
@@ -98,11 +100,36 @@ async function underBackingPauses() {
   console.log("[recon-failclosed] under-backing pause (regression guard) OK");
 }
 
+async function missingExpectedRemoteThrows() {
+  // SOLANA has live supply but its config was dropped, so only TON is wired. Declaring
+  // RECON_EXPECTED_REMOTES=[TON,SOLANA] makes recon refuse to start rather than under-count.
+  assert.throws(
+    () =>
+      new Recon([okRemote("TON", 500)], locked(500), new InMemoryGatewayStore(), {
+        ...cfg,
+        expectedRemotes: ["TON", "SOLANA"],
+      }),
+    /expected remote\(s\) \[SOLANA\] missing/,
+    "a declared-but-missing remote must throw at construction",
+  );
+  // When all declared remotes are present, construction succeeds.
+  const ok = new Recon([okRemote("TON", 500), okRemote("SOLANA", 0)], locked(500), new InMemoryGatewayStore(), {
+    ...cfg,
+    expectedRemotes: ["TON", "SOLANA"],
+  });
+  assert.ok(ok, "all expected remotes present -> constructs");
+  // Empty/absent expectedRemotes keeps the legacy behavior (only the >=1 guard applies).
+  const legacy = new Recon([okRemote("TON", 500)], locked(500), new InMemoryGatewayStore(), cfg);
+  assert.ok(legacy, "no expected-remotes list -> single remote still allowed");
+  console.log("[recon-failclosed] missing expected remote fatal; present set OK; legacy unaffected OK");
+}
+
 (async () => {
   await zeroRemotesThrows();
   await oneRemoteFailsIsIndeterminate();
   await recoveryResetsCounter();
   await underBackingPauses();
+  await missingExpectedRemoteThrows();
   console.log("recon-failclosed-spike: all assertions passed");
 })().catch((e) => {
   console.error(e);

@@ -60,6 +60,11 @@ export interface GatewayConfig {
     signers: string[]; // multisig member pubkeys (base58)
     signerSecret: Uint8Array | null; // THIS operator's solana key (for signing approvals)
     submitterSecret: Uint8Array | null; // fee payer + nonce authority (proposer/submitter)
+    // Expected fee-payer/submitter PUBLIC key (base58). Public, non-secret: every operator
+    // configures it from its own trusted knowledge of who the designated submitter is. The
+    // signer pins proposal.feePayer against it so a compromised coordinator cannot name an
+    // arbitrary fee payer / nonce authority (defense-in-depth; empty = not pinned).
+    submitterPubkey: string;
     scanMaxSignatures: number; // signatures fetched per scan (RPC rate-limit tuning)
     scanTxDelayMs: number; // delay between per-tx parses (429 avoidance)
     scanAddressBatch: number; // deposit addresses scanned per peg-out loop (rotation)
@@ -85,7 +90,16 @@ export interface GatewayConfig {
   caps: CapPolicy;
   fees: GatewayFeeConfig;
   storeUrl: string;
-  recon: { intervalMs: number; driftToleranceMilliViz: bigint; maxConsecutiveFailures: number };
+  recon: {
+    intervalMs: number;
+    driftToleranceMilliViz: bigint;
+    maxConsecutiveFailures: number;
+    // Chain names (e.g. ["TON","SOLANA"]) that MUST be present as recon remotes. If a
+    // listed remote is missing from config, recon refuses to start — closes the gap where
+    // dropping a remote's env var while it still has circulating wVIZ would silently stop
+    // monitoring its supply. Empty = only the "at least one remote" guard applies.
+    expectedRemotes: string[];
+  };
 }
 
 function opt(name: string, dflt: string): string {
@@ -244,6 +258,7 @@ export function loadConfig(): GatewayConfig {
         .filter(Boolean),
       signerSecret: solanaSecret("SOLANA_SIGNER_SECRET"),
       submitterSecret: solanaSecret("SOLANA_SUBMITTER_SECRET"),
+      submitterPubkey: opt("SOLANA_SUBMITTER_PUBKEY", ""),
       scanMaxSignatures: int("SOLANA_MAX_SIGNATURES", 25),
       scanTxDelayMs: int("SOLANA_RPC_TX_DELAY_MS", 250),
       scanAddressBatch: int("SOLANA_SCAN_ADDRESS_BATCH", 50),
@@ -311,6 +326,10 @@ export function loadConfig(): GatewayConfig {
       intervalMs: int("RECON_INTERVAL_MS", 30000),
       driftToleranceMilliViz: big("RECON_DRIFT_TOLERANCE_MILLI_VIZ", "0"),
       maxConsecutiveFailures: int("RECON_MAX_CONSECUTIVE_FAILURES", 3),
+      expectedRemotes: opt("RECON_EXPECTED_REMOTES", "")
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter((s) => s.length > 0),
     },
   };
 }
