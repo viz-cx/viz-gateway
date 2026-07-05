@@ -7,7 +7,8 @@ already fixed and merged / in-branch.
 **Status legend:** ☐ not started · ◐ in progress · ☑ done
 
 - ☑ **VG-05** — canonical encoding injectivity (merged PR #25, main `5387d6b`).
-- ☐ VG-02 — recon fails open
+- ☑ **VG-02** — recon fails open: `Promise.allSettled` per-remote + consecutive-failure escalation
+  + zero-remotes fatal; `packages/recon/src/checker.ts` (`Recon` class); `tools/recon-failclosed-spike.cjs`.
 - ☑ **VG-03** — VIZ peg-in detection gap: durable cursor (`getCursor`/`setCursor`)
   + cap-bounded advance via `nextScanWindow`; `tools/viz-scan-cursor-spike.cjs`.
 - ☑ **VG-06** — TON burn scan lt-paginated (`paginateBurnsByLt`) + fail-closed on

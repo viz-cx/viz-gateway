@@ -164,7 +164,18 @@ locked balance, so it is the most serious finding in this report.
 
 ---
 
-### VG-02 — Medium — recon backing monitor fails open on node error and on missing remotes
+### VG-02 — Medium — recon backing monitor fails open on node error and on missing remotes ✅ FIXED
+
+**Fix:** `packages/recon/src/checker.ts` (`Recon` class, exported); `packages/recon/src/index.ts`
+updated to use it; `packages/common/src/config.ts` adds `RECON_MAX_CONSECUTIVE_FAILURES` (default 3);
+`tools/recon-failclosed-spike.cjs` (wired into `npm run verify`).
+- Zero remotes → `Recon` constructor throws (fatal); process exits 1 before any check.
+- Per-remote supply fetched via `Promise.allSettled`; any failed remote → check returns `null`
+  (indeterminate) and circulating is never reduced to a false-low.
+- Consecutive `null` results tracked in `Recon.consecutiveFailures`; reaching
+  `maxConsecutiveFailures` triggers `store.pause` + `notifyStaff("recon-stalled", ...)`.
+- Healthy result resets the counter; a single blip doesn't pause.
+- `RECON_ONCE=1` exits 2 (non-zero) on indeterminate, matching the existing UNDER-BACKED code.
 
 - **Component:** `packages/recon/src/index.ts`
 - **Location:** `index.ts:51-55` (`Promise.all` over `remotes[].supply()`), `index.ts:112-118` (loop `catch` logs only), `index.ts:40-42` (zero remotes → warn only)

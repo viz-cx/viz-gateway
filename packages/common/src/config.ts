@@ -85,7 +85,7 @@ export interface GatewayConfig {
   caps: CapPolicy;
   fees: GatewayFeeConfig;
   storeUrl: string;
-  recon: { intervalMs: number; driftToleranceMilliViz: bigint };
+  recon: { intervalMs: number; driftToleranceMilliViz: bigint; maxConsecutiveFailures: number };
 }
 
 function opt(name: string, dflt: string): string {
@@ -310,6 +310,7 @@ export function loadConfig(): GatewayConfig {
     recon: {
       intervalMs: int("RECON_INTERVAL_MS", 30000),
       driftToleranceMilliViz: big("RECON_DRIFT_TOLERANCE_MILLI_VIZ", "0"),
+      maxConsecutiveFailures: int("RECON_MAX_CONSECUTIVE_FAILURES", 3),
     },
   };
 }
