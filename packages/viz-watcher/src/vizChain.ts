@@ -36,6 +36,18 @@ const ZERO_TRX = "0000000000000000000000000000000000000000";
 export const MAX_BLOCKS_PER_SCAN = 200;
 
 /**
+ * Defense-in-depth: a correct node echoes back the transaction_id we asked for. Throw if it
+ * is MISSING or mismatched — an absent id (undefined/"") must NOT skip the check (fail-open),
+ * or a lying/misbehaving node could return a different transfer under the requested trxId
+ * (VG M7). Fail closed: we only derive a peg-in from a response we can tie to the exact trx.
+ */
+export function assertTransactionIdMatches(returnedId: string | undefined, requestedId: string): void {
+  if (!returnedId || returnedId !== requestedId) {
+    throw new Error(`getDeposit(${requestedId}): node returned transaction_id "${returnedId ?? ""}" != requested ${requestedId}`);
+  }
+}
+
+/**
  * The block window a single watcher tick should scan+commit, given the current
  * cursor and safe head. `scannedTo` is capped at one MAX_BLOCKS_PER_SCAN stride so
  * a large backlog is caught over successive ticks rather than skipped (VG-03);
@@ -149,13 +161,9 @@ export class VizJsChain implements VizChain {
     }
     if (!tx || !Array.isArray(tx.operations)) return null;
 
-    // Defense-in-depth: a correct node echoes the id we asked for. A mismatch means a
-    // misbehaving/lying node returned a different transaction — refuse to derive from it.
-    if (tx.transaction_id && tx.transaction_id !== trxId) {
-      throw new Error(
-        `getDeposit(${trxId}): node returned transaction_id ${tx.transaction_id} != requested ${trxId}`,
-      );
-    }
+    // Defense-in-depth: a correct node echoes the id we asked for. Missing OR mismatched =>
+    // refuse to derive from it (an empty id must not skip the check — see M7).
+    assertTransactionIdMatches(tx.transaction_id, trxId);
 
     // Confirm the transfer is irreversible before trusting it (re-org safety).
     const lib = await this.lastIrreversibleBlock();
