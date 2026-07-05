@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import type { CapPolicy } from "./caps";
 import type { PegInFeePolicy } from "./fees";
 import type { FederationManifest, ManifestFees, OperatorRef, RemoteChainId } from "./types";
+import { GatewayAccounts } from "./gatewayAccounts";
 
 /**
  * Shared fee constants. For the multisig to merge signatures, every operator must
@@ -32,7 +33,7 @@ export interface GatewayConfig {
   federation: FederationManifest;
   viz: {
     nodeUrl: string;
-    gatewayAccount: string;
+    gatewayAccounts: Record<RemoteChainId, string>;
     signingWif: string;
     extraConfirmations: number;
   };
@@ -217,7 +218,10 @@ export function loadConfig(): GatewayConfig {
     viz: {
       // Accepts http(s):// or ws(s)://; viz-js-lib picks the transport from the scheme.
       nodeUrl: opt("VIZ_NODE_URL", opt("VIZ_NODE_WS", "https://node.viz.cx")),
-      gatewayAccount: opt("VIZ_GATEWAY_ACCOUNT", "viz-gateway"),
+      gatewayAccounts: {
+        GRAM: opt("VIZ_GATEWAY_ACCOUNT_GRAM", ""),
+        SOLANA: opt("VIZ_GATEWAY_ACCOUNT_SOLANA", ""),
+      } as Record<RemoteChainId, string>,
       signingWif: opt("VIZ_SIGNING_WIF", ""),
       extraConfirmations: int("VIZ_EXTRA_CONFIRMATIONS", 2),
     },
@@ -332,4 +336,9 @@ export function loadConfig(): GatewayConfig {
         .filter((s) => s.length > 0),
     },
   };
+}
+
+/** Build the validated registry from config. Throws fail-closed on bad/missing config. */
+export function buildGatewayAccounts(cfg: GatewayConfig): GatewayAccounts {
+  return new GatewayAccounts(cfg.viz.gatewayAccounts);
 }
