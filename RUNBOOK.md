@@ -56,10 +56,18 @@ multisig gas (step 6) and run a peg-out (step 8).
 - **TON testnet** for the multisig + wVIZ jetton. Get test TON from the testnet
   faucet (e.g. @testgiver_ton_bot). Use a testnet `GRAM_ENDPOINT`
   (`https://testnet.toncenter.com/api/v2/jsonRPC`) and a testnet API key.
-- **VIZ**: confirm whether a public VIZ testnet exists. If not, use a dedicated,
-  low-balance VIZ **mainnet** account for the gateway (VIZ is ~$0.005, so a
+- **VIZ**: confirm whether a public VIZ testnet exists. If not, use dedicated,
+  low-balance VIZ **mainnet** accounts for the gateway (VIZ is ~$0.005, so a
   functional test costs cents). The two custody sides are independent, so
-  TON-testnet wVIZ + a low-stakes VIZ account is fine for an end-to-end test.
+  TON-testnet wVIZ + low-stakes VIZ accounts is fine for an end-to-end test.
+- **Per-network VIZ backing accounts (greenfield):** each external chain gets its
+  own VIZ account so VIZ locked on its behalf is ring-fenced:
+  - `gram.gate` — receives VIZ from users bridging to GRAM/TON; releases VIZ on
+    GRAM peg-outs. Set `VIZ_GATEWAY_ACCOUNT_GRAM=gram.gate`.
+  - `solana.gate` — same for Solana. Set `VIZ_GATEWAY_ACCOUNT_SOLANA=solana.gate`.
+  - `fees.gate` — unchanged; receives fee sweeps from both chains.
+  - No balance migration: greenfield bring-up starts with all accounts at zero.
+    The accounts are independent, so neither chain's backing can offset the other's.
 - Tooling: Node 20+, Docker, and `npx @ton/blueprint` for building the contracts.
 
 ## 1. Build the TON bytecode (Blueprint)
@@ -138,18 +146,29 @@ npm run set-minter-admin
 Get the gateway's own Jetton wallet address (the multisig's wVIZ wallet) for the
 minter, and record it → `GRAM_GATEWAY_JETTON_WALLET` (peg-out deposits go here).
 
-## 4. Create & configure the VIZ gateway account
+## 4. Create & configure the VIZ backing accounts
 
-Create a VIZ account (`viz-gateway`) from an existing account; you hold its
-initial master key. Then set its authorities with the setup utility:
+Create **two** VIZ accounts — one per external chain — from an existing account;
+you hold their initial master keys. Then set each account's authorities with the
+setup utility:
 
 ```
+# gram.gate (GRAM/TON backing account)
 VIZ_NODE_URL=https://node.viz.cx \
-GATEWAY_ACCOUNT=viz-gateway \
+GATEWAY_ACCOUNT=gram.gate \
 ACTIVE_ACCOUNTS=<your_viz_account>   ACTIVE_THRESHOLD=1 \
 MASTER_GUARDIANS=<guardian-1,guardian-2,...>   MASTER_THRESHOLD=3 \
 RECOVERY_ACCOUNT=<separate conservative account> \
-npm run setup:viz-account          # dry-run prints the authorities + current state
+npm run setup:viz-account
+APPLY=1 GATEWAY_MASTER_WIF=<current master key> npm run setup:viz-account
+
+# solana.gate (Solana backing account)
+VIZ_NODE_URL=https://node.viz.cx \
+GATEWAY_ACCOUNT=solana.gate \
+ACTIVE_ACCOUNTS=<your_viz_account>   ACTIVE_THRESHOLD=1 \
+MASTER_GUARDIANS=<guardian-1,guardian-2,...>   MASTER_THRESHOLD=3 \
+RECOVERY_ACCOUNT=<separate conservative account> \
+npm run setup:viz-account
 APPLY=1 GATEWAY_MASTER_WIF=<current master key> npm run setup:viz-account
 ```
 
@@ -158,14 +177,24 @@ accounts (the setup aborts if unset). After this: `active` = your key (1-of-1),
 `master` = the guardian council (e.g. 3-of-4, recovery only), `recovery_account`
 set. Note: `change_recovery_account` takes effect after VIZ's owner-recovery delay.
 
+> **Injectivity invariant:** `gram.gate` and `solana.gate` MUST be distinct VIZ
+> accounts. Sharing the same account would break the per-chain isolation guarantee —
+> `GatewayAccounts` enforces this at construction and will refuse to start.
+
 ## 5. Configure `.env`
 
-`cp .env.example .env` and fill: `VIZ_NODE_URL`, `VIZ_GATEWAY_ACCOUNT`,
-`VIZ_SIGNING_WIF` (your active key), `GRAM_ENDPOINT`/`GRAM_API_KEY`,
-`GRAM_MULTISIG_ADDRESS`, `GRAM_JETTON_MINTER_ADDRESS`, `GRAM_GATEWAY_JETTON_WALLET`,
+`cp .env.example .env` and fill: `VIZ_NODE_URL`,
+`VIZ_GATEWAY_ACCOUNT_GRAM=gram.gate`, `VIZ_GATEWAY_ACCOUNT_SOLANA=solana.gate`,
+`VIZ_SIGNING_WIF` (your active key — must be authorised on BOTH backing accounts),
+`GRAM_ENDPOINT`/`GRAM_API_KEY`, `GRAM_MULTISIG_ADDRESS`,
+`GRAM_JETTON_MINTER_ADDRESS`, `GRAM_GATEWAY_JETTON_WALLET`,
 `GRAM_SIGNER_MNEMONIC` (your TON signer wallet), `FEDERATION_N=1`,
 `FEDERATION_THRESHOLD=1`, `SIGNER_ENDPOINTS=http://signer:8090`. Keep the fee/cap
 defaults (100 VIZ floor, 0.30%, 2,000 VIZ min; $500/$1k/$10k caps).
+
+> **`VIZ_GATEWAY_ACCOUNT` is removed.** Replace it with the two per-chain variables
+> above. Both must be set; the gateway refuses to start with either missing or empty.
+> `fees.gate` (`FEES_GATE_ACCOUNT`) is unchanged — fee sweeps from all chains land there.
 
 ### F2 — signer independent source validation (env per operator)
 
