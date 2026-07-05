@@ -1,8 +1,11 @@
 import {
   actionToWire,
+  baseFee,
   createStore,
   loadConfig,
+  pegInFeePolicyFor,
   type CanonicalAction,
+  type GatewayFeeConfig,
   type GatewayStore,
   type OutboxRecord,
 } from "@gateway/common";
@@ -65,6 +68,7 @@ async function tick(
     signingTimeoutMs: { pegIn: number; pegOut: number };
     staleDeliveryAlertMs: number;
     feesGateAccount: string;
+    fees: GatewayFeeConfig;
   },
   state: { alertedWedged: Set<string> },
 ): Promise<void> {
@@ -112,18 +116,19 @@ async function tick(
     const t = planTransition(rec, result, Date.now(), opts);
     await store.setStatus(rec.id, t.status, t.patch);
     if (t.status !== "QUEUED") state.alertedWedged.delete(rec.id); // recovered/advanced — re-arm
-    // Spawn FEE_SWEEP (on confirm) or REFUND (on window-exhaust) for a PEG_IN. Prefer the
-    // fee in the coordinator response, but on the recovery path that fee can be 0 (lost
-    // response, or rebuild failure for an already-executed action). In that case fall back
-    // to the fee the coordinator pinned on the row (store.setFee), so the FEE_SWEEP still
-    // fires and the withheld fee is not stranded as permanent surplus.
-    let feeMilliViz = result.feeMilliViz ?? 0n;
-    if (t.status === "CONFIRMED" && rec.direction === "PEG_IN" && feeMilliViz <= 0n) {
-      feeMilliViz = (await store.get(rec.id))?.feeMilliViz ?? 0n;
-    }
+    // Spawn FEE_SWEEP (on confirm) or REFUND (on window-exhaust) for a PEG_IN. VG-04: the
+    // sweep amount is the independently-derived `base` fee, computed here from the row's
+    // (immutable) gross — NOT the coordinator-pinned fee. `base` is chain-independent (floor
+    // + bps only, so the per-chain policy arg is immaterial), always derivable, and matches
+    // the signer's exact validateFeeSweep check. The activation surcharge, if withheld, is
+    // retained on the gateway as backing surplus (recon sees it via the pinned row fee).
+    const sweepAmountMilliViz =
+      t.status === "CONFIRMED" && rec.direction === "PEG_IN"
+        ? baseFee(rec.amountMilliViz, pegInFeePolicyFor(opts.fees, rec.remoteChain ?? "SOLANA"))
+        : 0n;
     const children = planChildren(rec, t.status, {
       feesGateAccount: opts.feesGateAccount,
-      feeMilliViz,
+      sweepAmountMilliViz,
     });
     for (const child of children) await store.enqueue(child);
     // A confirmed REFUND closes out its parent PEG_IN (REFUNDING -> REFUNDED).
@@ -154,6 +159,7 @@ async function main(): Promise<void> {
     signingTimeoutMs: cfg.dispatcher.signingTimeoutMs,
     staleDeliveryAlertMs: cfg.dispatcher.staleDeliveryAlertMs,
     feesGateAccount: cfg.feesGateAccount,
+    fees: cfg.fees,
   };
   // Persists across ticks so a wedged row is alerted once, not every loop.
   const state = { alertedWedged: new Set<string>() };

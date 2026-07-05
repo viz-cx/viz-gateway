@@ -13,7 +13,14 @@ already fixed and merged / in-branch.
   + cap-bounded advance via `nextScanWindow`; `tools/viz-scan-cursor-spike.cjs`.
 - ☑ **VG-06** — TON burn scan lt-paginated (`paginateBurnsByLt`) + fail-closed on
   truncation (pause + `notifyStaff`); `tools/ton-scan-pagination-spike.cjs`.
-- ☐ VG-04 — fee amount coordinator-authoritative for the sweep
+- ☑ **VG-04** — fee coordinator-authoritative for the sweep. FIXED via exact-`base`
+  sweep (`fix/vg-04-exact-fee-sweep`): signer `validateFeeSweep` requires exactly
+  `base` (chain-independent, re-derived from gross); dispatcher derives the same
+  `base` from the row gross (no coordinator input); activation surcharge retained as
+  gateway backing surplus (recon-consistent). The original "persist destProvisioned /
+  exact fee" recommendation is *not* implementable — the FEE_SWEEP is spawned after
+  the mint provisions the destination, so the mint-time flag is unrecoverable at sweep
+  time (esp. TON: the mint order carries no action id). See audit report VG-04.
 
 VG-03 + VG-06 (+ the shared cursor primitive) shipped together on
 `fix/vg-watcher-cursors`. Both spikes wired into `npm run verify` (full suite green).

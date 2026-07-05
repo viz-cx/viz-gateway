@@ -59,23 +59,30 @@ export function planTransition(rec: OutboxRecord, result: DeliveryResult, now: n
 
 /**
  * Child actions spawned by a parent's transition (pure, testable):
- *   - PEG_IN CONFIRMED  -> FEE_SWEEP: move the withheld fee to fees.gate (a VIZ
+ *   - PEG_IN CONFIRMED  -> FEE_SWEEP: sweep the `base` fee to fees.gate (a VIZ
  *     transfer from the M-of-N account, so it rides the release path as a PEG_OUT).
  *   - PEG_IN REFUNDING  -> REFUND: return GROSS to the original VIZ sender.
  * Both are idempotent (deterministic child id) and re-use the outbox + dispatcher.
+ *
+ * VG-04: the swept amount is `ctx.sweepAmountMilliViz` — the independently-derived `base`
+ * fee (a pure function of the immutable gross), NOT the coordinator-pinned withheld fee.
+ * Any activation surcharge withheld at mint is deliberately retained on the gateway as
+ * backing surplus (the signer only signs a sweep for exactly `base`); this matches the
+ * signer's validateFeeSweep exact check and removes all coordinator discretion over the
+ * sweep. The withheld fee (base + activation) stays pinned on the row for recon accounting.
  */
 export function planChildren(
   rec: OutboxRecord,
   status: ActionStatus,
-  ctx: { feesGateAccount: string; feeMilliViz: bigint },
+  ctx: { feesGateAccount: string; sweepAmountMilliViz: bigint },
 ): EnqueueInput[] {
-  if (status === "CONFIRMED" && rec.direction === "PEG_IN" && ctx.feeMilliViz > 0n) {
+  if (status === "CONFIRMED" && rec.direction === "PEG_IN" && ctx.sweepAmountMilliViz > 0n) {
     return [
       {
         id: `${rec.id}:fee`,
         direction: "FEE_SWEEP",
         recipient: ctx.feesGateAccount,
-        amountMilliViz: ctx.feeMilliViz,
+        amountMilliViz: ctx.sweepAmountMilliViz,
         digest: `${rec.digest}:fee`,
         status: "QUEUED",
         parentId: rec.id,
