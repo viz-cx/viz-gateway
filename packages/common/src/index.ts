@@ -11,3 +11,4 @@ export * from "./adapters";
 export * from "./rotation";
 export * from "./gatewayAccounts";
 export * from "./http";
+export * from "./seenRecovery";

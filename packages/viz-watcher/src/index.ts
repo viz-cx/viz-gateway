@@ -4,12 +4,17 @@ import {
   CircuitBreaker,
   createStore,
   loadConfig,
+  recoverStaleSeen,
   type VizChain,
 } from "@gateway/common";
+import { notifyStaff } from "@gateway/log";
 import { nextScanWindow, VizJsChain } from "./vizChain";
 
 /** Durable scan-cursor name (persisted in the shared store; survives restart). */
 const CURSOR = "cursor:viz-watcher";
+
+/** A peg-in stuck in SEEN longer than this (a crash between enqueue and QUEUED) is recovered. */
+const STALE_SEEN_MS = 5 * 60 * 1000;
 
 /**
  * viz-watcher: follows the VIZ irreversible head, detects deposits to the gateway
@@ -52,6 +57,20 @@ async function main(): Promise<void> {
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
+      // Recover peg-ins stranded in SEEN by a crash between enqueue and QUEUED (M6). The VIZ
+      // deposit was already irreversible before the enqueue, so re-running the cap decision and
+      // advancing is exactly what the live path would have done — just delayed to here.
+      const seen = await recoverStaleSeen(store, breaker, {
+        now: Date.now(),
+        staleMs: STALE_SEEN_MS,
+        match: (r) => r.direction === "PEG_IN",
+        capPauseReason: "VIZ peg-in 24h cap exceeded",
+      });
+      for (const r of seen.requeued)
+        notifyStaff("deposits", `recovered peg-in ${r.id} stranded in SEEN -> QUEUED (missed mint)`, { id: r.id, amountMilliViz: String(r.amountMilliViz) });
+      for (const r of seen.held)
+        notifyStaff("deposits", `peg-in ${r.id} recovered from SEEN but HELD (${r.lastError ?? "cap"})`, { id: r.id });
+
       const lib = await chain.lastIrreversibleBlock();
       const safeHead = lib - cfg.viz.extraConfirmations;
       if (cursor === 0) {

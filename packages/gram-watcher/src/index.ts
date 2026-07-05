@@ -1,9 +1,12 @@
-import { canonicalPegOut, CircuitBreaker, createStore, loadConfig } from "@gateway/common";
+import { canonicalPegOut, CircuitBreaker, createStore, loadConfig, recoverStaleSeen } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 import { GramHttpChain } from "./gramChain";
 
 /** Durable scan-cursor name; value is the last-processed logical time (lt). */
 const CURSOR = "cursor:gram-watcher";
+
+/** A peg-out stuck in SEEN longer than this (a crash between enqueue and QUEUED) is recovered. */
+const STALE_SEEN_MS = 5 * 60 * 1000;
 
 /**
  * gram-watcher: follows TON masterchain finality, detects wVIZ burns, and
@@ -51,6 +54,21 @@ async function main(): Promise<void> {
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
+      // Recover GRAM peg-outs stranded in SEEN by a crash between enqueue and QUEUED (M6). The
+      // TON burn was already final before the enqueue, so re-running the cap decision and
+      // advancing matches the live path. Scoped to GRAM so it never touches Solana peg-out rows
+      // (which the pegoutScanner owns with its burn-checkpoint recovery).
+      const seen = await recoverStaleSeen(store, breaker, {
+        now: Date.now(),
+        staleMs: STALE_SEEN_MS,
+        match: (r) => r.direction === "PEG_OUT" && r.remoteChain === "GRAM",
+        capPauseReason: "TON peg-out 24h cap exceeded",
+      });
+      for (const r of seen.requeued)
+        notifyStaff("withdraws", `recovered peg-out ${r.id} stranded in SEEN -> QUEUED (missed release)`, { id: r.id, amountMilliViz: String(r.amountMilliViz) });
+      for (const r of seen.held)
+        notifyStaff("withdraws", `peg-out ${r.id} recovered from SEEN but HELD (${r.lastError ?? "cap"})`, { id: r.id });
+
       if (cursor === 0) {
         // Cold start: begin at the wallet tip's lt so we don't replay all history
         // (backfill before first-ever run is a separate, deliberate operation).
