@@ -43,7 +43,19 @@ export function validateRemoteAddress(chain: RemoteChainId, address: string): vo
   if (!re.test(address)) throw new Error(`invalid ${chain} destination address: ${address}`);
 }
 
-/** VIZ deposit -> remote mint of wVIZ (chain committed in the digest). */
+/**
+ * VIZ deposit -> remote mint of wVIZ (chain committed in the digest).
+ *
+ * The digest commits the GROSS deposit amount — it is a SOURCE binding, not an economic
+ * one (VG M4). The minted NET (= gross − base − activation) is deliberately NOT in the
+ * digest: each signer RE-DERIVES it from the gross using its own fee config and rejects a
+ * mismatch (keyedSigner.assertNet). So if operators' fee configs diverge they compute
+ * different NETs, the odd one out refuses, and the mint simply never reaches threshold — a
+ * LIVENESS stall, never a wrong-amount mint. Operators MUST therefore share one fee config
+ * (the committed federation manifest, not per-host env) or peg-ins wedge. Putting NET in the
+ * digest would only turn that liveness stall into a digest mismatch — same outcome — so the
+ * source-binding digest + independent assertNet is the intended, theft-safe design.
+ */
 export function canonicalPegIn(d: VizDeposit): CanonicalAction {
   const id = `${d.trxId}:${d.opIndex}`;
   const body = canonicalString([
