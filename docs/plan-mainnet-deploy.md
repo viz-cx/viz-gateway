@@ -98,12 +98,18 @@ These are operator decisions, not code. Each materially changes later phases.
 
 VIZ is already live (prod rotation proven 2026-07-01). Remaining:
 
-- [ ] **Create the subaccounts first.** Verified on mainnet 2026-07-06: `gate` exists (1-of-1,
-      key `VIZ7bHca…`) but `gram.gate` / `fees.gate` / `solana.gate` **do not exist** — they are
-      dotted subaccounts, so only `gate` can create them (small account-creation fee each). For the
-      **TON-only launch** create `gram.gate` (backing) + `fees.gate` (shared fees); skip
-      `solana.gate` until Phase 2. `setup:viz-account` sets authorities on an *existing* account —
-      it does not create it.
+- [x] **Subaccounts created (2026-07-06).** `gram.gate` / `fees.gate` / `solana.gate` now exist on
+      mainnet, each **1-of-1 under a bootstrap key, unfunded (0 VIZ)**, `recovery_account=gate`.
+      Created from parent `gate` (dotted names ⇒ only the parent can create them; ~1 VIZ fee each).
+      Tool for future creations: `npm run setup:viz-create` (`createSubaccount.ts`) — dry-run,
+      `APPLY=1`, refuses recreate / wrong-parent / single-signer master.
+- [ ] **Upgrade each to the 2-of-3 operator keyset, THEN fund.** `npm run setup:viz-account` with
+      `ACTIVE_KEYS`=3 operator pubkeys `ACTIVE_THRESHOLD=2` **and** `MASTER_KEYS`=same 3 pubkeys
+      `MASTER_THRESHOLD=2` (master = same 2-of-3 per Phase 0 decision; `setup:viz-account` now
+      supports key-based master + refuses a single-signer master). Sign `APPLY=1` with each
+      account's **current bootstrap master WIF** (`gram.gate`→`VIZ5fmDqyyk9…`, `fees.gate`→
+      `VIZ5N1xLbUCp…`, `solana.gate`→`VIZ8eHjRK27…`). Discard the bootstrap keys after. TON-only
+      launch upgrades+funds `gram.gate`+`fees.gate`; `solana.gate` stays dormant until Phase 2.
 - [ ] Verify the VIZ mainnet accounts (RUNBOOK §4, `npm run setup:viz-account`):
       - **Per-network backing:** `gram.gate` (and `solana.gate` at Phase 2) — the
         `gatewayAccounts.ts` registry is injective + fail-closed, so these must be distinct.
