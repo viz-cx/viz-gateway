@@ -245,8 +245,10 @@ This cutover is required when migrating from the old additive-ed25519 scheme to 
 Execute in order, with the gateway **paused** between steps 2 and 5.
 
 1. **Deploy** `gateway_deposit` to devnet then mainnet; verify the program ID matches
-   `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1`; set the upgrade authority to the M-of-N
-   multisig; record the program ID and provenance in `contracts/solana/PROVENANCE.md`.
+   `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1`; set the upgrade authority to the federation's
+   M-of-N multisig (a Squads-style authority PDA — an SPL Token multisig does NOT work for the BPF
+   loader) and confirm it with `npm run authority:solana` (dry-run must print `SECURED`); record the
+   program ID and provenance in `contracts/solana/PROVENANCE.md`.
 2. **Reconfigure** lookup, scanner, and all signers: set `SOLANA_DEPOSIT_PROGRAM_ID`;
    remove `SOLANA_DEPOSIT_MASTER_SEED` and `DEPOSIT_MASTER_PUB` from every host.
 3. **Freeze issuance** of old additive deposit addresses: deploy the new lookup service
