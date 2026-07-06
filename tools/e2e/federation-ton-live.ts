@@ -25,14 +25,14 @@
 // E2E_GRAM_MULTISIG_ADDRESS / E2E_GRAM_JETTON_MINTER_ADDRESS.
 //
 // Run: npm run e2e:federation:gram:live
-import { createStore, loadConfig, type OutboxRecord, type RemoteChainId } from "@gateway/common";
+import { createStore, loadConfig, baseFee, pegInFeePolicyFor, type OutboxRecord, type RemoteChainId } from "@gateway/common";
 import { loadE2eConfig, buildRunEnv } from "./config";
 import { loadFederationConfig, buildFederationRunEnv } from "./federation-config";
 import { uniqueGrossMilliViz, expectedNetMilliViz } from "./amounts";
 import { pollUntil } from "./poll";
 import { launchStack, launchFederationStack, type FederationStack, type LaunchedStack } from "./stack";
-import { submitLock, vizBalanceMilliViz } from "./viz";
-import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists } from "./ton";
+import { submitLock, vizBalanceMilliViz, vizAccountExists } from "./viz";
+import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists, submitBurn } from "./ton";
 import { Address } from "@ton/ton";
 import { proveRotationLive } from "./gram-rotation";
 
@@ -69,6 +69,14 @@ const GRAM_APPROVE_MAX_WAIT_MS = 150_000;
 // (surplus flows to the multisig, not back to the proposer), so a lightly-funded
 // proposer can still cover the whole suite. Overrides the 1 TON default.
 const GRAM_ORDER_VALUE_NANO = 300_000_000;
+// Extra VIZ-release scenarios (fee-sweep / below-min refund / bad-recipient peg-out).
+// The FEE_SWEEP and REFUND are VIZ releases spawned only AFTER the peg-in settles, so
+// they need their own generous settle windows on top of the mint latency.
+const FEE_SWEEP_SETTLE_TIMEOUT_MS = 6 * 60_000;
+const REFUND_SETTLE_TIMEOUT_MS = 8 * 60_000;
+// Bad-recipient peg-out: after the burn is seen, watch this long to confirm NO VIZ is
+// released (the release fails closed and wedges — there is no PEG_OUT auto-refund).
+const WEDGE_OBSERVE_MS = 3 * 60_000;
 
 const WATCHERS = ["viz-watcher", "gram-watcher", "dispatcher"] as const;
 
@@ -140,6 +148,27 @@ async function main() {
   const vizBal = await vizBalanceMilliViz(cfg.viz.nodeUrl, cfg.viz.testAccount);
   if (vizBal < cfg.viz.minBalanceMilliViz) {
     throw new Error(`PREFLIGHT: top up ${cfg.viz.testAccount} — have ${vizBal}, need ${cfg.viz.minBalanceMilliViz}`);
+  }
+
+  // Extra-only: prove the VIZ-RELEASE scenarios not covered by criteria 1-3 (which are
+  // peg-in/mint only and never release VIZ). FEE_SWEEP, below-min REFUND, and the
+  // bad-recipient PEG_OUT all exercise the federation VIZ-release path for the first time.
+  if (process.env.FED_EXTRA_ONLY === "1") {
+    const feesGate = loadConfig().feesGateAccount;
+    console.log(`[fed-ton] run=${cfg.runId} EXTRA-ONLY (VIZ-release scenarios) feesGate=${feesGate}`);
+    try {
+      await proveFeeSweep(cfg, fees, feesGate, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner);
+      await proveBelowMinRefund(cfg, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner);
+      if (process.env.FED_PEGOUT_MODE === "live") {
+        await proveBadRecipientPegOut(cfg, signerSpecs, coordinatorEnv, watcherEnv, logDir, tonOwner);
+      } else {
+        console.log(`[fed-ton] bad-recipient peg-out ⇢ SKIPPED (set FED_PEGOUT_MODE=live; strands wVIZ at the gateway)`);
+      }
+      console.log(`\n[fed-ton] ✓ EXTRA VIZ-release scenarios complete`);
+    } finally {
+      await store.close();
+    }
+    return;
   }
 
   try {
@@ -377,6 +406,152 @@ async function proveRotation(
   const operators = fedCfg.operators.map((o) => ({ id: o.id, gramMnemonic: o.gramMnemonic! }));
   await proveRotationLive(cfg, operators);
   return true;
+}
+
+// ── Criterion 5: FEE_SWEEP lands the base fee in fees.gate ───────────────────
+// A peg-in withholds `base` from net; the dispatcher then spawns a FEE_SWEEP — a
+// federation VIZ release of exactly `base` to fees.gate (VG-04: base only, never
+// the activation surcharge). This is the FIRST live exercise of the federation
+// VIZ-release path (criteria 1-3 only mint on TON).
+async function proveFeeSweep(
+  cfg: ReturnType<typeof loadE2eConfig>,
+  fees: ReturnType<typeof loadConfig>["fees"],
+  feesGate: string,
+  signerSpecs: ReturnType<typeof buildFederationRunEnv>["signerSpecs"],
+  coordinatorEnv: Record<string, string>,
+  watcherEnv: Record<string, string>,
+  logDir: string,
+  tonOwner: string,
+): Promise<void> {
+  console.log(`\n[fed-ton] Criterion 5: FEE_SWEEP -> fees.gate (federation VIZ release)`);
+  const gross = uniqueGrossMilliViz(25_000n, `${cfg.runId}-fee`);
+  const net = expectedNetMilliViz(gross, fees, "GRAM" as RemoteChainId, true);
+  const base = baseFee(gross, pegInFeePolicyFor(fees, "GRAM" as RemoteChainId)); // exact swept amount
+  const wvizBefore = await tonWvizBalance(cfg, tonOwner);
+  const feesBefore = await vizBalanceMilliViz(cfg.viz.nodeUrl, feesGate);
+  console.log(`[fed-ton]   gross=${gross} net=${net} base(=swept)=${base}`);
+
+  await withStack(signerSpecs, coordinatorEnv, watcherEnv, `${logDir}-c5`, async () => {
+    const lockTx = await submitLock(cfg, gross, tonOwner);
+    console.log(`[fed-ton]   peg-in lock: ${lockTx}`);
+    await pollUntil(
+      async () => {
+        const b = await tonWvizBalance(cfg, tonOwner);
+        return b - wvizBefore === net ? b : null;
+      },
+      { timeoutMs: MINT_SETTLE_TIMEOUT_MS, intervalMs: POLL_MS, label: "mint credits net" },
+    );
+    console.log(`[fed-ton]   minted +${net}; awaiting FEE_SWEEP of ${base} to ${feesGate}`);
+    // Keep the stack UP: the sweep is a VIZ release the dispatcher spawns only after
+    // the peg-in is CONFIRMED, so it must complete before teardown.
+    const feesAfter = await pollUntil(
+      async () => {
+        const b = await vizBalanceMilliViz(cfg.viz.nodeUrl, feesGate);
+        return b - feesBefore === base ? b : null;
+      },
+      { timeoutMs: FEE_SWEEP_SETTLE_TIMEOUT_MS, intervalMs: POLL_MS, label: "fee sweep to fees.gate" },
+    );
+    if (feesAfter - feesBefore !== base) {
+      throw new Error(`fee-sweep delta ${feesAfter - feesBefore} != base ${base}`);
+    }
+  });
+  console.log(`[fed-ton]   ✓ fees.gate received exactly ${base} mVIZ (base only, no activation)`);
+}
+
+// ── Criterion 6: below-minimum peg-in refunds GROSS to the sender ────────────
+// A deposit whose NET can't clear the mint-gas floor is rejected (no mint); the
+// dispatcher's delivery window then exhausts and a REFUND returns the full GROSS
+// (no fee on a refund) to the original VIZ sender — another federation VIZ release.
+async function proveBelowMinRefund(
+  cfg: ReturnType<typeof loadE2eConfig>,
+  signerSpecs: ReturnType<typeof buildFederationRunEnv>["signerSpecs"],
+  coordinatorEnv: Record<string, string>,
+  watcherEnv: Record<string, string>,
+  logDir: string,
+  tonOwner: string,
+): Promise<void> {
+  console.log(`\n[fed-ton] Criterion 6: below-minimum peg-in refunds gross to sender`);
+  // NET = gross - base(10_000) must fall UNDER the mint-gas floor (~11_000). gross
+  // 15_000 -> net 5_000 is safely BELOW_MIN, so the coordinator rejects for refund.
+  const grossLow = 15_000n;
+  const sender = cfg.viz.testAccount;
+  const senderBefore = await vizBalanceMilliViz(cfg.viz.nodeUrl, sender);
+  const wvizBefore = await tonWvizBalance(cfg, tonOwner);
+  console.log(`[fed-ton]   grossLow=${grossLow} sender=${sender} senderBefore=${senderBefore}`);
+
+  // Short delivery window so the below-min deposit refunds (terminal) within the criterion.
+  const c6WatcherEnv = { ...watcherEnv, DISPATCHER_WINDOW_MS: String(UNDER_THRESHOLD_WINDOW_MS) };
+
+  await withStack(signerSpecs, coordinatorEnv, c6WatcherEnv, `${logDir}-c6`, async () => {
+    const lockTx = await submitLock(cfg, grossLow, tonOwner);
+    console.log(`[fed-ton]   below-min lock: ${lockTx} — expecting refund of ${grossLow} to ${sender}`);
+    const senderAfter = await pollUntil(
+      async () => {
+        const b = await vizBalanceMilliViz(cfg.viz.nodeUrl, sender);
+        // VIZ transfers are feeless, so a full-gross refund restores the pre-lock balance.
+        return b === senderBefore ? b : null;
+      },
+      { timeoutMs: REFUND_SETTLE_TIMEOUT_MS, intervalMs: POLL_MS, label: "gross refunded to sender" },
+    );
+    const wvizAfter = await tonWvizBalance(cfg, tonOwner);
+    if (wvizAfter !== wvizBefore) {
+      throw new Error(`BELOW-MIN MINTED: wVIZ moved ${wvizBefore}->${wvizAfter} for a sub-minimum deposit`);
+    }
+    console.log(`[fed-ton]   sender restored to ${senderAfter}; wVIZ unchanged at ${wvizAfter}`);
+  });
+  console.log(`[fed-ton]   ✓ below-min deposit refunded gross ${grossLow}; no wVIZ minted`);
+}
+
+// ── Criterion 7: peg-out to a nonexistent recipient fails closed ─────────────
+// A burn whose comment names a VIZ account that does not exist cannot be released
+// (the VIZ transfer would target nothing). There is NO PEG_OUT auto-refund, so the
+// release wedges for staff — the invariant is that NO VIZ is ever released and the
+// bad account is never created. SAFETY: the burned wVIZ moves to the gateway wallet
+// and stays there (recoverable by staff), so this is opt-in via FED_PEGOUT_MODE=live.
+async function proveBadRecipientPegOut(
+  cfg: ReturnType<typeof loadE2eConfig>,
+  signerSpecs: ReturnType<typeof buildFederationRunEnv>["signerSpecs"],
+  coordinatorEnv: Record<string, string>,
+  watcherEnv: Record<string, string>,
+  logDir: string,
+  tonOwner: string,
+): Promise<void> {
+  console.log(`\n[fed-ton] Criterion 7: peg-out to nonexistent recipient fails closed (no release)`);
+  const badRecipient = "nosuchaccountzz"; // valid VIZ name shape, guaranteed absent
+  const burnAmount = 1_000n; // 1 wVIZ
+  if (await vizAccountExists(cfg.viz.nodeUrl, badRecipient)) {
+    throw new Error(`test precondition broken: ${badRecipient} unexpectedly exists on VIZ`);
+  }
+  const wvizBefore = await tonWvizBalance(cfg, tonOwner);
+  if (wvizBefore < burnAmount) throw new Error(`burn wallet has ${wvizBefore} wVIZ, need >= ${burnAmount}`);
+
+  await withStack(signerSpecs, coordinatorEnv, watcherEnv, `${logDir}-c7`, async () => {
+    await submitBurn(cfg, burnAmount, badRecipient);
+    console.log(`[fed-ton]   burned ${burnAmount} wVIZ with comment=${badRecipient} (nonexistent)`);
+    // Confirm the burn was reflected (wVIZ left the burn wallet).
+    await pollUntil(
+      async () => {
+        const b = await tonWvizBalance(cfg, tonOwner);
+        return b <= wvizBefore - burnAmount ? b : null;
+      },
+      { timeoutMs: MINT_SETTLE_TIMEOUT_MS, intervalMs: POLL_MS, label: "burn reflected on wVIZ balance" },
+    );
+    console.log(`[fed-ton]   burn seen; observing ${WEDGE_OBSERVE_MS / 1000}s that NO VIZ is released`);
+    // The release must fail closed: the bad account is never created/credited.
+    const deadline = Date.now() + WEDGE_OBSERVE_MS;
+    while (Date.now() < deadline) {
+      try {
+        if (await vizAccountExists(cfg.viz.nodeUrl, badRecipient)) {
+          throw new Error(`FAIL-OPEN: ${badRecipient} exists — a release to a nonexistent recipient was attempted/succeeded`);
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("FAIL-OPEN")) throw err;
+        console.warn(`[fed-ton]   (peg-out) transient VIZ read error, ignoring: ${(err as Error).message}`);
+      }
+      await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+  });
+  console.log(`[fed-ton]   ✓ no VIZ released to ${badRecipient} (fail-closed; wVIZ held at gateway for staff)`);
 }
 
 /** Newest active PEG_IN/TON row minting to `owner`, created at/after `since`. */
