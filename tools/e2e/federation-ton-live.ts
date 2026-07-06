@@ -33,6 +33,7 @@ import { pollUntil } from "./poll";
 import { launchStack, launchFederationStack, type FederationStack, type LaunchedStack } from "./stack";
 import { submitLock, vizBalanceMilliViz } from "./viz";
 import { tonWvizBalance, nextOrderInfo, nextOrderSeqno, orderExists } from "./ton";
+import { Address } from "@ton/ton";
 import { proveRotationLive } from "./gram-rotation";
 
 // Live testnet end-to-end mint latency (VIZ irreversibility lag + 3 SEQUENTIAL
@@ -127,7 +128,12 @@ async function main() {
     DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),
   };
 
-  const tonOwner = cfg.gram.burnOwner; // wVIZ mint recipient
+  // wVIZ mint recipient. Normalize to a bare EQ/UQ address: post per-network-accounts
+  // (PR #32) routing is by the receiving VIZ account, so the peg-in memo carries the
+  // raw remote address with NO "ton:" prefix, and validateRemoteAddress requires the
+  // EQ/UQ form (the E2E_GRAM_BURN_OWNER is stored in 0Q testnet form — same account,
+  // different display tag — which the regex rejects).
+  const tonOwner = Address.parse(cfg.gram.burnOwner).toString();
   console.log(`[fed-ton] run=${cfg.runId} federation=${fedCfg.threshold}-of-${fedCfg.n} (${fedCfg.operators.map((o) => o.id).join(",")})`);
 
   // Preflight: VIZ principal + fee headroom for the several locks we will submit.
@@ -190,7 +196,7 @@ async function proveThresholdMint(
   const { seqno: seqnoBefore } = await nextOrderInfo(cfg);
 
   await withStack(signerSpecs, coordinatorEnv, watcherEnv, `${logDir}-c1`, async () => {
-    const lockTx = await submitLock(cfg, gross, `ton:${tonOwner}`);
+    const lockTx = await submitLock(cfg, gross, tonOwner);
     console.log(`[fed-ton]   peg-in lock: ${lockTx}`);
     const wvizAfter = await pollUntil(
       async () => {
@@ -236,13 +242,21 @@ async function proveUnderThreshold(
       fed.signers[i]!.kill();
       console.log(`[fed-ton]   killed signer ${fed.signers[i]!.operatorId}`);
     }
-    const lockTx = await submitLock(cfg, gross, `ton:${tonOwner}`);
+    const lockTx = await submitLock(cfg, gross, tonOwner);
     console.log(`[fed-ton]   peg-in lock: ${lockTx} — waiting to confirm NO mint lands`);
     // Wait a full mint-settle window; assert the balance never moves.
     const deadline = Date.now() + UNDER_THRESHOLD_WAIT_MS;
     while (Date.now() < deadline) {
-      const b = await tonWvizBalance(cfg, tonOwner);
-      if (b !== wvizBefore) throw new Error(`UNDER-THRESHOLD MINT: wVIZ moved ${wvizBefore}->${b} with only ${threshold - 1} live signers`);
+      // A transient toncenter read failure is NOT evidence of a mint — only a
+      // SUCCESSFUL read showing a moved balance fails this criterion. Swallow read
+      // errors and keep watching to the deadline (the assertion is "never moved").
+      try {
+        const b = await tonWvizBalance(cfg, tonOwner);
+        if (b !== wvizBefore) throw new Error(`UNDER-THRESHOLD MINT: wVIZ moved ${wvizBefore}->${b} with only ${threshold - 1} live signers`);
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("UNDER-THRESHOLD MINT")) throw err;
+        console.warn(`[fed-ton]   (under-threshold) transient balance read error, ignoring: ${(err as Error).message}`);
+      }
       await new Promise((r) => setTimeout(r, POLL_MS));
     }
   });
@@ -280,7 +294,7 @@ async function proveCrashWindow(
   const lockAt = Date.now();
   let rowId: string;
   try {
-    const lockTx = await submitLock(cfg, gross, `ton:${tonOwner}`);
+    const lockTx = await submitLock(cfg, gross, tonOwner);
     console.log(`[fed-ton]   peg-in lock: ${lockTx}`);
     const row = await pollUntil(async () => await findPegInRow(store, tonOwner, lockAt), {
       timeoutMs: FIND_ROW_TIMEOUT_MS, intervalMs: POLL_MS, label: "peg-in row appears",

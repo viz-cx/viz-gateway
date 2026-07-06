@@ -64,9 +64,15 @@ export function loadE2eConfig(env: NodeJS.ProcessEnv, chain: "gram" | "solana"):
 
 export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
   return {
-    // VIZ
+    // VIZ — per-network backing accounts (common/config buildGatewayAccounts requires
+    // BOTH chains present, non-empty, and distinct/injective). This TON harness only
+    // exercises GRAM, so GRAM = the account locks are sent to (E2E_VIZ_GATEWAY_ACCOUNT)
+    // and SOLANA gets a distinct, inert placeholder: the viz-watcher scans blocks
+    // globally and filters by isBackingAccount(to), so an account that never receives
+    // a transfer is never matched.
     VIZ_NODE_URL: cfg.viz.nodeUrl,
-    VIZ_GATEWAY_ACCOUNT: cfg.viz.gatewayAccount,
+    VIZ_GATEWAY_ACCOUNT_GRAM: cfg.viz.gatewayAccount,
+    VIZ_GATEWAY_ACCOUNT_SOLANA: `${cfg.viz.gatewayAccount}.solana-e2e-unused`,
     VIZ_SIGNING_WIF: cfg.viz.gatewayWif,
     VIZ_EXTRA_CONFIRMATIONS: "2",
     // GRAM (TON network)
