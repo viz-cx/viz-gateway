@@ -5,9 +5,9 @@ import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain, pubkeyOf } from "@gateway/solana-watcher/dist/solanaChain";
-import { Recon } from "./checker";
+import { Recon, uncoveredActiveChains } from "./checker";
 
-export { Recon } from "./checker";
+export { Recon, uncoveredActiveChains } from "./checker";
 
 /**
  * recon: continuously checks the peg invariant
@@ -27,18 +27,20 @@ async function main(): Promise<void> {
   // A per-chain split prevents a surplus on one chain from masking under-backing on another.
   const store = createStore(cfg.storeUrl);
   const recons: Recon[] = [];
+  // The chains recon actually covers (one Recon each). Derived from config, reused by both the
+  // static VG-02 gate and the store-derived M9 gate below.
+  const coveredChains = new Set<string>();
+  if (cfg.gram.jettonMinterAddress) coveredChains.add("GRAM");
+  if (cfg.solana.wvizMint) coveredChains.add("SOLANA");
   // VG-02: validate that every chain in RECON_EXPECTED_REMOTES is actually configured.
   // The per-chain Recon constructor can't catch "GRAM expected but no GRAM_JETTON_MINTER_ADDRESS
   // set" because that Recon is never even created in that case.
   if (cfg.recon.expectedRemotes && cfg.recon.expectedRemotes.length > 0) {
-    const configuredChains = new Set<string>();
-    if (cfg.gram.jettonMinterAddress) configuredChains.add("GRAM");
-    if (cfg.solana.wvizMint) configuredChains.add("SOLANA");
-    const missing = cfg.recon.expectedRemotes.filter((c) => !configuredChains.has(c));
+    const missing = cfg.recon.expectedRemotes.filter((c) => !coveredChains.has(c));
     if (missing.length > 0) {
       throw new Error(
         `[recon] expected remote(s) [${missing.join(",")}] not configured ` +
-          `(present: [${[...configuredChains].join(",")}]). ` +
+          `(present: [${[...coveredChains].join(",")}]). ` +
           `A remote with live wVIZ must never drop out of recon. Fix config or update RECON_EXPECTED_REMOTES.`,
       );
     }
@@ -76,11 +78,31 @@ async function main(): Promise<void> {
   // VG-02: no remotes = fatal misconfiguration (recon would always see circulating = 0).
   if (recons.length === 0) throw new Error("[recon] no remote configured — set GRAM_JETTON_MINTER_ADDRESS or SOLANA_WVIZ_MINT");
 
-  const configuredChains = [cfg.gram.jettonMinterAddress && "GRAM", cfg.solana.wvizMint && "SOLANA"].filter(Boolean).join(",");
   const once = process.env.RECON_ONCE === "1";
   console.log(
-    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ maxConsecFail=${cfg.recon.maxConsecutiveFailures} chains=[${configuredChains}] once=${once}`,
+    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ maxConsecFail=${cfg.recon.maxConsecutiveFailures} chains=[${[...coveredChains].join(",")}] once=${once}`,
   );
+
+  // M9: recon must cover EVERY chain that has minted (or committed to minting) wVIZ. Unlike
+  // RECON_EXPECTED_REMOTES (an env that defaults empty → fail-OPEN when a live chain is dropped),
+  // the active set is derived from the durable outbox: any chain with a committed/minted PEG_IN.
+  // A chain that minted wVIZ but has no Recon is a silent per-chain fail-open — its backing goes
+  // unchecked while circulating wVIZ still exists. Fail closed: pause the whole gateway + alert.
+  // Fatal at startup (refuse to run half-covered); in the loop, pause+alert but keep monitoring the
+  // covered chains rather than crashing recon entirely (which would stop all checking).
+  const enforceActiveChainCoverage = async (fatal: boolean): Promise<void> => {
+    const uncovered = uncoveredActiveChains(await store.activeRemoteChains(), coveredChains);
+    if (uncovered.length === 0) return;
+    const reason =
+      `[recon] active chain(s) [${uncovered.join(",")}] have minted wVIZ but are not covered by recon ` +
+      `(covered: [${[...coveredChains].join(",")}]). A chain with live circulating wVIZ must never drop out ` +
+      `of recon — restore its config (GRAM_JETTON_MINTER_ADDRESS / SOLANA_WVIZ_MINT).`;
+    await store.pause(reason);
+    console.error(`[recon] CRITICAL: ${reason}`);
+    notifyStaff("recon", reason, { uncovered, covered: [...coveredChains] });
+    if (fatal) throw new Error(reason);
+  };
+  await enforceActiveChainCoverage(true);
 
   // D3 reserve monitor: the Solana submitter pays fee + ATA rent for every mint;
   // if it runs dry, mints silently fail. Page (don't pause) when it's low.
@@ -119,6 +141,9 @@ async function main(): Promise<void> {
 
   while (running) {
     try {
+      // Re-check coverage each tick: a chain could go active at runtime (a peg-in mints on a chain
+      // recon isn't wired for). Non-fatal here — pause+alert but keep checking the covered chains.
+      await enforceActiveChainCoverage(false);
       for (const r of recons) {
         await r.onCheckResult(await r.check());
       }

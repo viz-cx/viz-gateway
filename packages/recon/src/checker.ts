@@ -20,6 +20,17 @@ export interface RemoteChain {
 }
 
 /**
+ * M9: given the chains that have live circulating wVIZ (from store.activeRemoteChains) and the
+ * chains recon actually covers, return the active chains that are NOT covered. A non-empty result
+ * means recon must fail closed (pause + refuse to run): a chain with live wVIZ has dropped out of
+ * the peg-invariant check, so its backing is going unverified. Pure so the offline spike can assert
+ * the exact decision main() uses (no drift).
+ */
+export function uncoveredActiveChains(active: readonly string[], covered: ReadonlySet<string>): string[] {
+  return active.filter((c) => !covered.has(c));
+}
+
+/**
  * Encapsulates the recon peg-invariant check and consecutive-failure escalation.
  * Exported so the offline spike can instantiate it with fake remotes + store.
  */
