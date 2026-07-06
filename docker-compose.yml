@@ -14,11 +14,13 @@ services:
     volumes:
       - gw-data:/app/data
 
-  ton-watcher:
+  # TON burn watcher (the package was renamed ton-watcher -> gram-watcher; SERVICE and the
+  # entrypoint case must use the real name or the container dies on MODULE_NOT_FOUND — BH3).
+  gram-watcher:
     image: viz-gateway:latest
     env_file: .env
     environment:
-      SERVICE: ton-watcher
+      SERVICE: gram-watcher
     restart: unless-stopped
     volumes:
       - gw-data:/app/data
@@ -43,7 +45,7 @@ services:
     environment:
       SERVICE: recon
     restart: unless-stopped
-    depends_on: [viz-watcher, ton-watcher]
+    depends_on: [viz-watcher, gram-watcher]
 
   # For a solo / bootstrap operator the coordinator runs in the same stack, so
   # `docker compose up` is a complete working bridge. In a multi-operator
@@ -60,6 +62,20 @@ services:
     volumes:
       - gw-data:/app/data
     depends_on: [signer]
+
+  # Drains QUEUED outbox rows to the coordinator with retries. Without this service the
+  # watchers enqueue peg-ins/outs but nothing ever delivers them — QUEUED rows sit forever
+  # and no mint/release happens (BH2). Shares the store volume; talks to the coordinator.
+  dispatcher:
+    image: viz-gateway:latest
+    env_file: .env
+    environment:
+      SERVICE: dispatcher
+      COORDINATOR_URL: http://coordinator:8080
+    restart: unless-stopped
+    volumes:
+      - gw-data:/app/data
+    depends_on: [coordinator]
 
 volumes:
   gw-data:

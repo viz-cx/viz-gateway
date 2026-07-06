@@ -4,7 +4,13 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json tsconfig.json ./
+# ALL workspace roots must be present before `npm install` (workspace linking) and
+# `npm run build` (tsc -b resolves every reference in tsconfig.json: packages, contracts,
+# setup-viz, tools/e2e). Copying only packages+tools made tsc -b fail TS6053 on the missing
+# contracts/setup-viz projects, so the image never built (BH1).
 COPY packages ./packages
+COPY contracts ./contracts
+COPY setup-viz ./setup-viz
 COPY tools ./tools
 RUN npm install --no-audit --no-fund
 RUN npm run build
@@ -17,6 +23,11 @@ RUN addgroup -S gw && adduser -S gw -G gw
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
+# node_modules holds workspace SYMLINKS (@gateway/contracts-ton -> ../contracts/ton, etc.);
+# their targets must exist at runtime or a service require() hits a dangling link. gram-watcher
+# imports @gateway/contracts-ton, so contracts is mandatory; setup-viz keeps every link intact.
+COPY --from=build /app/contracts ./contracts
+COPY --from=build /app/setup-viz ./setup-viz
 COPY --from=build /app/tools ./tools
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && mkdir -p /app/data && chown -R gw:gw /app/data
