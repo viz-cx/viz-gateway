@@ -27,13 +27,24 @@ async function main(): Promise<void> {
   if (cfg.activeAccounts.length === 0 && cfg.activeKeys.length === 0) {
     throw new Error("Set ACTIVE_ACCOUNTS and/or ACTIVE_KEYS (the operational signer set).");
   }
-  if (cfg.guardians.length === 0) {
-    throw new Error("Set MASTER_GUARDIANS (the guardian council accounts) — no default is provided.");
+  if (cfg.guardians.length === 0 && cfg.masterKeys.length === 0) {
+    throw new Error(
+      "Set MASTER_GUARDIANS (guardian council accounts) and/or MASTER_KEYS (recovery public keys) — no default is provided.",
+    );
   }
 
   const active = multisigAuthority(cfg.activeAccounts, cfg.activeThreshold, cfg.activeKeys);
-  const master = multisigAuthority(cfg.guardians, cfg.masterThreshold);
+  const master = multisigAuthority(cfg.guardians, cfg.masterThreshold, cfg.masterKeys);
   const regular = active;
+
+  // master can rewrite active, so a single-key/single-account master is a backdoor
+  // around the active threshold. Refuse it for a gateway account.
+  const masterWeight = master.key_auths.length + master.account_auths.length;
+  if (master.weight_threshold < 2 && masterWeight < 2) {
+    throw new Error(
+      "refusing single-signer master: master can rewrite active, so it must require >= 2 signers (keys/accounts).",
+    );
+  }
 
   // Reuse the account's current memo_key (and json_metadata) unless overridden,
   // so this update doesn't clobber them.
@@ -50,7 +61,7 @@ async function main(): Promise<void> {
 
   console.log(`[setup] account: ${cfg.gatewayAccount} @ ${cfg.nodeUrl}`);
   console.log(`[setup] active  (${active.weight_threshold} of ${active.account_auths.length + active.key_auths.length}):`, JSON.stringify(active));
-  console.log(`[setup] master  (${master.weight_threshold} of ${master.account_auths.length}):`, JSON.stringify(master));
+  console.log(`[setup] master  (${master.weight_threshold} of ${master.account_auths.length + master.key_auths.length}):`, JSON.stringify(master));
   console.log(`[setup] regular: = active`);
   console.log(`[setup] memo_key: ${memoKey}`);
   console.log(`[setup] recovery_account: ${cfg.recoveryAccount || "(unchanged)"}`);
@@ -71,7 +82,9 @@ async function main(): Promise<void> {
     memoKey,
     jsonMetadata,
   );
-  console.log("[setup] account_update broadcast: master = 3-of-4 guardians, active set updated.");
+  console.log(
+    `[setup] account_update broadcast: master = ${master.weight_threshold}-of-${master.account_auths.length + master.key_auths.length}, active set updated.`,
+  );
 
   if (cfg.recoveryAccount) {
     await viz.broadcast.changeRecoveryAccountAsync(cfg.masterWif, cfg.gatewayAccount, cfg.recoveryAccount, []);

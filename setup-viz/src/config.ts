@@ -23,8 +23,9 @@ export interface SetupConfig {
   activeKeys: string[];
   activeThreshold: number;
 
-  // Guardian (master) set — the fixed recovery council.
+  // Guardian (master) set — the fixed recovery council: accounts and/or raw keys.
   guardians: string[];
+  masterKeys: string[];
   masterThreshold: number;
 
   recoveryAccount: string;
@@ -45,6 +46,7 @@ export function loadSetupConfig(): SetupConfig {
     // The guardian council (last-resort recovery only). No default — must be set
     // explicitly so a deployment never silently inherits example validator names.
     guardians: list(opt("MASTER_GUARDIANS", "")),
+    masterKeys: list(opt("MASTER_KEYS", "")),
     masterThreshold: int("MASTER_THRESHOLD", 3),
 
     recoveryAccount: opt("RECOVERY_ACCOUNT", ""),
