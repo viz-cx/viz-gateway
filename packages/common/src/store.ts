@@ -10,6 +10,7 @@ import type {
   StatusPatch,
 } from "./idempotency";
 import type { RemoteChainId } from "./types";
+import { baseFee, type PegInFeePolicy } from "./fees";
 
 /**
  * Persistent, cross-process gateway state:
@@ -47,12 +48,32 @@ export interface GatewayStore {
    * VIZ fees minted-as-surplus but not yet swept to fees.gate, in milli-VIZ.
    * = sum(PEG_IN fee, minted) − sum(FEE_SWEEP amount, confirmed). recon adds this
    * to circulating to keep `locked == circulating + unswept` exact between sweeps.
+   *
+   * SIGNED: a NEGATIVE result (swept > minted fees) is an over-sweep anomaly — mis-pinning
+   * or a double FEE_SWEEP leaking backing — NOT clamped to 0 (which would hide it). recon
+   * must treat < 0 as a fail-closed condition (pause + alert), never as "0 = fine" (M10).
    */
   unsweptFeesMilliViz(chain?: RemoteChainId): Promise<bigint>;
+  /**
+   * Like unsweptFeesMilliViz, but the minted-side fee is RE-DERIVED per row as
+   * baseFee(gross, feePolicy) from the row's immutable gross, instead of trusting the
+   * coordinator-written fee_milli_viz column. recon uses this so a compromised or
+   * recovery-path coordinator that understates the pinned fee cannot shrink expectedLocked
+   * and mask an under-backing. The activation surcharge is NOT credited (unrecoverable, and
+   * under-crediting is the safe direction — stricter backing check, never laxer).
+   */
+  unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint>;
 
   // --- rolling 24h cap window (shared) ---
   recordCap(amountMilliViz: bigint, now: number): Promise<void>;
   capSumMilliViz(sinceMs: number, now: number): Promise<bigint>;
+  /**
+   * Atomic reserve: prune, sum the live window, and record `amountMilliViz` ONLY if the
+   * post-record total stays within `capMilliViz` — all in one transaction. Returns true if
+   * reserved, false if it would breach the cap (nothing recorded). Closes the cross-process
+   * TOCTOU where two watchers both read the sum, both pass, then both record over the cap.
+   */
+  tryReserveCap(amountMilliViz: bigint, capMilliViz: bigint, sinceMs: number, now: number): Promise<boolean>;
 
   // --- peg-out deposit addresses (Variant A registry) ---
   /** Register (idempotently) a derived deposit address for a VIZ account. */
@@ -242,7 +263,22 @@ export class SqliteGatewayStore implements GatewayStore {
         now,
         input.parentId ?? null,
       );
-    return Number(res.changes) === 1;
+    const inserted = Number(res.changes) === 1;
+    if (!inserted) {
+      // The id already exists. A REPLAY of the same event carries the same digest (silent,
+      // correct idempotency). A DIFFERENT digest under the same id means two DISTINCT events
+      // collided on one idempotency key (e.g. a cross-chain sourceId clash) — the second would
+      // otherwise be silently dropped and its output lost. Fail closed: halt for review (M5).
+      const existing = this.db.prepare("SELECT digest FROM action_outbox WHERE id = ?").get(input.id) as
+        | { digest?: string }
+        | undefined;
+      if (existing && existing.digest !== input.digest) {
+        const reason = `idempotency-key collision on ${input.id}: stored digest ${existing.digest} != incoming ${input.digest} (two distinct events mapped to one id)`;
+        console.error(`[store] CRITICAL: ${reason} -> pausing`);
+        await this.pause(reason);
+      }
+    }
+    return inserted;
   }
 
   async get(id: string): Promise<OutboxRecord | undefined> {
@@ -324,7 +360,24 @@ export class SqliteGatewayStore implements GatewayStore {
       .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'${chainFilter}`)
       .all(...chainArgs) as Row[];
     const v = sumBigIntColumn(minted) - sumBigIntColumn(swept);
-    return v > 0n ? v : 0n;
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
+  }
+
+  async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
+    const ph = MINTED_STATUSES.map(() => "?").join(",");
+    const chainFilter = chain ? " AND remote_chain = ?" : "";
+    const chainArgs: string[] = chain ? [chain] : [];
+    // Re-derive the minted fee from each row's immutable GROSS (never the coordinator-pinned
+    // fee_milli_viz), so an understated pinned fee cannot mask under-backing (see interface doc).
+    const minted = this.db
+      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})${chainFilter}`)
+      .all(...MINTED_STATUSES, ...chainArgs) as Row[];
+    const mintedFees = minted.reduce((a, r) => a + baseFee(BigInt(String(r["v"])), feePolicy), 0n);
+    const swept = this.db
+      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'${chainFilter}`)
+      .all(...chainArgs) as Row[];
+    const v = mintedFees - sumBigIntColumn(swept);
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
 
   async recordCap(amountMilliViz: bigint, now: number): Promise<void> {
@@ -341,6 +394,31 @@ export class SqliteGatewayStore implements GatewayStore {
       .prepare("SELECT amount_milli_viz AS v FROM cap_window WHERE ts <= ?")
       .all(now) as Row[];
     return sumBigIntColumn(rows);
+  }
+
+  async tryReserveCap(amountMilliViz: bigint, capMilliViz: bigint, sinceMs: number, now: number): Promise<boolean> {
+    // BEGIN IMMEDIATE takes the write lock up front, so concurrent processes serialize here and
+    // the prune+sum+insert is a single atomic read-modify-write (busy_timeout makes losers wait,
+    // not fail). Without it, two watchers could both read the sum, both pass, both insert -> cap
+    // bypassed AND the per-deposit pause never trips (neither breaches on its own).
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM cap_window WHERE ts < ?").run(sinceMs);
+      const rows = this.db
+        .prepare("SELECT amount_milli_viz AS v FROM cap_window WHERE ts <= ?")
+        .all(now) as Row[];
+      const sum = sumBigIntColumn(rows);
+      if (sum + amountMilliViz > capMilliViz) {
+        this.db.exec("COMMIT"); // keep the prune; record nothing
+        return false;
+      }
+      this.db.prepare("INSERT INTO cap_window(ts, amount_milli_viz) VALUES(?, ?)").run(now, amountMilliViz.toString());
+      this.db.exec("COMMIT");
+      return true;
+    } catch (e) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back / no tx */ }
+      throw e;
+    }
   }
 
   private setKey(key: string, value: string): void {
@@ -397,7 +475,17 @@ export class InMemoryGatewayStore implements GatewayStore {
   private reason = "";
 
   async enqueue(input: EnqueueInput): Promise<boolean> {
-    if (this.rows.has(input.id)) return false;
+    const existing = this.rows.get(input.id);
+    if (existing) {
+      // Same digest = idempotent replay (silent). Different digest = two distinct events on
+      // one id — fail closed rather than silently drop the second (M5; mirrors the sqlite path).
+      if (existing.digest !== input.digest) {
+        const reason = `idempotency-key collision on ${input.id}: stored digest ${existing.digest} != incoming ${input.digest} (two distinct events mapped to one id)`;
+        console.error(`[store] CRITICAL: ${reason} -> pausing`);
+        await this.pause(reason);
+      }
+      return false;
+    }
     const now = Date.now();
     this.rows.set(input.id, {
       id: input.id,
@@ -463,13 +551,32 @@ export class InMemoryGatewayStore implements GatewayStore {
       if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
     }
     const v = minted - swept;
-    return v > 0n ? v : 0n;
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
+  }
+  async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
+    let minted = 0n;
+    let swept = 0n;
+    for (const r of this.rows.values()) {
+      if (r.direction === "PEG_IN" && (r.status === "BROADCAST" || r.status === "CONFIRMED") && (!chain || r.remoteChain === chain)) {
+        minted += baseFee(r.amountMilliViz, feePolicy); // re-derived from GROSS, not the pinned fee
+      }
+      if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
+    }
+    const v = minted - swept;
+    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
   async recordCap(amountMilliViz: bigint, now: number): Promise<void> {
     this.caps.push({ ts: now, amount: amountMilliViz });
   }
   async capSumMilliViz(sinceMs: number, now: number): Promise<bigint> {
     return this.caps.filter((e) => e.ts >= sinceMs && e.ts <= now).reduce((a, e) => a + e.amount, 0n);
+  }
+  async tryReserveCap(amountMilliViz: bigint, capMilliViz: bigint, sinceMs: number, now: number): Promise<boolean> {
+    // Single-process store: JS is single-threaded, so sum+push is already atomic.
+    const sum = this.caps.filter((e) => e.ts >= sinceMs && e.ts <= now).reduce((a, e) => a + e.amount, 0n);
+    if (sum + amountMilliViz > capMilliViz) return false;
+    this.caps.push({ ts: now, amount: amountMilliViz });
+    return true;
   }
   async registerDepositAddress(rec: { vizAccount: string; solAddress: string; wvizAta: string }): Promise<void> {
     if (this.deposits.has(rec.vizAccount)) return;

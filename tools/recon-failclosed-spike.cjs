@@ -124,12 +124,67 @@ async function missingExpectedRemoteThrows() {
   console.log("[recon-failclosed] missing expected remote fatal; present set OK; legacy unaffected OK");
 }
 
+// H6: recon must credit unswept fees RE-DERIVED from each row's gross, not the coordinator-pinned
+// fee_milli_viz. A compromised/failed coordinator that understates the pinned fee (e.g. 0) must not
+// be able to shrink expectedLocked and hide an under-backing.
+async function coordinatorUnderstatedFeeCannotMask() {
+  // base = max(floor 1000, 0.20% of gross). For gross 100_000 -> max(1000, 200) = 1000.
+  const feePolicy = { floorMilliViz: 1000n, bps: 20, activationSurchargeMilliViz: 0n, mintGasFloorMilliViz: 0n };
+  const store = new InMemoryGatewayStore();
+  // A minted PEG_IN whose 1000 base fee was withheld as surplus but PINNED to 0 by the coordinator.
+  await store.enqueue({ id: "gram-1:0", direction: "PEG_IN", remoteChain: "GRAM",
+    recipient: "EQdest", sender: "alice", amountMilliViz: 100_000n, digest: "d", status: "CONFIRMED" });
+
+  // Store-level: derived reads the real fee from gross; the pinned column is understated.
+  assert.strictEqual(await store.unsweptFeesDerivedMilliViz(feePolicy, "GRAM"), 1000n, "derived fee comes from gross (1000)");
+  assert.strictEqual(await store.unsweptFeesMilliViz("GRAM"), 0n, "coordinator understated the pinned fee to 0");
+
+  // locked == circulating (1000) but does NOT cover the 1000 withheld fee -> under-backed by 1000.
+  const remotes = () => [okRemote("GRAM", 1000)];
+  // Pinned recon (no fee policy) is fooled: unswept=0 -> expectedLocked=1000 -> drift 0 -> "OK".
+  const masked = await new Recon(remotes(), locked(1000), store, cfg, "GRAM").check();
+  assert.strictEqual(masked, true, "pinned-fee recon is masked into reporting healthy");
+  // Derived recon (production) sees unswept=1000 -> expectedLocked=2000 -> drift -1000 -> UNDER-BACKED.
+  const caught = await new Recon(remotes(), locked(1000), store, cfg, "GRAM", feePolicy).check();
+  assert.strictEqual(caught, false, "derived-fee recon catches the under-backing the coordinator tried to hide");
+  console.log("[recon-failclosed] H6: coordinator-understated fee cannot mask under-backing (derived from gross) OK");
+}
+
+// M10: a NEGATIVE unswept fee (confirmed FEE_SWEEPs exceed the minted peg-in fees) is an
+// over-sweep leaking backing. The store must NOT clamp it to 0 (which hid it), and recon must
+// fail closed on it. The trap: a negative unswept makes expectedLocked SMALLER, so the drift
+// looks POSITIVE (over-backed) and would report "OK" — the exact masking this guards against.
+async function overSweepFailsClosed() {
+  const store = new InMemoryGatewayStore();
+  // Confirmed PEG_IN, pinned fee 5n.
+  await store.enqueue({ id: "gram-1", direction: "PEG_IN", remoteChain: "GRAM",
+    recipient: "EQdest", sender: "alice", amountMilliViz: 100_000n, digest: "d1", status: "CONFIRMED" });
+  await store.setFee("gram-1", 5n);
+  // A FEE_SWEEP that pulls MORE than the fee justifies (double sweep / mis-pin): 20n swept vs 5n owed.
+  await store.enqueue({ id: "gram-1:fee", direction: "FEE_SWEEP", remoteChain: "GRAM",
+    recipient: "fees.gate", sender: undefined, amountMilliViz: 20n, digest: "d2", status: "CONFIRMED" });
+
+  // Store-level: the -15n is surfaced, NOT clamped to 0n.
+  assert.strictEqual(await store.unsweptFeesMilliViz("GRAM"), -15n, "over-sweep surfaces as NEGATIVE unswept (not clamped)");
+
+  // recon-level: locked==circulating==1000, so WITHOUT the guard expectedLocked=1000+(-15)=985,
+  // drift=+15 => falsely "OK". The guard must trip first.
+  const r = await new Recon([okRemote("GRAM", 1000)], locked(1000), store, cfg, "GRAM").check();
+  assert.strictEqual(r, false, "over-sweep => fail closed (false), NOT masked as over-backed OK");
+  assert.strictEqual(await store.isPaused(), true, "over-sweep trips the pause");
+  const reason = await store.pauseReason();
+  assert.ok(reason && reason.includes("over-swept"), `pause reason mentions over-sweep: "${reason}"`);
+  console.log("[recon-failclosed] M10: negative unswept (over-sweep) fails closed, not masked OK");
+}
+
 (async () => {
   await zeroRemotesThrows();
   await oneRemoteFailsIsIndeterminate();
   await recoveryResetsCounter();
   await underBackingPauses();
   await missingExpectedRemoteThrows();
+  await coordinatorUnderstatedFeeCannotMask();
+  await overSweepFailsClosed();
   console.log("recon-failclosed-spike: all assertions passed");
 })().catch((e) => {
   console.error(e);

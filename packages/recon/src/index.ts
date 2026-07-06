@@ -1,4 +1,4 @@
-import { buildGatewayAccounts, createStore, loadConfig } from "@gateway/common";
+import { buildGatewayAccounts, createStore, loadConfig, pegInFeePolicyFor } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
@@ -59,6 +59,7 @@ async function main(): Promise<void> {
       store,
       reconCfg,
       "GRAM",
+      pegInFeePolicyFor(cfg.fees, "GRAM"), // recon derives unswept fees from gross, not the pinned fee
     ));
   }
   if (cfg.solana.wvizMint) {
@@ -69,6 +70,7 @@ async function main(): Promise<void> {
       store,
       reconCfg,
       "SOLANA",
+      pegInFeePolicyFor(cfg.fees, "SOLANA"), // recon derives unswept fees from gross, not the pinned fee
     ));
   }
   // VG-02: no remotes = fatal misconfiguration (recon would always see circulating = 0).

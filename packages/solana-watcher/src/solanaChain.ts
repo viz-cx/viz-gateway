@@ -20,10 +20,83 @@ const MEMO_PROGRAM_ID = "MemoSq4gq4PtfDg1xv9JaY9Cz9c6Tn3ANk6tDsj4hf"; // SPL Mem
 
 /** RPC scan throttling/pagination (avoid 429 on public/free-tier RPC). */
 export interface SolanaScanOpts {
-  /** Max signatures fetched per scan call. */
+  /** Max signatures fetched per scan page. */
   maxSignatures?: number;
+  /** Page ceiling per peg-out scan; hit before draining back to the cursor => fail closed. */
+  maxScanPages?: number;
   /** Delay (ms) between per-tx getParsedTransaction calls. */
   txDelayMs?: number;
+}
+
+/** One entry of the newest→oldest signature list `getSignaturesForAddress` returns. */
+export interface ScanSig {
+  signature: string;
+  slot: number;
+  err: unknown;
+}
+
+/**
+ * Pure slot-pagination core for the Solana peg-out scan (VG H4), the analog of the TON
+ * watcher's paginateBurnsByLt. Walks signature pages newest→older via the `before` anchor,
+ * collecting FINAL burns (slot <= safeSlot) with slot > fromSlot, until it drains back to
+ * the cursor / history end (`drained: true`) or exhausts `maxScanPages` (`drained: false` —
+ * a burst larger than the scan window; the caller MUST fail closed and NOT advance the
+ * cursor past the older, unscanned burns).
+ *
+ * `newestFinalSlot` is the highest slot among FINAL burn txs seen (the cursor's next value
+ * after a complete drain). The not-yet-final tail (slot > safeSlot) is left for a later tick
+ * and never advances the cursor past it, so no burn is skipped. Factored out so it can be
+ * exercised offline against a fake signature source (tools/solana-scan-pagination-spike.cjs).
+ */
+export async function paginateBurnsBySlot(params: {
+  fromSlot: number;
+  safeSlot: number;
+  limit: number;
+  maxScanPages: number;
+  fetchPage: (before: string | null) => Promise<ScanSig[]>;
+  toBurn: (signature: string, slot: number) => Promise<RemoteBurn | null>;
+}): Promise<{ burns: RemoteBurn[]; newestFinalSlot: number; drained: boolean }> {
+  const { fromSlot, safeSlot, limit, maxScanPages, fetchPage, toBurn } = params;
+  const burns: RemoteBurn[] = [];
+  let newestFinalSlot = fromSlot;
+  let before: string | null = null;
+  let drained = false;
+  let pages = 0;
+
+  while (pages < maxScanPages && !drained) {
+    const page = await fetchPage(before);
+    pages++;
+    if (page.length === 0) {
+      drained = true; // no history under the anchor
+      break;
+    }
+    let sawFresh = false;
+    for (const s of page) {
+      if (s.slot <= fromSlot) {
+        drained = true; // reached the cursor: fully caught up
+        break;
+      }
+      sawFresh = true;
+      if (s.err) continue;
+      if (s.slot <= safeSlot) {
+        // Final => processed. The fresher tail (slot > safeSlot) is intentionally
+        // excluded so the cursor never advances past a tx we haven't finalized.
+        if (s.slot > newestFinalSlot) newestFinalSlot = s.slot;
+        const burn = await toBurn(s.signature, s.slot);
+        if (burn) burns.push(burn);
+      }
+    }
+    if (drained) break;
+    // A short page (fewer than a full limit) means we hit the end of history.
+    const last = page[page.length - 1];
+    if (!sawFresh || page.length < limit || !last) {
+      drained = true;
+      break;
+    }
+    before = last.signature;
+  }
+
+  return { burns, newestFinalSlot, drained };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -65,6 +138,7 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
   /** Confirmations buffer in slots, on top of 'finalized'. */
   private readonly finalitySlots: number;
   private readonly maxSignatures: number;
+  private readonly maxScanPages: number;
   private readonly txDelayMs: number;
   /** Write-path (mint) config; null on read-only watchers. */
   private readonly writer: {
@@ -89,6 +163,7 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     this.gatewayTokenAccount = gatewayTokenAccount ? new PublicKey(gatewayTokenAccount) : null;
     this.finalitySlots = Math.max(0, finalitySlots);
     this.maxSignatures = Math.max(1, scan.maxSignatures ?? 25);
+    this.maxScanPages = Math.max(1, scan.maxScanPages ?? 50);
     this.txDelayMs = Math.max(0, scan.txDelayMs ?? 0);
     this.writer = writer;
     this.depositProgramId = depositProgramId;
@@ -137,35 +212,63 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     return this.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
   }
 
-  async finalizedBurnsSince(_fromSlot: number, toSlot: number): Promise<RemoteBurn[]> {
-    if (!this.gatewayTokenAccount) return [];
-    const safeSlot = toSlot - this.finalitySlots;
-    const sigs = await this.conn.getSignaturesForAddress(this.gatewayTokenAccount, {
+  /**
+   * Range-based peg-out scan keyed on slot (VG H4), the analog of gram's
+   * finalizedBurnsPaginated. Pages the gateway token account's signatures newest→older via
+   * the `before` anchor, collecting FINAL burns with slot > fromSlot, until it drains back
+   * to the cursor / history end (`drained: true`) or hits `maxScanPages` with more to scan
+   * (`drained: false` — a burst we cannot fully see this tick; the caller MUST fail closed
+   * and not advance the cursor past the unscanned older burns).
+   *
+   * `newestFinalSlot` is the highest slot among FINAL burns seen (the cursor's next value
+   * after a complete drain). The not-yet-final tail is left for a later tick and never
+   * advances the cursor past it, so no burn is skipped.
+   */
+  async finalizedBurnsPaginated(
+    fromSlot: number,
+  ): Promise<{ burns: RemoteBurn[]; newestFinalSlot: number; drained: boolean }> {
+    if (!this.gatewayTokenAccount) return { burns: [], newestFinalSlot: fromSlot, drained: true };
+    const acct = this.gatewayTokenAccount;
+    const safeSlot = (await this.finalizedHeight()) - this.finalitySlots;
+    return paginateBurnsBySlot({
+      fromSlot,
+      safeSlot,
       limit: this.maxSignatures,
+      maxScanPages: this.maxScanPages,
+      fetchPage: (before) =>
+        this.conn.getSignaturesForAddress(
+          acct,
+          before ? { limit: this.maxSignatures, before } : { limit: this.maxSignatures },
+        ),
+      toBurn: async (signature, slot) => {
+        // Throttle between per-tx parses to stay under RPC rate limits (429).
+        if (this.txDelayMs > 0) await sleep(this.txDelayMs);
+        const tx = await this.conn.getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 0,
+          commitment: "finalized",
+        });
+        if (!tx) return null;
+        const parsed = parseGatewayDeposit(tx, acct.toBase58());
+        if (!parsed) return null;
+        return {
+          chain: "SOLANA",
+          sourceId: signature,
+          height: slot,
+          from: parsed.from,
+          amountMilliViz: parsed.amountBaseUnits,
+          homeDestination: parsed.memo.trim(),
+        };
+      },
     });
-    const burns: RemoteBurn[] = [];
-    for (const s of sigs) {
-      if (s.err) continue;
-      if (s.slot > safeSlot) continue; // not yet final per the buffer
-      // Throttle between per-tx parses to stay under RPC rate limits (429).
-      if (this.txDelayMs > 0) await sleep(this.txDelayMs);
-      const tx = await this.conn.getParsedTransaction(s.signature, {
-        maxSupportedTransactionVersion: 0,
-        commitment: "finalized",
-      });
-      if (!tx) continue;
-      const parsed = parseGatewayDeposit(tx, this.gatewayTokenAccount.toBase58());
-      if (!parsed) continue;
-      burns.push({
-        chain: "SOLANA",
-        sourceId: s.signature,
-        height: s.slot,
-        from: parsed.from,
-        amountMilliViz: parsed.amountBaseUnits,
-        homeDestination: parsed.memo.trim(),
-      });
-    }
-    return burns;
+  }
+
+  /**
+   * Interface conformance (RemoteChain). The Solana watcher drives the paginated
+   * finalizedBurnsPaginated directly (for its truncation signal); this thin wrapper
+   * treats `fromHeight` as the slot cursor and returns just the burns.
+   */
+  async finalizedBurnsSince(fromSlot: number, _toSlot: number): Promise<RemoteBurn[]> {
+    return (await this.finalizedBurnsPaginated(fromSlot)).burns;
   }
 
   /**

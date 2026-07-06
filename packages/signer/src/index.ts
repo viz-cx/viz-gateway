@@ -1,9 +1,11 @@
 import { createServer } from "node:http";
 import {
   actionFromWire,
+  BodyError,
   buildGatewayAccounts,
   createStore,
   loadConfig,
+  readLimitedBody,
   type SolanaMintProposal,
   type GramMintProposal,
   type VizReleaseProposal,
@@ -139,28 +141,34 @@ async function main(): Promise<void> {
       res.writeHead(404).end();
       return;
     }
-    let body = "";
-    reqStream.on("data", (c) => (body += c));
-    reqStream.on("end", () => {
-      void (async () => {
-        try {
-          // Refuse to sign anything while the gateway is paused (shared flag).
-          if (await store.isPaused()) {
-            res.writeHead(423, { "content-type": "application/json" });
-            res.end(JSON.stringify({ error: "paused", reason: await store.pauseReason() }));
-            return;
-          }
-          const req = JSON.parse(body) as ApproveRequest;
-          const action = actionFromWire(req.action);
-          const approval = await routeApproval(signer, action, req.proposal);
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify(approval));
-        } catch (err) {
-          res.writeHead(500, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: String(err) }));
+    void (async () => {
+      const sendErr = (code: number, msg: string): void => {
+        res.writeHead(code, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: msg }));
+      };
+      let body: string;
+      try {
+        body = await readLimitedBody(reqStream); // bounded size + timeout (BM4)
+      } catch (err) {
+        sendErr(err instanceof BodyError ? err.statusCode : 400, String(err));
+        return;
+      }
+      try {
+        // Refuse to sign anything while the gateway is paused (shared flag).
+        if (await store.isPaused()) {
+          res.writeHead(423, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "paused", reason: await store.pauseReason() }));
+          return;
         }
-      })();
-    });
+        const req = JSON.parse(body) as ApproveRequest;
+        const action = actionFromWire(req.action);
+        const approval = await routeApproval(signer, action, req.proposal);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(approval));
+      } catch (err) {
+        sendErr(500, String(err));
+      }
+    })();
   });
 
   server.listen(port, host, () => {

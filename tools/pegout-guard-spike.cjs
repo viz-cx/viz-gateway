@@ -107,6 +107,26 @@ console.log("[recovery] SEEN burn-checkpoint classification OK");
   assert.strictEqual(classifySeenRecovery(Boolean(stuck.txid), true), "REQUEUE");
   console.log("[e2e] burn checkpoint persisted on SEEN row -> recoverable OK");
 
+  // f) checkAndRecord — the atomic check+record primitive the peg-in/observer watchers now use.
+  //    Proves: pure gates (per-tx, manual-review) reject WITHOUT recording; the rolling-24h slot
+  //    is reserved atomically only on `ok`; a rejected amount reserves nothing; boundary is exact.
+  {
+    const { InMemoryGatewayStore } = require("../packages/common/dist/store.js");
+    const DAY = 86_400_000;
+    const s = new InMemoryGatewayStore();
+    const b = new CircuitBreaker({ perTxMilliViz: 1_000n, rolling24hMilliViz: 1_500n, manualReviewAboveMilliViz: 900n }, s);
+    const t = 1_000_000;
+    assert.deepStrictEqual(await b.checkAndRecord(1_001n, t), { ok: false, reason: "OVER_PER_TX" }, "over per-tx");
+    assert.deepStrictEqual(await b.checkAndRecord(950n, t), { ok: false, reason: "NEEDS_MANUAL_REVIEW" }, "manual review");
+    assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 0n, "rejected amounts record nothing");
+    assert.deepStrictEqual(await b.checkAndRecord(800n, t), { ok: true }, "within caps -> ok");
+    assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 800n, "accepted amount recorded exactly once");
+    assert.deepStrictEqual(await b.checkAndRecord(800n, t), { ok: false, reason: "OVER_24H" }, "800+800 > 1500 -> OVER_24H");
+    assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 800n, "an OVER_24H reject reserves nothing");
+    assert.deepStrictEqual(await b.checkAndRecord(700n, t), { ok: true }, "800+700 == 1500 (== cap) fits");
+    console.log("[caps] checkAndRecord: pure gates reject w/o recording; 24h reserve atomic + boundary-exact OK");
+  }
+
   console.log("\nRESULT: peg-out validate-before-burn + burn-checkpoint recovery verified.");
   await store.close();
 })().catch((e) => {

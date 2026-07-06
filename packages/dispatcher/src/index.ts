@@ -38,12 +38,16 @@ function recordToAction(rec: OutboxRecord): CanonicalAction {
   };
 }
 
-async function submit(url: string, rec: OutboxRecord): Promise<DeliveryResult> {
+async function submit(url: string, rec: OutboxRecord, timeoutMs: number): Promise<DeliveryResult> {
   try {
     const res = await fetch(`${url.replace(/\/$/, "")}/submit`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: actionToWire(recordToAction(rec)) }),
+      // Bound the call so a blackhole coordinator (socket accepted, no response) can't
+      // wedge the delivery loop forever — the timeout surfaces as a caught error and the
+      // row retries. Generous (see submitTimeoutMs) so a legit slow mint is not aborted.
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.status === 423) return { broadcast: false, error: "coordinator paused" };
     if (!res.ok) return { broadcast: false, error: `coordinator HTTP ${res.status}` };
@@ -67,6 +71,7 @@ async function tick(
     windowMs: number;
     signingTimeoutMs: { pegIn: number; pegOut: number };
     staleDeliveryAlertMs: number;
+    submitTimeoutMs: number;
     feesGateAccount: string;
     fees: GatewayFeeConfig;
   },
@@ -90,12 +95,21 @@ async function tick(
   // timeout is requeued. The coordinator's actionExecuted check (called at the
   // start of every process()) handles the idempotency: if the action already landed
   // on-chain it short-circuits to CONFIRMED; if not, it broadcasts fresh.
+  //
+  // We MUST bump `attempts` here. The Solana broadcaster pins no txid before send, so its
+  // actionExecuted recovery scan (mintByActionId) is gated on `attempts > 0` (first-attempt
+  // rows skip the ~100-sig scan for speed). A crash on the FIRST delivery leaves attempts at 0
+  // even though the mint may have already landed and advanced the durable nonce; requeuing
+  // without incrementing would re-run buildMintProposal against the NEW nonce -> a distinct,
+  // valid SECOND mint (double-mint, backing broken). Incrementing forces the recovery scan so
+  // the already-landed mint short-circuits. Harmless for VIZ/TON (they short-circuit on the
+  // pinned txid/order first).
   const minTimeout = Math.min(opts.signingTimeoutMs.pegIn, opts.signingTimeoutMs.pegOut);
   const orphaned = await store.stale(now, minTimeout, ["BROADCAST"]);
   for (const rec of orphaned) {
     const timeout = rec.direction === "PEG_IN" ? opts.signingTimeoutMs.pegIn : opts.signingTimeoutMs.pegOut;
     if (now - rec.updatedAt < timeout) continue; // not yet stale for this direction
-    await store.setStatus(rec.id, "QUEUED", { nextAttemptAt: now });
+    await store.setStatus(rec.id, "QUEUED", { attempts: rec.attempts + 1, nextAttemptAt: now });
     console.warn(`[dispatcher] recovered orphaned BROADCAST row ${rec.id} (${rec.direction}) -> QUEUED`);
   }
 
@@ -112,7 +126,7 @@ async function tick(
     // CONFIRMED is recoverable: orphaned BROADCAST rows are requeued and the
     // coordinator's actionExecuted check prevents a double-mint/release.
     await store.setStatus(rec.id, "BROADCAST");
-    const result = await submit(url, rec);
+    const result = await submit(url, rec, opts.submitTimeoutMs);
     const t = planTransition(rec, result, Date.now(), opts);
     await store.setStatus(rec.id, t.status, t.patch);
     if (t.status !== "QUEUED") state.alertedWedged.delete(rec.id); // recovered/advanced — re-arm
@@ -158,6 +172,7 @@ async function main(): Promise<void> {
     windowMs: cfg.dispatcher.windowMs,
     signingTimeoutMs: cfg.dispatcher.signingTimeoutMs,
     staleDeliveryAlertMs: cfg.dispatcher.staleDeliveryAlertMs,
+    submitTimeoutMs: cfg.dispatcher.submitTimeoutMs,
     feesGateAccount: cfg.feesGateAccount,
     fees: cfg.fees,
   };

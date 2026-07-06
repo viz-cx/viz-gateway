@@ -181,7 +181,21 @@ async function reReadParentPegIn(
       `parent PEG_IN ${parentId} for ${action.id} not found or not yet irreversible on VIZ`,
     );
   }
-  return { deposit, parent: canonicalPegIn(deposit) };
+  const parent = canonicalPegIn(deposit);
+  // Canonical child-id equality. The strict `\d+` check above still accepts zero-padded
+  // opIndexes ("<trx>:00", "<trx>:000", …) that all parseInt to the same parent deposit and
+  // pass the digest bind (same parent digest). Without this guard a compromised coordinator
+  // could harvest M signatures on unlimited distinct child ids — each a different memo, hence
+  // a different VIZ txid (VIZ transfers are not deduplicated), i.e. a REAL second FEE_SWEEP /
+  // REFUND that drains locked backing. `parent.id` is numeric-canonical (no leading zeros), so
+  // requiring exact equality rejects every padded variant while accepting the one true child.
+  const canonicalChildId = `${parent.id}${suffix}`;
+  if (action.id !== canonicalChildId) {
+    throw new SourceMismatchError(
+      `non-canonical child id "${action.id}" for parent ${parent.id} (canonical is "${canonicalChildId}") — refusing to sign a duplicate`,
+    );
+  }
+  return { deposit, parent };
 }
 
 /**

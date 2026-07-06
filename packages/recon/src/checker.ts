@@ -1,4 +1,4 @@
-import type { GatewayStore, RemoteChainId } from "@gateway/common";
+import type { GatewayStore, RemoteChainId, PegInFeePolicy } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 
 export interface ReconCfg {
@@ -32,6 +32,10 @@ export class Recon {
     private readonly store: GatewayStore,
     private readonly cfg: ReconCfg,
     private readonly chain?: RemoteChainId,
+    // When set, the peg invariant credits unsweptFees RE-DERIVED from each row's gross
+    // (baseFee), not the coordinator-pinned fee — so an understated pinned fee cannot mask
+    // under-backing. Production always passes it; legacy/empty-store tests may omit it.
+    private readonly feePolicy?: PegInFeePolicy,
   ) {
     // VG-02: zero remotes is a fatal misconfiguration — recon with no wVIZ supply
     // visibility always sees circulating = 0, so drift ≥ 0, so always "healthy".
@@ -70,7 +74,12 @@ export class Recon {
       [locked, settled, unsweptFees] = await Promise.all([
         this.getLockedBalance(),
         Promise.allSettled(this.remotes.map((r) => r.supply())),
-        this.store.unsweptFeesMilliViz(this.chain),
+        // Derive from gross when a fee policy is configured (production) so the coordinator
+        // cannot understate the pinned fee to hide a shortfall; fall back to the pinned column
+        // only for legacy callers that pass no policy.
+        this.feePolicy
+          ? this.store.unsweptFeesDerivedMilliViz(this.feePolicy, this.chain)
+          : this.store.unsweptFeesMilliViz(this.chain),
       ]);
     } catch (err) {
       console.error("[recon] check indeterminate (VIZ node or store unavailable):", err);
@@ -88,6 +97,18 @@ export class Recon {
     if (failedNames.length > 0) {
       console.error(`[recon] check indeterminate (${failedNames.join(",")} supply unavailable) — not reporting healthy`);
       return null;
+    }
+
+    // Over-sweep guard (M10): a NEGATIVE unswept fee means confirmed FEE_SWEEPs pulled MORE
+    // than the derived peg-in fees justify — mis-pinning or a double sweep leaking backing.
+    // The store no longer clamps this to 0 (which silently hid it); treat it as a fail-closed
+    // condition and pause, rather than folding a negative into the drift arithmetic.
+    if (unsweptFees < 0n) {
+      const reason = `over-swept fees ${unsweptFees} mVIZ: confirmed FEE_SWEEPs exceed derived peg-in fees (mis-pinning or double sweep)`;
+      await this.store.pause(reason);
+      console.error(`[recon] CRITICAL: OVER-SWEEP DETECTED -> gateway paused: ${reason}`);
+      notifyStaff("drift", reason, { unsweptFees: String(unsweptFees) });
+      return false;
     }
 
     const circulating = (settled as PromiseFulfilledResult<bigint>[]).reduce((a, s) => a + s.value, 0n);

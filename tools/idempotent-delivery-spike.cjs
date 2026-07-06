@@ -37,7 +37,7 @@ const { planTransition, planChildren } = require("../packages/dispatcher/dist/po
 const { mintMessageB64 } = require("../packages/solana-watcher/dist/solanaSign.js");
 const { InMemoryGatewayStore, SqliteGatewayStore } = require("../packages/common/dist/store.js");
 const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/dist/keyedSigner.js");
-const { VizReleaseBroadcaster, GramMintBroadcaster } = require("../packages/coordinator/dist/adapters.js");
+const { VizReleaseBroadcaster, GramMintBroadcaster, SolanaMintBroadcaster } = require("../packages/coordinator/dist/adapters.js");
 const { GatewayAccounts } = require("../packages/common/dist/gatewayAccounts.js");
 const { releaseTxId } = require("../packages/viz-watcher/dist/vizSign.js");
 const { mkdtempSync } = require("node:fs");
@@ -451,6 +451,37 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     const nowStale = await store.stale(updatedAt + 10000, 5000, ["BROADCAST"]);
     assert.ok(nowStale.some((r) => r.id === "s1:0"), "BROADCAST row surfaced by stale() after timeout");
     console.log("[16] BROADCAST row surfaced by stale() for recovery -> not before timeout, yes after OK");
+  }
+
+  // ── 16b. C1: Solana orphan-recovery must NOT double-mint ──────────────────────
+  // The Solana broadcaster pins no txid before send, so its recovery scan (mintByActionId)
+  // is gated on attempts > 0 (first attempts skip the ~100-sig scan for speed). If the
+  // dispatcher requeued an orphaned BROADCAST row WITHOUT bumping attempts, actionExecuted
+  // would MISS an already-landed mint, and buildMintProposal would mint AGAIN on a fresh
+  // durable nonce -> a distinct, valid SECOND mint (backing broken). Prove the gate: attempts
+  // === 0 misses the landed mint; a bumped attempts finds it and short-circuits.
+  {
+    const landed = { txid: "SOL_MINT_LANDED" };
+    const chain = { mintByActionId: async () => landed }; // simulate: the first mint already landed
+    const store = new InMemoryGatewayStore();
+    await store.enqueue({ id: "sol:0", direction: "PEG_IN", remoteChain: "SOLANA",
+      recipient: "9xR", sender: "alice", amountMilliViz: 100000n, digest: "d", status: "QUEUED" });
+    await store.setStatus("sol:0", "BROADCAST"); // mid-flight; Solana pins NO txid
+    const b = new SolanaMintBroadcaster(chain, ["m1"], FEES, store);
+    const action = { id: "sol:0", direction: "PEG_IN", remoteChain: "SOLANA",
+      recipient: "9xR", amountMilliViz: 100000n, digest: "d" };
+
+    // attempts === 0: scan skipped -> the landed mint is MISSED (this is the double-mint window).
+    const first = await b.actionExecuted(action);
+    assert.strictEqual(first.executed, false, "attempts=0 skips the recovery scan (documents the window)");
+
+    // The fix: dispatcher orphan-recovery bumps attempts. Now the scan runs and finds the mint.
+    await store.setStatus("sol:0", "QUEUED", { attempts: 1, nextAttemptAt: 0 });
+    assert.strictEqual((await store.get("sol:0")).attempts, 1, "orphan-requeue bumped attempts");
+    const second = await b.actionExecuted(action);
+    assert.strictEqual(second.executed, true, "attempts>0 -> recovery scan finds the landed mint");
+    assert.strictEqual(second.txid, "SOL_MINT_LANDED", "short-circuits to already-landed txid (no double-mint)");
+    console.log("[16b] C1: Solana orphan-recovery bumps attempts -> scan short-circuits, no double-mint OK");
   }
 
   // ── 17-19. REAL VizReleaseBroadcaster: persist-txid-before-send + confirm-by-id ─

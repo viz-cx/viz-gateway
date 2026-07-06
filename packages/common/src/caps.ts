@@ -39,4 +39,20 @@ export class CircuitBreaker {
   async record(amount: bigint, now: number = Date.now()): Promise<void> {
     await this.store.recordCap(amount, now);
   }
+
+  /**
+   * Atomic evaluate-and-record: the correct primitive when the caller will act on `ok`. The
+   * per-tx and manual-review gates are pure per-amount checks (no window state), so they run
+   * first; the rolling-24h check and its record then happen in ONE atomic store transaction
+   * (tryReserveCap). This closes the cross-process TOCTOU the separate check()+record() pair had,
+   * where two watchers could both pass check() and both record() over the cap while neither
+   * tripped the OVER_24H pause. Nothing is recorded unless the decision is `ok`.
+   */
+  async checkAndRecord(amount: bigint, now: number = Date.now()): Promise<CapDecision> {
+    if (amount > this.policy.perTxMilliViz) return { ok: false, reason: "OVER_PER_TX" };
+    if (amount > this.policy.manualReviewAboveMilliViz) return { ok: false, reason: "NEEDS_MANUAL_REVIEW" };
+    const reserved = await this.store.tryReserveCap(amount, this.policy.rolling24hMilliViz, now - DAY_MS, now);
+    if (!reserved) return { ok: false, reason: "OVER_24H" };
+    return { ok: true };
+  }
 }

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { actionFromWire, buildGatewayAccounts, createStore, loadConfig, type CanonicalAction } from "@gateway/common";
+import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfig, readLimitedBody, type CanonicalAction } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   const store = createStore(cfg.storeUrl);
 
   const signers = cfg.coordinator.signerEndpoints.map(
-    (ep, i) => new HttpSignerClient(`signer-${i + 1}`, ep),
+    (ep, i) => new HttpSignerClient(`signer-${i + 1}`, ep, cfg.coordinator.signerApproveTimeoutMs),
   );
 
   const accounts = buildGatewayAccounts(cfg);
@@ -119,26 +119,29 @@ async function main(): Promise<void> {
       return;
     }
     if (req.method === "POST" && req.url === "/submit") {
-      let body = "";
-      req.on("data", (c) => (body += c));
-      req.on("end", () => {
-        void (async () => {
-          try {
-            if (await store.isPaused()) {
-              json(423, { error: "paused", reason: await store.pauseReason() });
-              return;
-            }
-            const raw = JSON.parse(body) as { action: Record<string, unknown> };
-            const action = actionFromWire(raw.action);
-            const result = await orchestrate(action);
-            console.log(`[coordinator] ${action.id} -> ${JSON.stringify(result)}`);
-            json(200, result);
-          } catch (err) {
-            console.error("[coordinator] /submit failed:", err);
-            json(500, { error: String(err) });
+      void (async () => {
+        let body: string;
+        try {
+          body = await readLimitedBody(req); // bounded size + timeout (BM4)
+        } catch (err) {
+          json(err instanceof BodyError ? err.statusCode : 400, { error: String(err) });
+          return;
+        }
+        try {
+          if (await store.isPaused()) {
+            json(423, { error: "paused", reason: await store.pauseReason() });
+            return;
           }
-        })();
-      });
+          const raw = JSON.parse(body) as { action: Record<string, unknown> };
+          const action = actionFromWire(raw.action);
+          const result = await orchestrate(action);
+          console.log(`[coordinator] ${action.id} -> ${JSON.stringify(result)}`);
+          json(200, result);
+        } catch (err) {
+          console.error("[coordinator] /submit failed:", err);
+          json(500, { error: String(err) });
+        }
+      })();
       return;
     }
     json(404, { error: "not found" });

@@ -166,6 +166,21 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(feeSweep({ id: "garbage:fee" }), deps(deposit)), "13 FEE_SWEEP malformed parent id");
   }
 
+  // 14) Zero-padded opIndex in the child id: "<trx>:00:fee" / "<trx>:000:fee" all parseInt to the
+  //     SAME parent deposit and keep the correct parent digest, so the digest bind passes — but each
+  //     is a DISTINCT id, hence a distinct memo -> distinct VIZ txid, i.e. a REAL second FEE_SWEEP a
+  //     compromised coordinator could harvest signatures for (unbounded, draining backing). The
+  //     canonical child-id equality check must reject every non-canonical padding.
+  {
+    await expectReject(validateAction(feeSweep({ id: `${deposit.trxId}:00:fee` }), deps(deposit)), "14 FEE_SWEEP zero-padded child id (double-sweep)");
+    await expectReject(validateAction(feeSweep({ id: `${deposit.trxId}:000:fee` }), deps(deposit)), "14 FEE_SWEEP triple-padded child id");
+  }
+
+  // 15) Same padding attack on REFUND (returns GROSS to the sender — a double refund is worse).
+  {
+    await expectReject(validateAction(refund({ id: `${deposit.trxId}:00:refund` }), deps(deposit)), "15 REFUND zero-padded child id (double-refund)");
+  }
+
   if (failures > 0) {
     console.error(`\nRESULT: ${failures} FAILED`);
     process.exit(1);
