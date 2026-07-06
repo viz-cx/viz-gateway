@@ -28,8 +28,11 @@ import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
  * <= the surcharge between the user and fees.gate (never the backing), so it is
  * safe to trust the boolean while the net arithmetic is verified.
  *
- * Keys are passed in here for the scaffold; in production this class wraps an
- * HSM/KMS and the raw secret never leaves the device.
+ * Keys are passed in here as raw material. Custody is NOT delegated to an HSM/KMS
+ * (decided 2026-07-06): the M-of-N federation is the custody control — each operator
+ * holds its own key on its own machine, under a separate person, so theft requires T
+ * independent machines. Keys stay local; at-rest they are protected by a passphrase
+ * keystore (no plaintext on disk/env), not by moving them off-box. See AUDIT.md §8.
  *
  * F2: `validateSource` re-derives the action from the operator's OWN chain view and
  * throws on any mismatch. It runs BEFORE the proposal-vs-action checks (which remain

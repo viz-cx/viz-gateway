@@ -14,8 +14,13 @@ blocker for this deploy.
 **Phase 0 resolved (2026-07-06):**
 - **Launch scope:** **TON only first.** Prove a mainnet round-trip on one chain, then add Solana
   (Phase 2 deferred to a later window). Halves the recon surface for the soft-launch.
-- **Key custody:** **in-memory (scaffold) accepted for the soft-launch.** Migrate `keyedSigner.ts`
-  to HSM/KMS before raising exposure. Largest un-audited operational risk (`AUDIT.md §8`).
+- **Key custody:** **keys stay on the operators' own local machines — HSM/KMS is NOT planned**
+  (decided 2026-07-06). The custody control is the M-of-N federation itself: each operator runs
+  on separate hardware under a separate person, so no external custody service is trusted and
+  theft requires compromising T *independent* machines at once. Residual = persistent
+  single-key exfiltration from one compromised operator box (bounded by threshold); mitigated
+  locally by at-rest encryption of the key material (no plaintext WIF/mnemonic on disk/env —
+  cross-platform passphrase keystore), NOT by moving keys off-box. See `AUDIT.md §8`.
 - **Caps:** **unlimited at launch** (operator decision). ⚠️ This removes the compensating control
   that made in-memory keys tolerable AND disables the `OVER_24H`→fail-closed auto-pause that recon
   leans on. `caps.ts` has no off switch, so "unlimited" = set the three `CAP_*`/`MANUAL_REVIEW_*`
@@ -44,9 +49,14 @@ These are operator decisions, not code. Each materially changes later phases.
    `tester4` is 2-of-3 and TON multisig is permanently 3-of-4 (testnet); mainnet deploys fresh
    at 2-of-3. **Still to nail down:** who are the 3 *independent* launch operators, are their
    keys generated on separate hardware, and the concrete trigger/timeline for the 5-of-7 grow.
-2. **Key custody.** *Decided (2026-07-06):* **accept in-memory (scaffold) for the soft-launch;**
-   migrate `keyedSigner.ts` to HSM/KMS before raising exposure. `AUDIT.md §8` flags this as the
-   single largest un-audited operational risk (WIFs/mnemonics in process memory).
+2. **Key custody.** *Decided (2026-07-06):* **keys stay local to each operator's machine; HSM/KMS
+   is NOT planned.** The M-of-N federation is the custody control — each operator's key lives only
+   on that operator's own hardware, under a separate person, so no external custody service is
+   trusted and theft requires compromising T *independent* machines simultaneously. The one residual
+   this leaves that a single-box HSM would close — persistent exfiltration of *one* operator's key
+   from a compromised box — is bounded by the threshold and mitigated by **local at-rest encryption**
+   of the key material (a cross-platform passphrase keystore: no plaintext WIF/mnemonic/secret on
+   disk or in env files), which keeps keys on-box. See `AUDIT.md §8`.
 3. **Production VIZ account.** *Decided (2026-07-06):* **provision fresh dedicated accounts**
    (`gram.gate` / `solana.gate` / `fees.gate`); do **not** reuse `tester4`. Each gets a fresh
    2-of-3 active-set authority (Phase 1).
