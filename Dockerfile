@@ -12,7 +12,10 @@ COPY packages ./packages
 COPY contracts ./contracts
 COPY setup-viz ./setup-viz
 COPY tools ./tools
-RUN npm install --no-audit --no-fund
+# npm ci (not install): a clean, reproducible install straight from package-lock.json, so the
+# image is built from the exact tree CI validates instead of whatever `install` happens to
+# resolve (BM5). Requires the lockfile to be in sync — enforced by CI's own `npm ci`.
+RUN npm ci --no-audit --no-fund
 RUN npm run build
 
 FROM node:22-alpine AS runtime
