@@ -42,17 +42,25 @@ export class CircuitBreaker {
 
   /**
    * Atomic evaluate-and-record: the correct primitive when the caller will act on `ok`. The
-   * per-tx and manual-review gates are pure per-amount checks (no window state), so they run
-   * first; the rolling-24h check and its record then happen in ONE atomic store transaction
-   * (tryReserveCap). This closes the cross-process TOCTOU the separate check()+record() pair had,
-   * where two watchers could both pass check() and both record() over the cap while neither
-   * tripped the OVER_24H pause. Nothing is recorded unless the decision is `ok`.
+   * rolling-24h check and its record happen in ONE atomic store transaction (tryReserveCap),
+   * closing the cross-process TOCTOU the separate check()+record() pair had, where two watchers
+   * could both pass check() and both record() over the cap while neither tripped the OVER_24H
+   * pause.
+   *
+   * Gate order matches the original check() (issue #37): per-tx -> 24h -> manual-review. The 24h
+   * gate MUST precede manual-review so a rolling-window breach reports OVER_24H (-> the
+   * cross-process pause) rather than silently HOLDing one tx as NEEDS_MANUAL_REVIEW while the
+   * window stays full. Consequence: a manual-review-band tx that fits the window reserves its
+   * 24h slot and is then HELD — if later approved the reservation counts it once (manual release
+   * just flips status, no re-check); if ultimately rejected the slot over-counts until the 24h
+   * window slides past it. That is the conservative (stricter-caps) direction, never a bypass.
+   * A per-tx or window rejection still reserves nothing.
    */
   async checkAndRecord(amount: bigint, now: number = Date.now()): Promise<CapDecision> {
     if (amount > this.policy.perTxMilliViz) return { ok: false, reason: "OVER_PER_TX" };
-    if (amount > this.policy.manualReviewAboveMilliViz) return { ok: false, reason: "NEEDS_MANUAL_REVIEW" };
     const reserved = await this.store.tryReserveCap(amount, this.policy.rolling24hMilliViz, now - DAY_MS, now);
     if (!reserved) return { ok: false, reason: "OVER_24H" };
+    if (amount > this.policy.manualReviewAboveMilliViz) return { ok: false, reason: "NEEDS_MANUAL_REVIEW" };
     return { ok: true };
   }
 }
