@@ -44,10 +44,10 @@ const line = format.printf(({ timestamp, level, message, module: mod, ...meta })
 
 export function createLogger(module: string): Logger {
   const dir = usableLogDir();
-  const console = new transports.Console();
+  const consoleTransport = new transports.Console();
   // Only attach the rotating file transport when the dir is writable; otherwise its own internal
   // mkdir throws uncaught and crashes the service on startup (see usableLogDir).
-  const file = dir
+  const fileTransport = dir
     ? new DailyRotateFile({
         dirname: dir,
         filename: `${module}-%DATE%.log`,
@@ -60,7 +60,7 @@ export function createLogger(module: string): Logger {
     level: process.env.LOG_LEVEL ?? "debug",
     defaultMeta: { module },
     format: format.combine(format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }), line),
-    transports: file ? [console, file] : [console],
+    transports: fileTransport ? [consoleTransport, fileTransport] : [consoleTransport],
   });
 }
 
