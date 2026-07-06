@@ -40,3 +40,17 @@ export function changeAdminBody(newAdmin: Address, queryId: bigint = 0n): Cell {
     .storeAddress(newAdmin)
     .endCell();
 }
+
+/**
+ * change_content#4 query_id:uint64 content:^Cell — replaces the minter's on-chain
+ * metadata cell (name/symbol/decimals/description/image). Only the admin may send
+ * it; once the admin is the multisig, wrap this body in a multisig order (see
+ * setMinterContent.ts). Build `content` with buildWvizContent().
+ */
+export function changeContentBody(content: Cell, queryId: bigint = 0n): Cell {
+  return beginCell()
+    .storeUint(OP_CHANGE_CONTENT, 32)
+    .storeUint(queryId, 64)
+    .storeRef(content)
+    .endCell();
+}

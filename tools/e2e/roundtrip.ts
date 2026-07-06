@@ -7,6 +7,7 @@ import { pollUntil } from "./poll";
 import { launchStack } from "./stack";
 import { submitLock, vizBalanceMilliViz } from "./viz";
 import { submitBurn, tonWvizBalance } from "./ton";
+import { Address } from "@ton/ton";
 
 const PEG_IN_TIMEOUT_MS = 8 * 60_000;
 const PEG_OUT_TIMEOUT_MS = 8 * 60_000;
@@ -33,7 +34,10 @@ async function main() {
   }
 
   // 2) Snapshot
-  const tonOwner = cfg.gram.burnOwner; // burn wallet address = wVIZ mint recipient
+  // Routing is by the receiving VIZ account (per-network split, PR #30/#32); the peg-in
+  // memo carries the raw, normalized remote address with NO "ton:" prefix
+  // (validateRemoteAddress rejects colons). Normalize (0Q… -> EQ… bounceable).
+  const tonOwner = Address.parse(cfg.gram.burnOwner).toString(); // burn wallet = wVIZ mint recipient
   const gross = uniqueGrossMilliViz(20_000n, cfg.runId);
   const net = expectedNetMilliViz(gross, fees, chain.toUpperCase() as RemoteChainId, true);
   const recvBefore = await vizBalanceMilliViz(cfg.viz.nodeUrl, cfg.viz.recipient);
@@ -47,8 +51,8 @@ async function main() {
   );
 
   try {
-    // 4) Peg-in: lock VIZ with memo "ton:<burn_wallet_address>"
-    const memo = `ton:${tonOwner}`;
+    // 4) Peg-in: lock VIZ with memo = the bare burn-wallet address (chain = receiving account)
+    const memo = tonOwner;
     const lockTx = await submitLock(cfg, gross, memo);
     console.log(`[e2e] peg-in lock submitted: ${lockTx} gross=${gross} memo=${memo}`);
 

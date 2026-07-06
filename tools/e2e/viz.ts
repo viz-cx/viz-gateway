@@ -36,6 +36,13 @@ export async function vizBalanceMilliViz(nodeUrl: string, account: string): Prom
   return vizToMilli(accts[0]!.balance);
 }
 
+/** True iff the VIZ account exists (get_accounts returns a row). */
+export async function vizAccountExists(nodeUrl: string, account: string): Promise<boolean> {
+  setTransport(nodeUrl);
+  const accts = await call<Array<{ name?: string }>>((cb) => viz.api.getAccounts([account], cb));
+  return Boolean(accts && accts.length > 0 && accts[0]);
+}
+
 export async function submitLock(cfg: E2eConfig, grossMilliViz: bigint, memo: string): Promise<string> {
   setTransport(cfg.viz.nodeUrl);
   const gp = await call<{ head_block_number: number; head_block_id: string }>((cb) =>

@@ -1,7 +1,7 @@
 // tools/e2e/ton.ts — minimal TON client for the e2e harness (burn submit + wVIZ balance).
-import { TonClient, WalletContractV4, internal, Address, beginCell, toNano } from "@ton/ton";
+import { TonClient, WalletContractV4, internal, Address, beginCell, toNano, Cell } from "@ton/ton";
 import { mnemonicToPrivateKey } from "@ton/crypto";
-import { Multisig } from "@gateway/contracts-ton";
+import { Multisig, parseWvizContent } from "@gateway/contracts-ton";
 import type { E2eConfig } from "./config";
 
 function client(cfg: E2eConfig): TonClient {
@@ -80,6 +80,37 @@ export async function tonWvizBalance(cfg: E2eConfig, ownerAddress: string): Prom
     if (!(await c.isContractDeployed(jw))) return 0n;
     const res = await c.runMethod(jw, "get_wallet_data", []);
     return res.stack.readBigNumber(); // balance is the first field
+  });
+}
+
+export interface MinterData {
+  totalSupply: bigint; // circulating wVIZ, base units (mVIZ)
+  mintable: boolean;
+  admin: string; // friendly address of the current admin (should be the multisig)
+  content: Record<string, string>; // parsed TEP-64 on-chain metadata (name/symbol/decimals/description/image)
+}
+
+/**
+ * Read the deployed wVIZ minter's on-chain state via `get_jetton_data`
+ * (standard governed-discoverable layout: total_supply, mintable, admin,
+ * jetton_content:^Cell, jetton_wallet_code:^Cell). The content cell is parsed
+ * back to a flat record so a live run can assert the deployed metadata matches
+ * what buildWvizContent produced — including whether an icon (`image`) is set.
+ */
+export async function readMinterData(cfg: E2eConfig): Promise<MinterData> {
+  return withRetry(async () => {
+    const c = client(cfg);
+    const res = await c.runMethod(Address.parse(cfg.gram.jettonMinterAddress), "get_jetton_data", []);
+    const totalSupply = res.stack.readBigNumber();
+    const mintable = res.stack.readBoolean();
+    const admin = res.stack.readAddress();
+    const content = res.stack.readCell();
+    return {
+      totalSupply,
+      mintable,
+      admin: admin.toString(),
+      content: parseWvizContent(content as Cell),
+    };
   });
 }
 
