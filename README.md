@@ -130,6 +130,20 @@ npm run build
 npm run threshold        # prints the 5-of-7 analysis
 ```
 
+## Tests
+
+Two offline suites, both run in CI (`.github/workflows/ci.yml`) and needing no chain RPC:
+
+```
+npm run verify           # scenario spikes (tools/*-spike.cjs): federation, canonical, recon, caps, ...
+npm run test:unit        # node:test unit suites in packages/*/test
+```
+
+`test:unit` compiles those suites through [`tsconfig.test.json`](./tsconfig.test.json) to `dist-test/`
+first — the sources use extensionless imports, so `node --test` can't execute the `.ts` files
+directly — then runs the compiled `*.test.js`. It builds the workspace first, since the tests
+resolve `@gateway/*` against each package's `dist/`.
+
 ## Run an operator node (Docker)
 
 Each trusted operator:
