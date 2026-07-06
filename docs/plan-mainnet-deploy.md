@@ -28,9 +28,12 @@ blocker for this deploy.
   coordinator bug = the entire backing balance, immediately. Recorded as accepted risk.
 - **VIZ identity:** **fresh dedicated accounts** — provision clean `gram.gate` / `solana.gate` /
   `fees.gate` with fresh 2-of-3 active authority; do not reuse `tester4`.
+- **Grow trigger (2026-07-06):** grow **2-of-3 → 5-of-7 by adding independent operators as they
+  come online** — operator-availability driven, not time/volume gated. Launch value stays small
+  until the set grows.
 - **Still open (Phase 0 not yet closed):** (a) the 3 *independent* launch operators — who they are,
-  keys generated on separate hardware; (b) concrete trigger/timeline for the 5-of-7 grow;
-  (c) secrets & funding staged (item 6).
+  keys generated on separate hardware (see the **operator key-collection protocol** in Phase 0
+  item 1); (c) secrets & funding staged (item 6) — **nothing staged yet**.
 
 > This consolidates the per-chain steps that today live testnet-oriented in `RUNBOOK.md`
 > (§4 VIZ accounts, §5 config, §5 Solana cutover, §6 TON gas, §9/§9b proofs) into one
@@ -42,13 +45,29 @@ blocker for this deploy.
 
 These are operator decisions, not code. Each materially changes later phases.
 
-1. **Federation size & operators.** *Decided (2026-07-06):* **launch at 2-of-3** (3 operators)
-   as a capped soft-launch, then grow toward **5-of-7** (BFT-clean for f=2) once live behavior
-   is proven. At 2-of-3 no single operator can act alone (threshold 2), but any 2 colluding
-   can — accept this for the soft-launch window and keep caps tight (item 5). Today VIZ
-   `tester4` is 2-of-3 and TON multisig is permanently 3-of-4 (testnet); mainnet deploys fresh
-   at 2-of-3. **Still to nail down:** who are the 3 *independent* launch operators, are their
-   keys generated on separate hardware, and the concrete trigger/timeline for the 5-of-7 grow.
+1. **Federation size & operators.** *Decided (2026-07-06):* **launch at 2-of-3** (3 independent
+   operators), then grow toward **5-of-7** (BFT-clean for f=2) **by adding operators as they come
+   online** (availability-driven, not time/volume gated). At 2-of-3 no single operator can act
+   alone (threshold 2), but any 2 colluding can — keep launch value small until the set grows.
+   Today VIZ `tester4` is 2-of-3 and TON multisig is permanently 3-of-4 (testnet); mainnet deploys
+   fresh at 2-of-3. **Still to nail down:** who are the 3 *independent* launch operators and are
+   their keys generated on separate hardware.
+
+   **Operator key-collection protocol (2-of-3, TON-only launch).** The whole point of M-of-N is
+   that *no single box holds a quorum of keys* — so each operator generates their own key material
+   locally and sends the coordinator **public values only**:
+   - **VIZ active key** — operator generates a VIZ keypair on their own box, keeps the private WIF
+     (`VIZ_SIGNING_WIF`, sealed in their own `FED_KEYSTORE`), sends the coordinator the **public key**
+     `VIZ7…`. The three pubkeys become `ACTIVE_KEYS` with `ACTIVE_THRESHOLD=2`.
+   - **TON wallet** — operator generates a 24-word v4 wallet locally, keeps the mnemonic
+     (`GRAM_SIGNER_MNEMONIC`, sealed), sends the coordinator the derived **v4 address** `EQ…`
+     (workchain 0, mainnet). The three addresses build the multisig via
+     `gen:multisig-data` in **addresses-only mode** (`MULTISIG_SIGNER_ADDRESSES=<a,b,c>`) so **no
+     operator mnemonic ever reaches the coordinator's box**.
+   - **Solana** — deferred (Phase 2); no Solana key collected at launch.
+   - ⚠️ **Never collect** `VIZ_SIGNING_WIF` or `GRAM_SIGNER_MNEMONIC` from an operator — if the
+     coordinator holds ≥2 operators' secrets the 2-of-3 is fake (effectively 1-of-1). Fix operator
+     order (op-1/2/3) once: TON `signers[index]` is baked into the multisig address.
 2. **Key custody.** *Decided (2026-07-06):* **keys stay local to each operator's machine; HSM/KMS
    is NOT planned.** The M-of-N federation is the custody control — each operator's key lives only
    on that operator's own hardware, under a separate person, so no external custody service is
@@ -65,8 +84,13 @@ These are operator decisions, not code. Each materially changes later phases.
 5. **Caps.** *Decided (2026-07-06):* **unlimited at launch** (operator decision, risk accepted).
    ⚠️ Removes the compensating control for in-memory keys and disables the `OVER_24H`→auto-pause;
    `caps.ts` has no off switch so this is implemented as effectively-infinite `CAP_*` env values.
-6. **Secrets & funding staged:** operator keys in the chosen vault; VIZ master held offline;
-   Solana submitter SOL; TON multisig gas; VIZ balances for backing accounts.
+6. **Secrets & funding.** *Status (2026-07-06): **nothing staged yet.*** Checklist:
+   - [ ] Each operator's secrets sealed in their **own** `FED_KEYSTORE` (per the key-collection
+         protocol in item 1) — coordinator holds only the public keys/addresses.
+   - [ ] VIZ **master/guardian key held offline** (`gate` key; active-only 2-of-3 on the gate accounts).
+   - [ ] **VIZ backing balance** on `gram.gate` — **small at launch** (grow with the operator set).
+   - [ ] **TON multisig gas** on the mainnet multisig (~0.05–0.1 TON per first peg-in).
+   - [ ] Solana submitter SOL — **deferred** (Phase 2, out of the TON-only launch scope).
 
 ---
 
@@ -74,9 +98,21 @@ These are operator decisions, not code. Each materially changes later phases.
 
 VIZ is already live (prod rotation proven 2026-07-01). Remaining:
 
-- [ ] Create/verify the VIZ mainnet accounts (RUNBOOK §4, `npm run setup:viz-account`):
-      - **Per-network backing:** `gram.gate`, `solana.gate` (one per remote; the
-        `gatewayAccounts.ts` registry is injective + fail-closed, so these must be distinct).
+- [x] **Subaccounts created (2026-07-06).** `gram.gate` / `fees.gate` / `solana.gate` now exist on
+      mainnet, each **1-of-1 under a bootstrap key, unfunded (0 VIZ)**, `recovery_account=gate`.
+      Created from parent `gate` (dotted names ⇒ only the parent can create them; ~1 VIZ fee each).
+      Tool for future creations: `npm run setup:viz-create` (`createSubaccount.ts`) — dry-run,
+      `APPLY=1`, refuses recreate / wrong-parent / single-signer master.
+- [ ] **Upgrade each to the 2-of-3 operator keyset, THEN fund.** `npm run setup:viz-account` with
+      `ACTIVE_KEYS`=3 operator pubkeys `ACTIVE_THRESHOLD=2` **and** `MASTER_KEYS`=same 3 pubkeys
+      `MASTER_THRESHOLD=2` (master = same 2-of-3 per Phase 0 decision; `setup:viz-account` now
+      supports key-based master + refuses a single-signer master). Sign `APPLY=1` with each
+      account's **current bootstrap master WIF** (`gram.gate`→`VIZ5fmDqyyk9…`, `fees.gate`→
+      `VIZ5N1xLbUCp…`, `solana.gate`→`VIZ8eHjRK27…`). Discard the bootstrap keys after. TON-only
+      launch upgrades+funds `gram.gate`+`fees.gate`; `solana.gate` stays dormant until Phase 2.
+- [ ] Verify the VIZ mainnet accounts (RUNBOOK §4, `npm run setup:viz-account`):
+      - **Per-network backing:** `gram.gate` (and `solana.gate` at Phase 2) — the
+        `gatewayAccounts.ts` registry is injective + fail-closed, so these must be distinct.
       - **Shared fee account:** `fees.gate` — single account across all networks; FEE_SWEEP
         children land here (`sourceValidator.ts` re-derives recipient = operator's own
         `fees.gate`, never coordinator-fed). Must be distinct from every backing account.
@@ -110,8 +146,10 @@ Currently devnet (program `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1`, Anchor 
 
 Currently testnet (multisig `EQCuW98I…` 3-of-4, minter deployed testnet).
 
-- [ ] Deploy **multisig-v2** at **2-of-3** on TON mainnet (`contracts/ton`,
-      `gen:multisig-data`); verify cell hashes against `contracts/ton/boc/PROVENANCE.md`.
+- [ ] Deploy **multisig-v2** at **2-of-3** on TON mainnet (`contracts/ton`, `gen:multisig-data`
+      in **addresses-only mode**: `MULTISIG_SIGNER_ADDRESSES=<op1,op2,op3>` `MULTISIG_THRESHOLD=2`
+      — builds the multisig from the collected operator addresses with no mnemonic on this box);
+      verify cell hashes against `contracts/ton/boc/PROVENANCE.md`.
 - [ ] Deploy the **wVIZ Jetton minter** on TON mainnet; **hand minter admin to the multisig**
       (one-way — multisig dysfunction permanently locks wVIZ; verify the multisig works first).
 - [ ] Fund the **multisig** with mainnet TON for mint execution + first-time recipient

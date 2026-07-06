@@ -40,9 +40,15 @@ declare module "viz-js-lib" {
     block_num?: number;
   }
 
+  export interface ChainProperties {
+    account_creation_fee: string;
+    [key: string]: unknown;
+  }
+
   interface VizApi {
     getAccounts(names: string[], cb: Cb<Account[]>): void;
     getDynamicGlobalProperties(cb: Cb<DynamicGlobalProperties>): void;
+    getChainProperties(cb: Cb<ChainProperties>): void;
     broadcastTransactionSynchronous(trx: VizTransaction, cb: Cb<BroadcastResult>): void;
   }
   interface VizConfig {
@@ -50,6 +56,19 @@ declare module "viz-js-lib" {
     get(key: string): unknown;
   }
   interface VizBroadcast {
+    accountCreateAsync(
+      wif: string,
+      fee: string,
+      delegation: string,
+      creator: string,
+      newAccountName: string,
+      master: Authority,
+      active: Authority,
+      regular: Authority,
+      memoKey: string,
+      jsonMetadata: string,
+      referrer: string,
+    ): Promise<unknown>;
     accountUpdateAsync(
       wif: string,
       account: string,

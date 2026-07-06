@@ -32,6 +32,7 @@
     "deploy:minter": "node contracts/ton/dist/deployJettonMinter.js",
     "set-minter-admin": "node contracts/ton/dist/setMinterAdmin.js",
     "setup:viz-account": "node setup-viz/dist/setupAccount.js",
+    "setup:viz-create": "node setup-viz/dist/createSubaccount.js",
     "rotate": "node setup-viz/dist/rotate.js",
     "rotate:gram": "node contracts/ton/dist/rotateTon.js",
     "rotate:solana": "node contracts/solana/dist/rotateSolana.js",
