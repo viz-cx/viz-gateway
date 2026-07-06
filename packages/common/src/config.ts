@@ -1,8 +1,10 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, openSync, readSync, closeSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import type { CapPolicy } from "./caps";
 import type { PegInFeePolicy } from "./fees";
 import type { FederationManifest, ManifestFees, OperatorRef, RemoteChainId } from "./types";
 import { GatewayAccounts } from "./gatewayAccounts";
+import { openKeystore } from "./keystore";
 
 /**
  * Shared fee constants. For the multisig to merge signatures, every operator must
@@ -145,6 +147,81 @@ function solanaSecret(name: string): Uint8Array | null {
 }
 
 /**
+ * Read a passphrase from the controlling TTY with echo disabled, synchronously.
+ * loadConfig() is sync and runs at startup, so we can't use async readline here.
+ * Best-effort: turns off terminal echo via `stty`, reads one line from /dev/tty,
+ * restores echo. Any failure (no tty, no stty) bubbles up to the caller, which
+ * then reports that FED_KEYSTORE_PASSPHRASE must be set instead.
+ */
+function readPassphraseFromTty(prompt: string): string {
+  process.stderr.write(prompt);
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    try {
+      execFileSync("stty", ["echo"], { stdio: ["inherit", "ignore", "ignore"] });
+    } catch {
+      /* nothing we can do; the terminal may show subsequent input */
+    }
+  };
+  try {
+    execFileSync("stty", ["-echo"], { stdio: ["inherit", "ignore", "ignore"] });
+    const fd = openSync("/dev/tty", "rs");
+    try {
+      const buf = Buffer.alloc(1);
+      let line = "";
+      while (readSync(fd, buf, 0, 1, null) === 1) {
+        const ch = buf.toString("utf8");
+        if (ch === "\n" || ch === "\r") break;
+        line += ch;
+      }
+      return line;
+    } finally {
+      closeSync(fd);
+    }
+  } finally {
+    restore();
+    process.stderr.write("\n");
+  }
+}
+
+/**
+ * If FED_KEYSTORE points to a sealed keystore, decrypt it and populate the three
+ * secret env vars (VIZ_SIGNING_WIF / GRAM_SIGNER_MNEMONIC / SOLANA_SIGNER_SECRET)
+ * so the rest of loadConfig reads them exactly as it would from a plaintext env.
+ * The passphrase comes from FED_KEYSTORE_PASSPHRASE, or — when that is unset and a
+ * TTY is attached — an interactive hidden prompt. An already-set env var is never
+ * overwritten (an explicit plaintext value wins, e.g. for a mixed local setup).
+ * No-op when FED_KEYSTORE is unset: the plaintext-env path is fully preserved.
+ */
+export function hydrateKeystore(): void {
+  const path = process.env.FED_KEYSTORE;
+  if (path === undefined || path.trim() === "") return;
+  if (!existsSync(path)) throw new Error(`FED_KEYSTORE points to a missing file: ${path}`);
+
+  let passphrase = process.env.FED_KEYSTORE_PASSPHRASE;
+  if (passphrase === undefined || passphrase === "") {
+    if (!process.stdin.isTTY) {
+      throw new Error(
+        "FED_KEYSTORE is set but FED_KEYSTORE_PASSPHRASE is empty and no TTY is available to prompt.",
+      );
+    }
+    passphrase = readPassphraseFromTty(`Passphrase for keystore ${path}: `);
+  }
+
+  const secrets = openKeystore(JSON.parse(readFileSync(path, "utf8")), passphrase);
+  const setIfUnset = (name: string, value: string | undefined) => {
+    if (value !== undefined && (process.env[name] === undefined || process.env[name] === "")) {
+      process.env[name] = value;
+    }
+  };
+  setIfUnset("VIZ_SIGNING_WIF", secrets.vizSigningWif);
+  setIfUnset("GRAM_SIGNER_MNEMONIC", secrets.gramSignerMnemonic);
+  setIfUnset("SOLANA_SIGNER_SECRET", secrets.solanaSignerSecret);
+}
+
+/**
  * Parse a federation manifest object (the committed federation.json). The
  * running gateway reads this to know the operator set + their pubkeys; the
  * rotation tool rewrites it after a successful rotation.
@@ -190,6 +267,11 @@ export function parseManifest(raw: unknown): FederationManifest {
 
 /** Load and validate config from environment. Throws on invalid federation. */
 export function loadConfig(): GatewayConfig {
+  // If a sealed keystore is configured, decrypt it into the secret env vars first,
+  // so everything below reads keys the same way whether they came from a keystore
+  // or a plaintext env. No-op when FED_KEYSTORE is unset.
+  hydrateKeystore();
+
   // Defaults to 1-of-1 for a solo bootstrap launch. Grow by adding signer keys
   // (yours or validators') and raising the threshold — no redeploy required.
   const n = int("FEDERATION_N", 1);
