@@ -305,8 +305,15 @@ under-rated.
   takeover. This is an operational assumption, not enforced in code.
 - **Single shared SQLite file** and **single coordinator instance** — data-integrity and
   liveness SPOFs respectively (no HA yet); neither enables theft.
-- **Keys in signer process memory** (scaffold) — production intends HSM/KMS
-  (`keyedSigner.ts` comment); the raw secret handling is in scope to review as-is.
+- **Keys held locally by each operator (accepted; HSM/KMS not planned, decided 2026-07-06):**
+  the custody control is the M-of-N federation, not per-box hardware — each operator's key lives
+  only on that operator's own machine, under a separate person, so no external custody service is
+  trusted and theft requires compromising T *independent* machines at once. Residual a single-box
+  HSM would close = persistent exfiltration of *one* operator's key from a compromised box (valid
+  until rotation); bounded by the threshold. Mitigation is **local at-rest encryption** — a
+  cross-platform passphrase keystore so no plaintext WIF/mnemonic/secret sits on disk or in env
+  files — which keeps keys on-box rather than moving them off it. The raw in-memory secret handling
+  (Node strings can't be reliably zeroized) is in scope to review as-is.
 - **`bigint-buffer@1.1.5` buffer overflow (GHSA-3gc7-fjrx-p6mg, high, no fix):** pulled
   transitively via `@solana/spl-token → @solana/buffer-layout-utils`. The package is
   unmaintained and `1.1.5` is the latest; there is no patched version to bump to. The
