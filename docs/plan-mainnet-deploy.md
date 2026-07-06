@@ -11,6 +11,22 @@ blocker for this deploy.
 - **VIZ accounts:** per-network backing (`gram.gate`, `solana.gate`) + one **shared fee
   account** `fees.gate` across all networks.
 
+**Phase 0 resolved (2026-07-06):**
+- **Launch scope:** **TON only first.** Prove a mainnet round-trip on one chain, then add Solana
+  (Phase 2 deferred to a later window). Halves the recon surface for the soft-launch.
+- **Key custody:** **in-memory (scaffold) accepted for the soft-launch.** Migrate `keyedSigner.ts`
+  to HSM/KMS before raising exposure. Largest un-audited operational risk (`AUDIT.md §8`).
+- **Caps:** **unlimited at launch** (operator decision). ⚠️ This removes the compensating control
+  that made in-memory keys tolerable AND disables the `OVER_24H`→fail-closed auto-pause that recon
+  leans on. `caps.ts` has no off switch, so "unlimited" = set the three `CAP_*`/`MANUAL_REVIEW_*`
+  env values to an effectively-infinite bigint. Combined blast radius on a key compromise or
+  coordinator bug = the entire backing balance, immediately. Recorded as accepted risk.
+- **VIZ identity:** **fresh dedicated accounts** — provision clean `gram.gate` / `solana.gate` /
+  `fees.gate` with fresh 2-of-3 active authority; do not reuse `tester4`.
+- **Still open (Phase 0 not yet closed):** (a) the 3 *independent* launch operators — who they are,
+  keys generated on separate hardware; (b) concrete trigger/timeline for the 5-of-7 grow;
+  (c) secrets & funding staged (item 6).
+
 > This consolidates the per-chain steps that today live testnet-oriented in `RUNBOOK.md`
 > (§4 VIZ accounts, §5 config, §5 Solana cutover, §6 TON gas, §9/§9b proofs) into one
 > mainnet-sequenced checklist. Execute in a fresh session; resolve Phase 0 decisions first.
@@ -28,17 +44,17 @@ These are operator decisions, not code. Each materially changes later phases.
    `tester4` is 2-of-3 and TON multisig is permanently 3-of-4 (testnet); mainnet deploys fresh
    at 2-of-3. **Still to nail down:** who are the 3 *independent* launch operators, are their
    keys generated on separate hardware, and the concrete trigger/timeline for the 5-of-7 grow.
-2. **Key custody.** `AUDIT.md §8` flags that signer keys are in **process memory** (scaffold;
-   `keyedSigner.ts` comment says production wraps HSM/KMS). Deploying real value on in-memory
-   WIFs/mnemonics is the single largest un-audited operational risk. Decide: HSM/KMS now, or
-   accept in-memory for a capped soft-launch?
-3. **Production VIZ account.** `tester4` is the current on-chain gateway identity. Confirm it
-   is the intended production account, or provision a dedicated one and redo the active-set
-   authority upgrade.
-4. **Launch scope.** Both remotes at once (TON + Solana) or one first? One-chain launch
-   halves the moving parts and the recon surface.
-5. **Caps.** Set conservative per-tx and rolling-24h caps (`caps.ts` / env) for the initial
-   window regardless of audit posture — the cheapest blast-radius limiter.
+2. **Key custody.** *Decided (2026-07-06):* **accept in-memory (scaffold) for the soft-launch;**
+   migrate `keyedSigner.ts` to HSM/KMS before raising exposure. `AUDIT.md §8` flags this as the
+   single largest un-audited operational risk (WIFs/mnemonics in process memory).
+3. **Production VIZ account.** *Decided (2026-07-06):* **provision fresh dedicated accounts**
+   (`gram.gate` / `solana.gate` / `fees.gate`); do **not** reuse `tester4`. Each gets a fresh
+   2-of-3 active-set authority (Phase 1).
+4. **Launch scope.** *Decided (2026-07-06):* **TON only first.** Solana (Phase 2) deferred to a
+   later window. Halves the moving parts and the recon surface.
+5. **Caps.** *Decided (2026-07-06):* **unlimited at launch** (operator decision, risk accepted).
+   ⚠️ Removes the compensating control for in-memory keys and disables the `OVER_24H`→auto-pause;
+   `caps.ts` has no off switch so this is implemented as effectively-infinite `CAP_*` env values.
 6. **Secrets & funding staged:** operator keys in the chosen vault; VIZ master held offline;
    Solana submitter SOL; TON multisig gas; VIZ balances for backing accounts.
 
@@ -61,7 +77,11 @@ VIZ is already live (prod rotation proven 2026-07-01). Remaining:
       by one key.
 - [ ] Confirm live authority hash matches the intended keyset (anti-rollback).
 
-## Phase 2 — Solana mainnet (remote: mint / burn, PDA custody)
+## Phase 2 — Solana mainnet (remote: mint / burn, PDA custody) — **DEFERRED**
+
+> Phase 0 launch scope = **TON only first**. Solana stays devnet for the initial mainnet window;
+> execute this phase after the TON round-trip is proven. Set `RECON_EXPECTED_REMOTES` to TON-only
+> at launch so recon fails closed on a missing Solana remote rather than expecting one.
 
 Currently devnet (program `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1`, Anchor 1.1.2).
 
