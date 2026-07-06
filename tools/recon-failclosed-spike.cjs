@@ -11,7 +11,7 @@
 // Run: node tools/recon-failclosed-spike.cjs   (after npm run build)
 const assert = require("node:assert");
 const { InMemoryGatewayStore } = require("../packages/common/dist/store");
-const { Recon } = require("../packages/recon/dist/checker");
+const { Recon, uncoveredActiveChains } = require("../packages/recon/dist/checker");
 
 const MAX_FAIL = 3;
 const cfg = { driftToleranceMilliViz: 0n, maxConsecutiveFailures: MAX_FAIL };
@@ -177,6 +177,73 @@ async function overSweepFailsClosed() {
   console.log("[recon-failclosed] M10: negative unswept (over-sweep) fails closed, not masked OK");
 }
 
+// M9: recon must cover EVERY chain that has minted (or committed to minting) wVIZ, and that active
+// set is derived from the OUTBOX (durable) — not from RECON_EXPECTED_REMOTES (env, defaults empty →
+// fail-open when a live chain's config is dropped). store.activeRemoteChains() must classify only
+// committed/minted PEG_INs as active; a chain that's active but uncovered must fail closed.
+const PEG_IN = (id, chain, status) => ({
+  id, direction: "PEG_IN", remoteChain: chain, recipient: "r", sender: "s",
+  amountMilliViz: 100_000n, digest: "d-" + id, status,
+});
+
+async function activeChainsFromOutboxClassification() {
+  // Each committed/minted status marks a chain active.
+  for (const status of ["QUEUED", "SIGNING", "BROADCAST", "CONFIRMED"]) {
+    const store = new InMemoryGatewayStore();
+    await store.enqueue(PEG_IN("g-" + status, "GRAM", status));
+    assert.deepStrictEqual(
+      await store.activeRemoteChains(), ["GRAM"],
+      `PEG_IN in ${status} marks its chain active`,
+    );
+  }
+  // Non-committed / refunded / non-PEG_IN rows do NOT mark a chain active.
+  const store = new InMemoryGatewayStore();
+  await store.enqueue(PEG_IN("seen", "GRAM", "SEEN")); // detected, caps not yet passed
+  await store.enqueue(PEG_IN("held", "SOLANA", "HELD")); // failed caps → refund, never mints
+  await store.enqueue(PEG_IN("refd", "SOLANA", "REFUNDED"));
+  await store.enqueue({ id: "sweep", direction: "FEE_SWEEP", remoteChain: "GRAM",
+    recipient: "fees.gate", amountMilliViz: 5n, digest: "dsw", status: "CONFIRMED" });
+  await store.enqueue({ id: "out", direction: "PEG_OUT", remoteChain: "SOLANA",
+    recipient: "viz-acct", amountMilliViz: 10n, digest: "dout", status: "CONFIRMED" });
+  assert.deepStrictEqual(
+    await store.activeRemoteChains(), [],
+    "SEEN/HELD/REFUNDED PEG_INs and FEE_SWEEP/PEG_OUT rows do not mark a chain active",
+  );
+  // Mixed: only the chains with a committed PEG_IN come back.
+  const mixed = new InMemoryGatewayStore();
+  await mixed.enqueue(PEG_IN("g1", "GRAM", "CONFIRMED"));
+  await mixed.enqueue(PEG_IN("g2", "GRAM", "SEEN")); // same chain, doesn't double
+  await mixed.enqueue(PEG_IN("s1", "SOLANA", "HELD")); // SOLANA only ever held → not active
+  assert.deepStrictEqual(await mixed.activeRemoteChains(), ["GRAM"], "distinct active chains, GRAM only");
+  console.log("[recon-failclosed] M9: activeRemoteChains classifies committed/minted PEG_INs only OK");
+}
+
+async function uncoveredActiveChainFailsClosed() {
+  // SOLANA minted wVIZ (CONFIRMED peg-in) but its config was dropped, so recon covers only GRAM.
+  const store = new InMemoryGatewayStore();
+  await store.enqueue(PEG_IN("s1", "SOLANA", "CONFIRMED"));
+  const covered = new Set(["GRAM"]);
+  const uncovered = uncoveredActiveChains(await store.activeRemoteChains(), covered);
+  assert.deepStrictEqual(uncovered, ["SOLANA"], "SOLANA is active but not covered by recon");
+  // This is exactly the decision main() acts on → fail closed (pause).
+  if (uncovered.length > 0) await store.pause(`active chain(s) [${uncovered.join(",")}] not covered by recon`);
+  assert.strictEqual(await store.isPaused(), true, "uncovered active chain trips the pause (fail-closed)");
+
+  // When recon DOES cover the active chain, nothing is uncovered → no pause.
+  const store2 = new InMemoryGatewayStore();
+  await store2.enqueue(PEG_IN("s1", "SOLANA", "CONFIRMED"));
+  await store2.enqueue(PEG_IN("g1", "GRAM", "BROADCAST"));
+  const uncovered2 = uncoveredActiveChains(await store2.activeRemoteChains(), new Set(["GRAM", "SOLANA"]));
+  assert.deepStrictEqual(uncovered2, [], "covering every active chain → nothing uncovered");
+  assert.strictEqual(await store2.isPaused(), false, "fully-covered recon does not pause");
+
+  // A configured chain with NO circulating wVIZ yet (empty outbox) is fine — covered ⊇ active(∅).
+  const store3 = new InMemoryGatewayStore();
+  assert.deepStrictEqual(uncoveredActiveChains(await store3.activeRemoteChains(), new Set(["GRAM"])), [],
+    "no active chains yet → nothing uncovered (a fresh gateway is not half-covered)");
+  console.log("[recon-failclosed] M9: active-but-uncovered chain fails closed; covered set OK");
+}
+
 (async () => {
   await zeroRemotesThrows();
   await oneRemoteFailsIsIndeterminate();
@@ -185,6 +252,8 @@ async function overSweepFailsClosed() {
   await missingExpectedRemoteThrows();
   await coordinatorUnderstatedFeeCannotMask();
   await overSweepFailsClosed();
+  await activeChainsFromOutboxClassification();
+  await uncoveredActiveChainFailsClosed();
   console.log("recon-failclosed-spike: all assertions passed");
 })().catch((e) => {
   console.error(e);

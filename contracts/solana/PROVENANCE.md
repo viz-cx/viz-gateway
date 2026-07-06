@@ -23,24 +23,40 @@ There is **no transfer instruction**. Funds at a PDA can only be burned; they ca
 moved to any other address. The PDA has no private key — it is a program-derived address
 with bump-seed authority held by the program itself.
 
-### Upgrade authority
+### Upgrade authority (H3)
 
-On devnet/mainnet deploy, the upgrade authority **must be set to the M-of-N multisig**
-(same set as the wVIZ mint authority). This prevents unilateral program upgrades and
-requires operator consensus to change the burn logic.
+The burn-only guarantee holds only while the program is what we audited: whoever holds the
+BPF **upgrade authority** can replace `burn_deposit` with a drain-everything instruction and
+empty every deposit ATA. On devnet/mainnet deploy the upgrade authority **must be set to the
+federation's M-of-N multisig**, verified on-chain, and eventually dropped (non-upgradeable).
 
-To set after deploy:
+> ⚠️ The BPF Upgradeable Loader checks a **single** authority pubkey — it does NOT understand
+> SPL Token multisigs. The `createMultisig` account that gates the wVIZ *mint* authority
+> therefore **cannot** serve as the upgrade authority. Use a real on-chain multisig program
+> (e.g. **Squads v4**) and set its authority PDA (`SOLANA_UPGRADE_MULTISIG`) as the upgrade
+> authority. Mint-authority multisig ≠ upgrade-authority multisig.
+
+Verify + hand off with the in-repo tool (equivalent to `solana program show`, but fail-closed —
+dry-run exits non-zero when the authority isn't the multisig, so CI/operators notice):
+```bash
+SOLANA_DEPOSIT_PROGRAM_ID=MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 \
+SOLANA_UPGRADE_MULTISIG=<SQUADS_AUTHORITY_PDA> \
+  npm run authority:solana                       # dry-run: read + verdict, no writes
+# to reassign (the CURRENT authority must sign):
+APPLY=1 SOLANA_PAYER_SECRET='[..]' ... npm run authority:solana
+```
+Or the raw CLI equivalent:
 ```bash
 solana program set-upgrade-authority MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 \
-  --new-upgrade-authority <MULTISIG_ADDRESS> \
-  --url <RPC_URL>
+  --new-upgrade-authority <SQUADS_AUTHORITY_PDA> --url <RPC_URL>
+solana program show MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 --url <RPC_URL>  # Authority == multisig
 ```
 
-To verify:
-```bash
-solana program show MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 --url <RPC_URL>
-# Authority field must equal the multisig address
-```
+> **Not tested on a live cluster.** No `solana-test-validator` is available in the dev
+> environment, so `enforceProgramAuthority.ts`'s on-chain read/hand-off path has NOT been run
+> against a cluster. Its ProgramData parsing, PDA derivation, fail-closed verdict, and the
+> `SetAuthority` instruction layout are covered offline by
+> `tools/solana-upgrade-authority-spike.cjs`; dry-run it on devnet before mainnet.
 
 ### Devnet proof
 

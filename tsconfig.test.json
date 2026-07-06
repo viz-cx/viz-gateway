@@ -1,0 +1,22 @@
+{
+  // BM1: the unit suites live in packages/*/test and are written as node:test files with
+  // extensionless imports, so `node --test` cannot run them directly (Node has no TS loader here).
+  // This project compiles just those suites (and the sources they pull in) to dist-test/, from where
+  // `node --test dist-test/packages/*/test/*.test.js` runs them. It is NOT part of `tsc -b` (no
+  // composite/declaration), so it never touches the shipped dist/ outputs.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": false,
+    // Test bodies index arrays right after asserting their length (children[0] after
+    // assert.equal(children.length, 1)); the base config's noUncheckedIndexedAccess would flag
+    // every such access. Relax it for tests only — all other strict checks stay on.
+    "noUncheckedIndexedAccess": false,
+    "rootDir": ".",
+    "outDir": "dist-test"
+  },
+  "include": ["packages/*/test/**/*.ts"]
+}

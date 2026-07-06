@@ -51,6 +51,25 @@ export function loadSolanaDeployConfig(): SolanaDeployConfig {
   };
 }
 
+export interface SolanaProgramAuthorityConfig {
+  rpcUrl: string;
+  programId: string; // SOLANA_DEPOSIT_PROGRAM_ID (the gateway-deposit program)
+  expectedMultisig: string; // SOLANA_UPGRADE_MULTISIG (Squads-style M-of-N authority PDA)
+  payer: Keypair | null; // current authority holder; required to hand off (APPLY)
+  apply: boolean; // APPLY=1 to actually reassign the authority
+}
+
+export function loadSolanaProgramAuthorityConfig(): SolanaProgramAuthorityConfig {
+  return {
+    rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
+    // Same program the lookup/scanner/signers already point at — one canonical env, not a new one.
+    programId: opt("SOLANA_DEPOSIT_PROGRAM_ID", ""),
+    expectedMultisig: opt("SOLANA_UPGRADE_MULTISIG", ""),
+    payer: loadPayer(opt("SOLANA_PAYER_SECRET", "")),
+    apply: opt("APPLY", "0") === "1",
+  };
+}
+
 function loadSecret(name: string): Uint8Array | null {
   const v = opt(name, "");
   if (!v) return null;

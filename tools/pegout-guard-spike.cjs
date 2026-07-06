@@ -108,23 +108,54 @@ console.log("[recovery] SEEN burn-checkpoint classification OK");
   console.log("[e2e] burn checkpoint persisted on SEEN row -> recoverable OK");
 
   // f) checkAndRecord — the atomic check+record primitive the peg-in/observer watchers now use.
-  //    Proves: pure gates (per-tx, manual-review) reject WITHOUT recording; the rolling-24h slot
-  //    is reserved atomically only on `ok`; a rejected amount reserves nothing; boundary is exact.
+  //    Gate order (issue #37): per-tx -> 24h -> manual-review, matching check(). Proves: per-tx
+  //    and window rejections reserve nothing; 24h takes precedence over manual-review (a full
+  //    window in the overlap band trips OVER_24H, not NEEDS_MANUAL_REVIEW); a manual-review-band
+  //    tx that fits reserves its slot (conservative hold); boundary is exact.
   {
     const { InMemoryGatewayStore } = require("../packages/common/dist/store.js");
     const DAY = 86_400_000;
-    const s = new InMemoryGatewayStore();
-    const b = new CircuitBreaker({ perTxMilliViz: 1_000n, rolling24hMilliViz: 1_500n, manualReviewAboveMilliViz: 900n }, s);
     const t = 1_000_000;
-    assert.deepStrictEqual(await b.checkAndRecord(1_001n, t), { ok: false, reason: "OVER_PER_TX" }, "over per-tx");
-    assert.deepStrictEqual(await b.checkAndRecord(950n, t), { ok: false, reason: "NEEDS_MANUAL_REVIEW" }, "manual review");
-    assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 0n, "rejected amounts record nothing");
-    assert.deepStrictEqual(await b.checkAndRecord(800n, t), { ok: true }, "within caps -> ok");
-    assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 800n, "accepted amount recorded exactly once");
-    assert.deepStrictEqual(await b.checkAndRecord(800n, t), { ok: false, reason: "OVER_24H" }, "800+800 > 1500 -> OVER_24H");
-    assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 800n, "an OVER_24H reject reserves nothing");
-    assert.deepStrictEqual(await b.checkAndRecord(700n, t), { ok: true }, "800+700 == 1500 (== cap) fits");
-    console.log("[caps] checkAndRecord: pure gates reject w/o recording; 24h reserve atomic + boundary-exact OK");
+    const CAPS = { perTxMilliViz: 1_000n, rolling24hMilliViz: 1_500n, manualReviewAboveMilliViz: 900n };
+
+    // per-tx is checked before any reserve -> rejects, records nothing.
+    {
+      const s = new InMemoryGatewayStore();
+      const b = new CircuitBreaker(CAPS, s);
+      assert.deepStrictEqual(await b.checkAndRecord(1_001n, t), { ok: false, reason: "OVER_PER_TX" }, "over per-tx");
+      assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 0n, "OVER_PER_TX reserves nothing");
+    }
+
+    // issue #37: overlap band (manualReviewAbove < amount <= perTx) with a FULL window -> OVER_24H
+    // (the cross-process pause), NOT NEEDS_MANUAL_REVIEW. Pre-reorder this returned MANUAL_REVIEW.
+    {
+      const s = new InMemoryGatewayStore();
+      const b = new CircuitBreaker(CAPS, s);
+      assert.deepStrictEqual(await b.checkAndRecord(800n, t), { ok: true }, "fill window with 800");
+      assert.deepStrictEqual(await b.checkAndRecord(950n, t), { ok: false, reason: "OVER_24H" }, "950 in overlap band + full window -> OVER_24H (issue #37)");
+      assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 800n, "the OVER_24H-rejected 950 reserved nothing");
+    }
+
+    // overlap band with ROOM -> NEEDS_MANUAL_REVIEW, and it DOES reserve its 24h slot (conservative
+    // hold: an approved tx then counts once; a rejected one over-counts until the window slides).
+    {
+      const s = new InMemoryGatewayStore();
+      const b = new CircuitBreaker(CAPS, s);
+      assert.deepStrictEqual(await b.checkAndRecord(950n, t), { ok: false, reason: "NEEDS_MANUAL_REVIEW" }, "950 with room -> manual review");
+      assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 950n, "a manual-review hold reserves its 24h slot (conservative)");
+    }
+
+    // sub-review band: atomic reserve on ok, exact boundary, window rejection reserves nothing.
+    {
+      const s = new InMemoryGatewayStore();
+      const b = new CircuitBreaker(CAPS, s);
+      assert.deepStrictEqual(await b.checkAndRecord(800n, t), { ok: true }, "within caps -> ok");
+      assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 800n, "accepted amount recorded exactly once");
+      assert.deepStrictEqual(await b.checkAndRecord(800n, t), { ok: false, reason: "OVER_24H" }, "800+800 > 1500 -> OVER_24H");
+      assert.strictEqual(await s.capSumMilliViz(t - DAY, t), 800n, "an OVER_24H reject reserves nothing");
+      assert.deepStrictEqual(await b.checkAndRecord(700n, t), { ok: true }, "800+700 == 1500 (== cap) fits");
+    }
+    console.log("[caps] checkAndRecord: per-tx/window reject w/o record; 24h precedes manual-review (issue #37); boundary-exact OK");
   }
 
   console.log("\nRESULT: peg-out validate-before-burn + burn-checkpoint recovery verified.");

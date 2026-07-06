@@ -63,6 +63,15 @@ export interface GatewayStore {
    * under-crediting is the safe direction — stricter backing check, never laxer).
    */
   unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint>;
+  /**
+   * Distinct remote chains that have minted (or committed to minting) wVIZ — any chain with a
+   * PEG_IN row past the caps gate (QUEUED/SIGNING/BROADCAST/CONFIRMED). Such a chain has live or
+   * imminent circulating wVIZ, so recon MUST run a per-chain check for it. Derived from the outbox
+   * itself, NOT from env config, so a chain that drops out of RECON_EXPECTED_REMOTES (which defaults
+   * empty → fail-open) is still forced back into recon: dropping a live remote's config would
+   * otherwise silently stop checking its backing (per-chain fail-open, M9).
+   */
+  activeRemoteChains(): Promise<RemoteChainId[]>;
 
   // --- rolling 24h cap window (shared) ---
   recordCap(amountMilliViz: bigint, now: number): Promise<void>;
@@ -109,6 +118,15 @@ type Row = Record<string, unknown>;
 
 /** PEG_IN statuses at/after which the fee has been minted-as-surplus. */
 const MINTED_STATUSES: ActionStatus[] = ["BROADCAST", "CONFIRMED"];
+
+/**
+ * PEG_IN statuses at/after which a wVIZ mint is COMMITTED: it has passed the caps gate (QUEUED)
+ * and will mint barring a crash, or already has. A chain with any such row has live-or-imminent
+ * circulating wVIZ and must never leave recon (M9). Broader than MINTED_STATUSES so the
+ * QUEUED→BROADCAST window can't briefly mint on a chain recon doesn't yet cover. Refunded/held
+ * rows (SEEN/HELD/REFUNDING/REFUNDED/FAILED) never mint, so they don't mark a chain active.
+ */
+const ACTIVE_CHAIN_STATUSES: ActionStatus[] = ["QUEUED", "SIGNING", "BROADCAST", "CONFIRMED"];
 
 /** Sum a query's `v` column as BigInt (overflow-safe, unlike SQLite's int64 SUM). */
 function sumBigIntColumn(rows: Row[]): bigint {
@@ -380,6 +398,17 @@ export class SqliteGatewayStore implements GatewayStore {
     return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
 
+  async activeRemoteChains(): Promise<RemoteChainId[]> {
+    const ph = ACTIVE_CHAIN_STATUSES.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT remote_chain AS c FROM action_outbox
+         WHERE direction='PEG_IN' AND remote_chain IS NOT NULL AND status IN (${ph})`,
+      )
+      .all(...ACTIVE_CHAIN_STATUSES) as Row[];
+    return rows.map((r) => String(r["c"]) as RemoteChainId);
+  }
+
   async recordCap(amountMilliViz: bigint, now: number): Promise<void> {
     this.db
       .prepare("INSERT INTO cap_window(ts, amount_milli_viz) VALUES(?, ?)")
@@ -564,6 +593,19 @@ export class InMemoryGatewayStore implements GatewayStore {
     }
     const v = minted - swept;
     return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
+  }
+  async activeRemoteChains(): Promise<RemoteChainId[]> {
+    const active = new Set<RemoteChainId>();
+    for (const r of this.rows.values()) {
+      if (
+        r.direction === "PEG_IN" &&
+        r.remoteChain &&
+        (r.status === "QUEUED" || r.status === "SIGNING" || r.status === "BROADCAST" || r.status === "CONFIRMED")
+      ) {
+        active.add(r.remoteChain);
+      }
+    }
+    return [...active];
   }
   async recordCap(amountMilliViz: bigint, now: number): Promise<void> {
     this.caps.push({ ts: now, amount: amountMilliViz });
