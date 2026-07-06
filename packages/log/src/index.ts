@@ -1,7 +1,6 @@
 import { createLogger as createWinston, format, transports, type Logger } from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import { join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, accessSync, constants } from "node:fs";
 
 /**
  * Structured logging for the gateway services. Each service tags its lines with a
@@ -14,11 +13,27 @@ import { mkdirSync } from "node:fs";
 
 const LOG_DIR = process.env.LOG_DIR ?? "./logs";
 
-function ensureDir(): void {
+let warnedNoFileLog = false;
+
+/**
+ * Return LOG_DIR if it is usable for the rotating file transport, else null (→ console-only).
+ * The previous version swallowed a failed mkdir but STILL added the DailyRotateFile transport,
+ * whose own internal mkdir then threw UNCAUGHT and crashed every service on startup — e.g. a
+ * non-root container ($LOG_DIR unwritable, "EACCES mkdir 'logs/'"). We must decide up front and
+ * only attach the file transport when the directory is actually writable. mkdir(recursive) is a
+ * no-op on an existing dir (so it can't prove writability alone) — hence the explicit W_OK check.
+ */
+function usableLogDir(): string | null {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
+    accessSync(LOG_DIR, constants.W_OK);
+    return LOG_DIR;
   } catch {
-    /* best-effort: fall back to console-only if the dir can't be made */
+    if (!warnedNoFileLog) {
+      warnedNoFileLog = true;
+      console.warn(`[log] LOG_DIR '${LOG_DIR}' is not writable — logging to console only. Set LOG_DIR to a writable path for rotated files.`);
+    }
+    return null;
   }
 }
 
@@ -28,21 +43,24 @@ const line = format.printf(({ timestamp, level, message, module: mod, ...meta })
 });
 
 export function createLogger(module: string): Logger {
-  ensureDir();
-  return createWinston({
-    level: process.env.LOG_LEVEL ?? "debug",
-    defaultMeta: { module },
-    format: format.combine(format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }), line),
-    transports: [
-      new transports.Console(),
-      new DailyRotateFile({
-        dirname: LOG_DIR,
+  const dir = usableLogDir();
+  const consoleTransport = new transports.Console();
+  // Only attach the rotating file transport when the dir is writable; otherwise its own internal
+  // mkdir throws uncaught and crashes the service on startup (see usableLogDir).
+  const fileTransport = dir
+    ? new DailyRotateFile({
+        dirname: dir,
         filename: `${module}-%DATE%.log`,
         datePattern: "YYYY-MM-DD",
         maxSize: "50m",
         maxFiles: "30d",
-      }),
-    ],
+      })
+    : null;
+  return createWinston({
+    level: process.env.LOG_LEVEL ?? "debug",
+    defaultMeta: { module },
+    format: format.combine(format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }), line),
+    transports: fileTransport ? [consoleTransport, fileTransport] : [consoleTransport],
   });
 }
 

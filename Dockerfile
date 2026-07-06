@@ -20,6 +20,9 @@ RUN npm run build
 
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
+# Rotated logs go under the writable data volume (the non-root gw user owns /app/data, but
+# NOT /app — a relative "./logs" resolves to /app and crashes on mkdir EACCES). Override per host.
+ENV LOG_DIR=/app/data/logs
 WORKDIR /app
 # Non-root.
 RUN addgroup -S gw && adduser -S gw -G gw
