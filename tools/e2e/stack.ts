@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const ENTRY: Record<string, string> = {
   "viz-watcher": "packages/viz-watcher/dist/index.js",
-  "ton-watcher": "packages/ton-watcher/dist/index.js",
+  "gram-watcher": "packages/gram-watcher/dist/index.js",
   "solana-watcher": "packages/solana-watcher/dist/index.js",
   signer: "packages/signer/dist/index.js",
   coordinator: "packages/coordinator/dist/index.js",

@@ -5,7 +5,31 @@ import { Multisig } from "@gateway/contracts-ton";
 import type { E2eConfig } from "./config";
 
 function client(cfg: E2eConfig): TonClient {
-  return new TonClient({ endpoint: cfg.gram.endpoint, apiKey: cfg.gram.apiKey });
+  // Bound each toncenter call. Public testnet toncenter returns slow 504s under load;
+  // without a per-call timeout a single hung request blocks a pollUntil() iteration for
+  // minutes (TonClient's internal backoff), so the poll can't cycle to catch a recovery
+  // window and times out even though the on-chain state is correct. A short ceiling makes
+  // a blip fail fast and retry on the next interval — exactly what pollUntil intends.
+  return new TonClient({ endpoint: cfg.gram.endpoint, apiKey: cfg.gram.apiKey, timeout: 12_000 });
+}
+
+/**
+ * Retry a toncenter read a few times before giving up. Public testnet toncenter
+ * intermittently 504s or refuses the TCP connection (ETIMEDOUT); a bare read would
+ * then throw and abort a criterion that is in fact passing. These reads are pure
+ * (idempotent) queries, so retrying is safe and only smooths over transport blips.
+ */
+async function withRetry<T>(fn: () => Promise<T>, attempts = 5, delayMs = 3_000): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw last;
 }
 
 /**
@@ -16,11 +40,13 @@ function client(cfg: E2eConfig): TonClient {
  * a reliable "was a second order created?" counter.
  */
 export async function nextOrderInfo(cfg: E2eConfig): Promise<{ orderAddr: string; seqno: bigint }> {
-  const c = client(cfg);
-  const ms = c.open(Multisig.createFromAddress(Address.parse(cfg.gram.multisigAddress)));
-  const data = await ms.getMultisigData();
-  const orderAddr = await ms.getOrderAddress(data.nextOrderSeqno);
-  return { orderAddr: orderAddr.toString(), seqno: data.nextOrderSeqno };
+  return withRetry(async () => {
+    const c = client(cfg);
+    const ms = c.open(Multisig.createFromAddress(Address.parse(cfg.gram.multisigAddress)));
+    const data = await ms.getMultisigData();
+    const orderAddr = await ms.getOrderAddress(data.nextOrderSeqno);
+    return { orderAddr: orderAddr.toString(), seqno: data.nextOrderSeqno };
+  });
 }
 
 /** Current nextOrderSeqno of the gateway multisig — the count of orders ever created. */
@@ -33,8 +59,10 @@ export async function nextOrderSeqno(cfg: E2eConfig): Promise<bigint> {
  * Same predicate as `GramHttpChain.orderExists` — existence, not the executed flag.
  */
 export async function orderExists(cfg: E2eConfig, orderAddr: string): Promise<boolean> {
-  const state = await client(cfg).getContractState(Address.parse(orderAddr));
-  return state.state === "active";
+  return withRetry(async () => {
+    const state = await client(cfg).getContractState(Address.parse(orderAddr));
+    return state.state === "active";
+  });
 }
 
 /** Jetton wallet address of `owner` under the configured minter. */
@@ -46,11 +74,13 @@ async function walletAddressOf(c: TonClient, minter: string, owner: string): Pro
 }
 
 export async function tonWvizBalance(cfg: E2eConfig, ownerAddress: string): Promise<bigint> {
-  const c = client(cfg);
-  const jw = await walletAddressOf(c, cfg.gram.jettonMinterAddress, ownerAddress);
-  if (!(await c.isContractDeployed(jw))) return 0n;
-  const res = await c.runMethod(jw, "get_wallet_data", []);
-  return res.stack.readBigNumber(); // balance is the first field
+  return withRetry(async () => {
+    const c = client(cfg);
+    const jw = await walletAddressOf(c, cfg.gram.jettonMinterAddress, ownerAddress);
+    if (!(await c.isContractDeployed(jw))) return 0n;
+    const res = await c.runMethod(jw, "get_wallet_data", []);
+    return res.stack.readBigNumber(); // balance is the first field
+  });
 }
 
 export async function submitBurn(
