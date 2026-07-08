@@ -20,4 +20,9 @@ description: "wVIZ is a 1:1 bridge claim on VIZ locked in the viz-gateway multis
 image: "https://raw.githubusercontent.com/viz-cx/viz-gateway/main/metadata/wviz.png"
 address: "0:REPLACE_WITH_MAINNET_MINTER_RAW_ADDRESS"
 websites:
+  - "https://viz.cx"
+  - "https://viz.world"
   - "https://github.com/viz-cx/viz-gateway"
+social:
+  - "https://t.me/viz_world"
+  - "https://t.me/eng_viz_faq"
