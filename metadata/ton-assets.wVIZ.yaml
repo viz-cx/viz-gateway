@@ -1,0 +1,23 @@
+# DRAFT ton-assets submission for wVIZ — file a PR to https://github.com/tonkeeper/ton-assets
+#
+# Process (per the ton-assets README): fork the repo, add this as
+# `jettons/wVIZ.yaml` (edit only YAML in `jettons/`, never jettons.json), open a PR.
+#
+# BEFORE SUBMITTING, fill/verify:
+#   1. `address:` — the wVIZ mainnet minter, in RAW form `0:<hex>` (NOT EQ/UQ). Known
+#      only after Phase 3 (TON mainnet minter deploy). Convert the EQ address to raw.
+#   2. `image:` — must be a DIRECT link ending in .png/.jpg (ton-assets rule), and must
+#      NOT use a ton.api URL. Requires committing metadata/wviz.png first (referenced by
+#      metadata/wviz.json but NOT yet present in the repo). The GitHub *avatar* URL is
+#      unsuitable (no image extension).
+#
+# Fields below mirror the canonical metadata/wviz.json (name/symbol) and a real
+# ton-assets entry (name, description, image, address, symbol, websites, social).
+
+name: VIZ
+symbol: wVIZ
+description: "wVIZ is a 1:1 bridge claim on VIZ locked in the viz-gateway multisig. Each wVIZ is redeemable for exactly 1 VIZ on the VIZ blockchain."
+image: "https://raw.githubusercontent.com/viz-cx/viz-gateway/main/metadata/wviz.png"
+address: "0:REPLACE_WITH_MAINNET_MINTER_RAW_ADDRESS"
+websites:
+  - "https://github.com/viz-cx/viz-gateway"
