@@ -71,7 +71,7 @@ export function loadDeployConfig(): DeployConfig {
         "WVIZ_DESCRIPTION",
         "Bridge claim on VIZ locked in the gateway multisig. 1 wVIZ = 1 VIZ.",
       ),
-      image: opt("WVIZ_IMAGE", ""),
+      image: opt("WVIZ_IMAGE", "https://avatars.githubusercontent.com/u/37064345?s=200&v=4"),
     },
 
     minterAddress: opt("MINTER_ADDRESS", ""),

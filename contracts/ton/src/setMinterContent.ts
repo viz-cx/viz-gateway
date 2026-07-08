@@ -29,6 +29,11 @@ import { Order } from "./wrappers/Order";
 
 const ORDER_TTL_SEC = Number.parseInt(process.env.TON_ORDER_TTL_SEC || "172800", 10); // 48h
 
+/** Value attached to the new_order message; must be covered by the proposer wallet. */
+const NEW_ORDER_VALUE = toNano("1");
+/** Gas headroom on top of NEW_ORDER_VALUE so the proposer wallet can also pay its own fees. */
+const PROPOSER_GAS_HEADROOM = toNano("0.05");
+
 /** The single multisig action: send change_content to the minter as the admin. */
 function contentAction(minter: Address, content: Cell): TransferRequest {
   return {
@@ -89,6 +94,23 @@ async function submit(): Promise<void> {
   if (myIdx < 0) throw new Error(`your wallet ${wallet.address.toString()} is not a current multisig signer`);
 
   const orderAddr = await c.open(Multisig.createFromAddress(multisigAddr)).getOrderAddress(data.nextOrderSeqno);
+
+  // Pre-flight the proposer balance: sendNewOrder attaches NEW_ORDER_VALUE and the
+  // wallet also pays its own gas. If the wallet can't cover it, the new_order never
+  // leaves the wallet and no order is created — but the raw send would still "succeed"
+  // client-side. Fail closed here so the operator isn't told they proposed when they didn't.
+  const balance = await c.getBalance(wallet.address);
+  const required = NEW_ORDER_VALUE + PROPOSER_GAS_HEADROOM;
+  const fmt = (n: bigint) => (Number(n) / 1e9).toFixed(4);
+  console.log(`[set-minter-content] proposer   : ${wallet.address.toString()} (${fmt(balance)} TON)`);
+  if (balance < required) {
+    throw new Error(
+      `proposer wallet ${wallet.address.toString()} has ${fmt(balance)} TON but needs ` +
+        `≥ ${fmt(required)} TON (${fmt(NEW_ORDER_VALUE)} new_order value + ${fmt(PROPOSER_GAS_HEADROOM)} gas). ` +
+        `Fund it before submitting — otherwise the new_order silently dies in the wallet and no order is created.`,
+    );
+  }
+
   if (!apply) {
     console.log(`[set-minter-content] order seqno ${data.nextOrderSeqno}, address ${orderAddr.toString()}`);
     console.log("[set-minter-content] DRY-RUN. Set APPLY=1 to send the new_order.");
@@ -106,7 +128,7 @@ async function submit(): Promise<void> {
   );
   const expiration = Math.floor(Date.now() / 1000) + ORDER_TTL_SEC;
   const sender = c.open(wallet).sender(secretKey);
-  await multisig.sendNewOrder(sender, [contentAction(minter, content)], expiration, toNano("1"), myIdx, true);
+  await multisig.sendNewOrder(sender, [contentAction(minter, content)], expiration, NEW_ORDER_VALUE, myIdx, true);
   console.log(`[set-minter-content] sent. Order address: ${orderAddr.toString()}`);
   console.log(`[set-minter-content] share it; each other signer runs: set:minter-content approve ${orderAddr.toString()}`);
 }
