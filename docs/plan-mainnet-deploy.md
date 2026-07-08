@@ -155,8 +155,11 @@ Currently testnet (multisig `EQCuW98I…` 3-of-4, minter deployed testnet).
       - Set the **deploy-time metadata env** so the token image bakes into the content cell at
         `deploy:minter` (read by `contracts/ton/src/config.ts`): `WVIZ_NAME`, `WVIZ_SYMBOL`,
         `WVIZ_DECIMALS=3`, `WVIZ_DESCRIPTION`, and **`WVIZ_IMAGE=<stable https/ipfs URL>`**.
-        ⚠️ If `WVIZ_IMAGE` is empty at deploy the token shows blank in wallets/explorers
-        (the testnet minter has this gap). Verify after deploy with `npm run e2e:gram:metadata`.
+        `WVIZ_IMAGE` defaults to the wVIZ avatar
+        (`https://avatars.githubusercontent.com/u/37064345?s=200&v=4`) in `config.ts`, so the
+        token no longer bakes blank; override the env only to use a different image.
+        (The already-deployed testnet minter predates this default and still has the gap.)
+        Verify after deploy with `npm run e2e:gram:metadata`.
       - Post-handoff (admin = multisig) the image/metadata can still be changed via
         `set:minter-content` (`submit` → each signer `approve <order>`; a threshold order runs
         `change_content#4`). Each approver rebuilds the expected content from its own `WVIZ_*`
