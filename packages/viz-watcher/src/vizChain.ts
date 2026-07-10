@@ -321,20 +321,25 @@ export class VizJsChain implements VizChain {
     const tx = buildReleaseTx(proposal);
     tx.signatures = signatures;
     const txid = releaseTxId(proposal); // deterministic; equals the on-chain id
+    let broadcastErr = "";
     try {
       await call<BroadcastResult>((cb) => viz.api.broadcastTransaction(tx, cb));
     } catch (err) {
       // An async broadcast can still land even when the HTTP call errors (proxy hiccup,
       // or a duplicate-in-pool rejection after a prior attempt already queued it), so we
-      // let the poll below decide by exact id rather than failing prematurely.
-      console.warn(`[viz-chain] broadcastTransaction(${txid}) errored (polling for inclusion anyway): ${String(err)}`);
+      // let the poll below decide by exact id rather than failing prematurely. But we keep
+      // the reason: if the poll never confirms, a genuine rejection (bad signature,
+      // expired TaPoS) should surface here, not be masked by a generic "not confirmed".
+      broadcastErr = String(err);
+      console.warn(`[viz-chain] broadcastTransaction(${txid}) errored (polling for inclusion anyway): ${broadcastErr}`);
     }
     for (let i = 0; i < RELEASE_CONFIRM_POLLS; i++) {
       await sleep(RELEASE_CONFIRM_INTERVAL_MS);
       if (await this.confirmReleaseByTxId(txid)) return txid;
     }
+    const secs = (RELEASE_CONFIRM_POLLS * RELEASE_CONFIRM_INTERVAL_MS) / 1000;
     throw new Error(
-      `viz release ${txid} not confirmed after ${(RELEASE_CONFIRM_POLLS * RELEASE_CONFIRM_INTERVAL_MS) / 1000}s`,
+      `viz release ${txid} not confirmed after ${secs}s${broadcastErr ? ` (broadcast error: ${broadcastErr})` : ""}`,
     );
   }
 }

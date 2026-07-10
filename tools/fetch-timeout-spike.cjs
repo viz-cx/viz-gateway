@@ -95,6 +95,7 @@ function configWiring() {
     "SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS",
     "DISPATCHER_SUBMIT_TIMEOUT_MS",
     "DISPATCHER_SIGNING_TIMEOUT_MS",
+    "FEDERATION_N",
   ];
   const saved = {};
   for (const k of KEYS) saved[k] = process.env[k];
@@ -108,11 +109,23 @@ function configWiring() {
   // env portion gracefully (the socket tests above already cover the runtime behavior).
   try {
     for (const k of KEYS) delete process.env[k];
+    process.env.FEDERATION_N = "1"; // pin the bootstrap size so the derived budget is deterministic
     const def = loadConfig();
     // Direction-aware defaults: PEG_IN wide (on-chain propose/approve), PEG_OUT tight (local sign).
     assert.strictEqual(def.coordinator.signerApproveTimeoutMs.pegIn, 180000, "signerApproveTimeoutMs.pegIn default = 180000");
     assert.strictEqual(def.coordinator.signerApproveTimeoutMs.pegOut, 30000, "signerApproveTimeoutMs.pegOut default = 30000");
-    assert.strictEqual(def.dispatcher.submitTimeoutMs, 300000, "submitTimeoutMs default = 300000");
+    // submit ceiling defaults to the derived orchestration budget N × pegIn + 120s margin.
+    // At the 1-of-1 bootstrap that is 1 × 180000 + 120000 = 300000 (the historical default).
+    assert.strictEqual(def.dispatcher.submitTimeoutMs, 300000, "submitTimeoutMs default (N=1) = 300000");
+    assert.strictEqual(def.dispatcher.signingTimeoutMs.pegIn, 300000, "signingTimeoutMs.pegIn default (N=1) = 300000");
+
+    // The derived budget scales with the federation size so a slow multi-signer peg-in is
+    // not aborted/requeued mid-approval (2 × 180s = 360s already exceeds the old flat 300s).
+    process.env.FEDERATION_N = "3";
+    const fed3 = loadConfig();
+    assert.strictEqual(fed3.dispatcher.submitTimeoutMs, 3 * 180000 + 120000, "submitTimeoutMs default (N=3) = 660000");
+    assert.strictEqual(fed3.dispatcher.signingTimeoutMs.pegIn, 3 * 180000 + 120000, "signingTimeoutMs.pegIn default (N=3) = 660000");
+    process.env.FEDERATION_N = "1"; // restore for the override checks below
 
     // submitTimeoutMs falls back to the peg-in signing timeout when its own var is unset.
     process.env.DISPATCHER_SIGNING_TIMEOUT_MS = "123456";

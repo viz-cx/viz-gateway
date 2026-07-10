@@ -54,6 +54,9 @@ async function main(): Promise<void> {
       cfg.gram.gatewayJettonWallet,
       cfg.gram.multisigAddress,
       cfg.gram.finalityConfirmations,
+      cfg.gram.scanMaxTransactions,
+      cfg.gram.maxScanPages,
+      cfg.gram.rpcTimeoutMs,
     );
     recons.push(new Recon(
       [{ name: "GRAM", supply: () => gram.circulatingSupplyMilliViz() }],

@@ -311,6 +311,26 @@ export function loadConfig(): GatewayConfig {
     federation = { n, threshold, operators };
   }
 
+  // Per-signer /approve ceilings (direction-aware), hoisted so the dispatcher's peg-in
+  // budget can be DERIVED from them. PEG_OUT (30s): a signer only re-validates + signs a
+  // VIZ release locally (sub-second). PEG_IN (180s): a REAL on-chain propose/approve
+  // (GRAM order deploy + vote, up to GRAM_APPROVE_MAX_WAIT_MS ≈ 150s) — a 30s ceiling
+  // aborted every live 3-of-N GRAM peg-in. SIGNER_APPROVE_TIMEOUT_MS sets both at once
+  // (back-compat); the per-direction vars win when present.
+  const signerApproveTimeoutMs = {
+    pegIn: int("SIGNER_APPROVE_TIMEOUT_PEG_IN_MS", int("SIGNER_APPROVE_TIMEOUT_MS", 180000)),
+    pegOut: int("SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS", int("SIGNER_APPROVE_TIMEOUT_MS", 30000)),
+  };
+  // Worst-case coordinator orchestration budget for a PEG_IN. Approvals are collected
+  // SEQUENTIALLY and the loop breaks at threshold, but a slow/failing signer may be
+  // contacted before a fast one, so budget for all N, plus a margin for the broadcast +
+  // on-chain execute poll. The dispatcher's /submit ceiling and peg-in requeue clock MUST
+  // clear this floor, or a legitimately-slow multi-signer peg-in is aborted/requeued
+  // mid-approval — the invariant the old flat 300s default silently broke once pegIn rose
+  // to 180s (2 × 180s = 360s > 300s). At the 1-of-1 bootstrap this is 180s + 120s = 300s,
+  // preserving the historical default.
+  const pegInOrchestrationBudgetMs = federation.n * signerApproveTimeoutMs.pegIn + 120_000;
+
   return {
     service: opt("SERVICE", "signer"),
     operatorId: opt("OPERATOR_ID", "op-1"),
@@ -391,18 +411,9 @@ export function loadConfig(): GatewayConfig {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      // Direction-aware ceilings. PEG_OUT (30s): a signer only re-validates the proposal
-      // and signs a VIZ release locally (no broadcast), so a healthy /approve is
-      // sub-second. PEG_IN (180s): the signer does a REAL on-chain propose/approve
-      // (GRAM order deploy + vote, up to GRAM_APPROVE_MAX_WAIT_MS ≈ 150s), which a 30s
-      // ceiling aborts ("operation aborted due to timeout") — the latent regression that
-      // blocked every live 3-of-N GRAM peg-in until the live drivers overrode it by hand.
-      // SIGNER_APPROVE_TIMEOUT_MS still sets both at once (back-compat); the per-direction
-      // vars win when present.
-      signerApproveTimeoutMs: {
-        pegIn: int("SIGNER_APPROVE_TIMEOUT_PEG_IN_MS", int("SIGNER_APPROVE_TIMEOUT_MS", 180000)),
-        pegOut: int("SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS", int("SIGNER_APPROVE_TIMEOUT_MS", 30000)),
-      },
+      // Direction-aware per-signer /approve ceilings; see the hoisted definition above
+      // (the dispatcher peg-in budget is derived from these).
+      signerApproveTimeoutMs,
     },
     // Dispatcher: drains QUEUED outbox rows to the coordinator with retries.
     // P3 policy: retry every 10s for 3 min, then REFUND. intervalMs is the loop tick.
@@ -416,19 +427,22 @@ export function loadConfig(): GatewayConfig {
       // which, until delivery is idempotent (the broadcast-boundary check, separate
       // work item), risks a double mint/release. Per-direction because a remote mint
       // (TON masterchain / Solana finality) confirms slower than a VIZ release.
-      // DISPATCHER_SIGNING_TIMEOUT_MS sets a single fallback for both.
+      // DISPATCHER_SIGNING_TIMEOUT_MS sets a single fallback for both. The peg-in default
+      // is the derived orchestration budget (N × pegIn + margin), not a flat 300s, so a
+      // slow multi-signer peg-in is not spuriously requeued mid-approval.
       signingTimeoutMs: {
-        pegIn: int("DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", 300000)),
+        pegIn: int("DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", pegInOrchestrationBudgetMs)),
         pegOut: int("DISPATCHER_SIGNING_TIMEOUT_PEG_OUT_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", 180000)),
       },
       // A release/refund retries forever (nothing to refund), so a row wedged this long
       // means the federation can't sign — alert operators rather than fail silently.
       staleDeliveryAlertMs: int("DISPATCHER_STALE_ALERT_MS", 3600000), // 1h
       // Ceiling on one /submit call. Must exceed the coordinator's total orchestration
-      // budget (up to N signers × SIGNER_APPROVE_TIMEOUT_MS + broadcast). Defaults to the
-      // peg-in orphan-recovery timeout (300s) so a submit that outlives it is requeued by
-      // the same clock rather than being aborted mid-flight and re-run gratuitously.
-      submitTimeoutMs: int("DISPATCHER_SUBMIT_TIMEOUT_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", 300000)),
+      // budget (up to N signers × the peg-in /approve ceiling + broadcast), so it defaults
+      // to that derived budget rather than a flat 300s — otherwise a legitimately-slow
+      // multi-signer peg-in is aborted mid-flight (2 × 180s > the old 300s). A submit that
+      // outlives it is requeued by the same clock rather than re-run gratuitously.
+      submitTimeoutMs: int("DISPATCHER_SUBMIT_TIMEOUT_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", pegInOrchestrationBudgetMs)),
     },
     feesGateAccount: opt("FEES_GATE_ACCOUNT", "fees.gate"),
     // Conservative bootstrap caps (1 VIZ ~ $0.005): $500 / $1,000 / $10,000.
