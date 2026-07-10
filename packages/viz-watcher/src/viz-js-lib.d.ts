@@ -62,6 +62,10 @@ declare module "viz-js-lib" {
     getOpsInBlock(blockNum: number, onlyVirtual: boolean, cb: Cb<OpWrapper[]>): void;
     getTransaction(trxId: string, cb: Cb<AnnotatedTransaction | null>): void;
     getAccounts(names: string[], cb: Cb<Account[]>): void;
+    /** Accepts a signed trx into the pending pool and returns WITHOUT waiting for block
+     * inclusion. The public RPC proxy 504s on the synchronous variant's wait, so the
+     * write path broadcasts async and confirms by exact id via a poll. */
+    broadcastTransaction(trx: VizTransaction, cb: Cb<BroadcastResult>): void;
     broadcastTransactionSynchronous(trx: VizTransaction, cb: Cb<BroadcastResult>): void;
   }
 

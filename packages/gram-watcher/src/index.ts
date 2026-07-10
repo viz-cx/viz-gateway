@@ -29,6 +29,7 @@ async function main(): Promise<void> {
     cfg.gram.finalityConfirmations,
     cfg.gram.scanMaxTransactions,
     cfg.gram.maxScanPages,
+    cfg.gram.rpcTimeoutMs,
   );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);

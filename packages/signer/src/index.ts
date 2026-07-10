@@ -70,6 +70,8 @@ async function main(): Promise<void> {
         "", // multisigAddress (read-only reader; order reads not needed here)
         cfg.gram.finalityConfirmations,
         cfg.gram.scanMaxTransactions,
+        cfg.gram.maxScanPages,
+        cfg.gram.rpcTimeoutMs,
       )
     : {
         async getBurn() {
