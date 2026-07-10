@@ -28,6 +28,17 @@ import { buildReleaseTx, releaseTxId } from "./vizSign";
 const ZERO_TRX = "0000000000000000000000000000000000000000";
 
 /**
+ * Per-RPC deadline. viz-js-lib's HTTP transport has been observed to wedge after
+ * upstream 502s (node.viz.cx is load-balanced with intermittently unhealthy
+ * backends): the callback is never invoked, so a bare Promise around it never
+ * settles and the scan loop stalls silently — no error, no progress, until the
+ * process is restarted. Racing every call against this deadline turns a wedged
+ * transport into a caught, logged error the loop retries on the next tick, so the
+ * watcher self-heals from transient node failures instead of going dark.
+ */
+export const RPC_TIMEOUT_MS = 20_000;
+
+/**
  * Bound the per-call block scan so a watcher tick can't accidentally scan the
  * chain. Exported so the watcher advances its cursor only to what a single call
  * actually scanned (`min(safeHead, cursor + MAX_BLOCKS_PER_SCAN)`), never past it
@@ -61,7 +72,19 @@ export function nextScanWindow(cursor: number, safeHead: number): { scannedTo: n
 
 function call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    exec((err, res) => (err ? reject(err) : resolve(res)));
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`viz RPC timed out after ${RPC_TIMEOUT_MS}ms`));
+    }, RPC_TIMEOUT_MS);
+    exec((err, res) => {
+      if (settled) return; // late callback after a timeout — ignore
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(res);
+    });
   });
 }
 
