@@ -49,6 +49,7 @@ export interface GatewayConfig {
     finalityConfirmations: number;
     scanMaxTransactions: number; // txs fetched per getTransactions page (RPC rate-limit tuning)
     maxScanPages: number; // page ceiling per peg-out scan; hit before draining => fail closed
+    rpcTimeoutMs: number; // per-toncenter-call deadline; a wedged/rate-limited call becomes a retryable error
     approveMaxWaitMs: number; // max wait for a proposed order / approval to land on-chain
     approvePollIntervalMs: number; // poll cadence while waiting for the above
     orderValueNano: number; // TON (nano) the proposer attaches to new_order
@@ -83,10 +84,13 @@ export interface GatewayConfig {
     url: string;
     listen: string;
     signerEndpoints: string[];
-    /** Per-signer /approve HTTP timeout. A blackhole signer (socket accepted, no
-     * response) must become a caught error, not an unbounded await that wedges the
-     * whole sequential approval loop — and thus every /submit behind it. */
-    signerApproveTimeoutMs: number;
+    /** Per-signer /approve HTTP timeout, direction-aware. A blackhole signer (socket
+     * accepted, no response) must become a caught error, not an unbounded await that
+     * wedges the whole sequential approval loop — and thus every /submit behind it. But
+     * a PEG_IN /approve does a REAL on-chain propose/approve (GRAM: up to
+     * approveMaxWaitMs) while a PEG_OUT /approve only re-validates + signs a VIZ release
+     * locally (sub-second), so the two need very different ceilings. */
+    signerApproveTimeoutMs: { pegIn: number; pegOut: number };
   };
   dispatcher: {
     intervalMs: number;
@@ -334,6 +338,15 @@ export function loadConfig(): GatewayConfig {
       // maxScanPages * scanMaxTransactions txs to drain back to the cursor, the scan
       // fails closed (pause + alert) rather than silently skipping older burns (VG-06).
       maxScanPages: int("GRAM_MAX_SCAN_PAGES", 50),
+      // Per-toncenter-call deadline (30s, up from the old hardcoded 10s). Contract reads
+      // (liteserver) stay sub-second, but the transaction-index endpoint newestLt/burn
+      // scans hit is slow + rate-limited under a live run's own load (multiple watchers +
+      // signers on one public endpoint). A 10s ceiling made cold-start's newestLt() time
+      // out or read empty repeatedly, so the watcher only anchored its cursor right as the
+      // peg-out burn landed — and the strictly-newer forward scan then skipped it. Racing
+      // each call against a wider deadline turns a wedged call into a retryable error and
+      // lets cold-start lock the pre-burn tip early. Mirrors viz-watcher's RPC_TIMEOUT_MS.
+      rpcTimeoutMs: int("GRAM_RPC_TIMEOUT_MS", 30000),
       // The proposer sends new_order then waits for the Order contract to deploy; an
       // approver waits for its vote to reflect. Testnet inclusion + toncenter view lag
       // can exceed the 60s default, so this is tunable for live runs.
@@ -378,10 +391,18 @@ export function loadConfig(): GatewayConfig {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      // 30s: a signer only re-validates the proposal and signs locally (no broadcast),
-      // so a healthy /approve is sub-second. Well above that keeps a slow-but-legit
-      // signer from being dropped, while still converting a hang into a caught error.
-      signerApproveTimeoutMs: int("SIGNER_APPROVE_TIMEOUT_MS", 30000),
+      // Direction-aware ceilings. PEG_OUT (30s): a signer only re-validates the proposal
+      // and signs a VIZ release locally (no broadcast), so a healthy /approve is
+      // sub-second. PEG_IN (180s): the signer does a REAL on-chain propose/approve
+      // (GRAM order deploy + vote, up to GRAM_APPROVE_MAX_WAIT_MS ≈ 150s), which a 30s
+      // ceiling aborts ("operation aborted due to timeout") — the latent regression that
+      // blocked every live 3-of-N GRAM peg-in until the live drivers overrode it by hand.
+      // SIGNER_APPROVE_TIMEOUT_MS still sets both at once (back-compat); the per-direction
+      // vars win when present.
+      signerApproveTimeoutMs: {
+        pegIn: int("SIGNER_APPROVE_TIMEOUT_PEG_IN_MS", int("SIGNER_APPROVE_TIMEOUT_MS", 180000)),
+        pegOut: int("SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS", int("SIGNER_APPROVE_TIMEOUT_MS", 30000)),
+      },
     },
     // Dispatcher: drains QUEUED outbox rows to the coordinator with retries.
     // P3 policy: retry every 10s for 3 min, then REFUND. intervalMs is the loop tick.

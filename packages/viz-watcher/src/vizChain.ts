@@ -39,6 +39,19 @@ const ZERO_TRX = "0000000000000000000000000000000000000000";
 export const RPC_TIMEOUT_MS = 20_000;
 
 /**
+ * Release-confirmation poll bound. The release is broadcast ASYNC (see broadcastRelease)
+ * and confirmed by re-reading its exact id from the chain, because the synchronous
+ * broadcast blocks until block inclusion — which node.viz.cx / its RPC proxy 504s (and
+ * RPC_TIMEOUT_MS aborts) once inclusion lags past ~20s, making a legit release look
+ * failed. ~60s of polling covers that inclusion lag; a still-unconfirmed release then
+ * fails the round and is retried idempotently (confirmReleaseByTxId dedupes by id).
+ */
+export const RELEASE_CONFIRM_INTERVAL_MS = 3_000;
+export const RELEASE_CONFIRM_POLLS = 20;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
  * Bound the per-call block scan so a watcher tick can't accidentally scan the
  * chain. Exported so the watcher advances its cursor only to what a single call
  * actually scanned (`min(safeHead, cursor + MAX_BLOCKS_PER_SCAN)`), never past it
@@ -288,14 +301,40 @@ export class VizJsChain implements VizChain {
     }
   }
 
-  /** Attach the >= T merged signatures (order-independent) and broadcast. */
+  /**
+   * Attach the >= T merged signatures (order-independent) and broadcast.
+   *
+   * ASYNC broadcast + poll (NOT broadcastTransactionSynchronous): the synchronous
+   * variant blocks until block inclusion, which node.viz.cx's RPC proxy 504s / the
+   * RPC_TIMEOUT_MS deadline aborts once inclusion lags past ~20s — a legit release then
+   * looks failed and the dispatcher retries it. broadcastTransaction returns as soon as
+   * the trx is accepted into the pending pool; the chain (not the ack) confirms it, so
+   * we poll confirmReleaseByTxId for the deterministic id. Mirrors tools/topup-tester3.cjs.
+   *
+   * Idempotent: the id is a pure function of the proposal (independent of signatures),
+   * and confirmReleaseByTxId dedupes by exact id — so a release that lands after the
+   * poll window is caught by the coordinator's actionExecuted check on the next retry
+   * rather than re-broadcast.
+   */
   async broadcastRelease(proposal: VizReleaseProposal, signatures: string[]): Promise<string> {
     if (signatures.length === 0) throw new Error("no signatures to broadcast");
     const tx = buildReleaseTx(proposal);
     tx.signatures = signatures;
-    const res = await call<BroadcastResult>((cb) =>
-      viz.api.broadcastTransactionSynchronous(tx, cb),
+    const txid = releaseTxId(proposal); // deterministic; equals the on-chain id
+    try {
+      await call<BroadcastResult>((cb) => viz.api.broadcastTransaction(tx, cb));
+    } catch (err) {
+      // An async broadcast can still land even when the HTTP call errors (proxy hiccup,
+      // or a duplicate-in-pool rejection after a prior attempt already queued it), so we
+      // let the poll below decide by exact id rather than failing prematurely.
+      console.warn(`[viz-chain] broadcastTransaction(${txid}) errored (polling for inclusion anyway): ${String(err)}`);
+    }
+    for (let i = 0; i < RELEASE_CONFIRM_POLLS; i++) {
+      await sleep(RELEASE_CONFIRM_INTERVAL_MS);
+      if (await this.confirmReleaseByTxId(txid)) return txid;
+    }
+    throw new Error(
+      `viz release ${txid} not confirmed after ${(RELEASE_CONFIRM_POLLS * RELEASE_CONFIRM_INTERVAL_MS) / 1000}s`,
     );
-    return res.id ?? "";
   }
 }

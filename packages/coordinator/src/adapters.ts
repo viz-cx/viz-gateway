@@ -21,19 +21,24 @@ export class HttpSignerClient implements SignerClient {
   constructor(
     public readonly operatorId: string,
     private readonly endpoint: string,
-    // Hard ceiling per call. A blackhole signer (socket accepted, no bytes) would
-    // otherwise hang this await forever; the orchestrator loops signers sequentially,
-    // so one such peer stalls every approval and wedges the whole delivery pipeline.
-    // AbortSignal turns the hang into the SAME caught error a refusing signer produces.
-    private readonly timeoutMs: number = 30000,
+    // Hard ceiling per call, direction-aware. A blackhole signer (socket accepted, no
+    // bytes) would otherwise hang this await forever; the orchestrator loops signers
+    // sequentially, so one such peer stalls every approval and wedges the whole delivery
+    // pipeline. AbortSignal turns the hang into the SAME caught error a refusing signer
+    // produces. PEG_IN /approve does a REAL on-chain propose/approve (GRAM: up to
+    // ~150s), so it needs a wide ceiling; PEG_OUT /approve only re-validates + signs a
+    // VIZ release locally (sub-second). A single 30s ceiling aborted every live GRAM
+    // peg-in — see config.ts coordinator.signerApproveTimeoutMs.
+    private readonly timeoutMs: { pegIn: number; pegOut: number } = { pegIn: 180000, pegOut: 30000 },
   ) {}
 
   async approve(action: CanonicalAction, proposal: Proposal): Promise<Approval> {
+    const timeoutMs = action.direction === "PEG_IN" ? this.timeoutMs.pegIn : this.timeoutMs.pegOut;
     const res = await fetch(`${this.endpoint.replace(/\/$/, "")}/approve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: actionToWire(action), proposal }),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.status === 423) throw new Error(`signer ${this.endpoint} is paused`);
     if (!res.ok) {

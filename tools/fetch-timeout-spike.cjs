@@ -52,7 +52,7 @@ function respondingServer(bodyObj, status = 200) {
 async function blackholeAborts() {
   const { server, held, port } = await blackholeServer();
   const TIMEOUT = 300;
-  const client = new HttpSignerClient("signer-1", `http://127.0.0.1:${port}`, TIMEOUT);
+  const client = new HttpSignerClient("signer-1", `http://127.0.0.1:${port}`, { pegIn: TIMEOUT, pegOut: TIMEOUT });
 
   const start = Date.now();
   await assert.rejects(
@@ -79,7 +79,7 @@ async function blackholeAborts() {
 async function healthyResolves() {
   const approval = { actionId: ACTION.id, operatorId: "op1", signature: "abc" };
   const { server, port } = await respondingServer(approval);
-  const client = new HttpSignerClient("signer-1", `http://127.0.0.1:${port}`, 5000);
+  const client = new HttpSignerClient("signer-1", `http://127.0.0.1:${port}`, { pegIn: 5000, pegOut: 5000 });
 
   const got = await client.approve(ACTION, PROPOSAL);
   assert.deepStrictEqual(got, approval, "healthy signer approval must round-trip unchanged");
@@ -91,6 +91,8 @@ async function healthyResolves() {
 function configWiring() {
   const KEYS = [
     "SIGNER_APPROVE_TIMEOUT_MS",
+    "SIGNER_APPROVE_TIMEOUT_PEG_IN_MS",
+    "SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS",
     "DISPATCHER_SUBMIT_TIMEOUT_MS",
     "DISPATCHER_SIGNING_TIMEOUT_MS",
   ];
@@ -107,7 +109,9 @@ function configWiring() {
   try {
     for (const k of KEYS) delete process.env[k];
     const def = loadConfig();
-    assert.strictEqual(def.coordinator.signerApproveTimeoutMs, 30000, "signerApproveTimeoutMs default = 30000");
+    // Direction-aware defaults: PEG_IN wide (on-chain propose/approve), PEG_OUT tight (local sign).
+    assert.strictEqual(def.coordinator.signerApproveTimeoutMs.pegIn, 180000, "signerApproveTimeoutMs.pegIn default = 180000");
+    assert.strictEqual(def.coordinator.signerApproveTimeoutMs.pegOut, 30000, "signerApproveTimeoutMs.pegOut default = 30000");
     assert.strictEqual(def.dispatcher.submitTimeoutMs, 300000, "submitTimeoutMs default = 300000");
 
     // submitTimeoutMs falls back to the peg-in signing timeout when its own var is unset.
@@ -116,10 +120,19 @@ function configWiring() {
 
     // An explicit override wins over the fallback.
     process.env.DISPATCHER_SUBMIT_TIMEOUT_MS = "77000";
+    // SIGNER_APPROVE_TIMEOUT_MS still sets BOTH directions at once (back-compat).
     process.env.SIGNER_APPROVE_TIMEOUT_MS = "9000";
     const ov = loadConfig();
     assert.strictEqual(ov.dispatcher.submitTimeoutMs, 77000, "DISPATCHER_SUBMIT_TIMEOUT_MS override");
-    assert.strictEqual(ov.coordinator.signerApproveTimeoutMs, 9000, "SIGNER_APPROVE_TIMEOUT_MS override");
+    assert.strictEqual(ov.coordinator.signerApproveTimeoutMs.pegIn, 9000, "SIGNER_APPROVE_TIMEOUT_MS sets pegIn");
+    assert.strictEqual(ov.coordinator.signerApproveTimeoutMs.pegOut, 9000, "SIGNER_APPROVE_TIMEOUT_MS sets pegOut");
+
+    // Per-direction vars win over the shared var.
+    process.env.SIGNER_APPROVE_TIMEOUT_PEG_IN_MS = "222000";
+    process.env.SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS = "11000";
+    const pd = loadConfig();
+    assert.strictEqual(pd.coordinator.signerApproveTimeoutMs.pegIn, 222000, "SIGNER_APPROVE_TIMEOUT_PEG_IN_MS wins");
+    assert.strictEqual(pd.coordinator.signerApproveTimeoutMs.pegOut, 11000, "SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS wins");
     console.log("[fetch-timeout] config defaults + env overrides OK");
   } catch (err) {
     console.log(`[fetch-timeout] config wiring skipped (loadConfig needs a manifest): ${String(err).split("\n")[0]}`);

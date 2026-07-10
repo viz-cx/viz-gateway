@@ -202,8 +202,13 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     finalityConfirmations: number,
     maxTransactions = 20,
     maxScanPages = 50,
+    // Per-call toncenter deadline. 30s (not 10s): the transaction-index endpoint is slow
+    // and rate-limited under a live run's own load, and a too-tight ceiling makes
+    // cold-start's newestLt() time out / read empty until the burn has already landed,
+    // after which the strictly-newer forward scan skips it. See config.ts gram.rpcTimeoutMs.
+    rpcTimeoutMs = 30_000,
   ) {
-    this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
+    this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: rpcTimeoutMs });
     this.minter = Address.parse(minterAddress);
     this.gatewayWallet = gatewayJettonWallet ? Address.parse(gatewayJettonWallet) : null;
     this.multisigAddress = multisigAddress;
@@ -258,6 +263,14 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
    * The newest tx's logical time on the gateway wallet, or 0 if it has no history.
    * Used for the watcher's cold start: begin at the current tip's `lt` so we don't
    * replay all history (backfill before first-ever run is a separate operation).
+   *
+   * Empty-vs-error: a transport failure THROWS (propagates to the watcher loop's
+   * try/catch, which leaves the cursor at 0 and retries next tick — never a false
+   * anchor). Only a genuinely empty response (no history) returns 0, which is correct
+   * to re-cold-start on. The real hazard is a rate-limited empty read on a wallet that
+   * DOES have history anchoring the cursor late; the wider rpcTimeoutMs (30s) is what
+   * keeps this read reliable under a live run's toncenter load so cold-start locks the
+   * pre-burn tip on the first tick.
    */
   async newestLt(): Promise<number> {
     if (!this.gatewayWallet) return 0;
