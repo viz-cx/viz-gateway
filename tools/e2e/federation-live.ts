@@ -56,6 +56,16 @@ const DISPATCHER_WINDOW_MS = 8 * 60_000;
 // Each signer's GramApprover waits for its proposed order / approval to land on-chain;
 // the 60s default is too tight for testnet inclusion + toncenter view lag.
 const GRAM_APPROVE_MAX_WAIT_MS = 150_000;
+// The orchestrator's per-signer HTTP /approve call is bounded (SIGNER_APPROVE_TIMEOUT_MS,
+// default 30s). On the GRAM peg-in leg a signer does a REAL on-chain propose/approve that
+// runs for GRAM_APPROVE_MAX_WAIT_MS, so the 30s default (tuned for Phase-A local signing)
+// aborts every legit approval. Give the HTTP call headroom over the on-chain wait.
+const SIGNER_APPROVE_TIMEOUT_MS = GRAM_APPROVE_MAX_WAIT_MS + 30_000; // 180s
+// The dispatcher's /submit call wraps the coordinator's FULL orchestration — up to 3
+// signers approved SEQUENTIALLY (3 × SIGNER_APPROVE_TIMEOUT_MS) plus the execute poll.
+// The 300s default is shorter than that worst case, so widen it (and the SIGNING requeue
+// clock) to keep a legitimately-slow mint from being aborted or requeued mid-flight.
+const DISPATCHER_SUBMIT_TIMEOUT_MS = 12 * 60_000;
 // TON (nano) the proposer attaches per order — ~0.1 TON + gas, 0.3 covers it with margin.
 const GRAM_ORDER_VALUE_NANO = 300_000_000;
 
@@ -88,6 +98,7 @@ async function main() {
     COORDINATOR_URL: "http://127.0.0.1:8080",
     GRAM_APPROVE_MAX_WAIT_MS: String(GRAM_APPROVE_MAX_WAIT_MS),
     GRAM_ORDER_VALUE_NANO: String(GRAM_ORDER_VALUE_NANO),
+    SIGNER_APPROVE_TIMEOUT_MS: String(SIGNER_APPROVE_TIMEOUT_MS),
   });
   delete coordinatorEnv["GRAM_SIGNER_MNEMONIC"];
 
@@ -97,6 +108,8 @@ async function main() {
     FEDERATION_THRESHOLD: String(fedCfg.threshold),
     COORDINATOR_URL: "http://127.0.0.1:8080",
     DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),
+    DISPATCHER_SUBMIT_TIMEOUT_MS: String(DISPATCHER_SUBMIT_TIMEOUT_MS),
+    DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS: String(DISPATCHER_SUBMIT_TIMEOUT_MS),
   };
 
   // wVIZ mint recipient = burn wallet owner. Normalize to a bare EQ/UQ address: post
