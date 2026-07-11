@@ -118,3 +118,18 @@ declare module "viz-js-lib/lib/auth/serializer/src/operations" {
 declare module "viz-js-lib/lib/auth/ecc/src/hash" {
   export function sha256(data: Buffer): Buffer;
 }
+
+// secp256k1 public-key recovery, used to attribute each collected release signature to
+// the VIZ key that produced it (so broadcastRelease attaches only signatures actually in
+// the backing account's active authority). git-pinned; paths stable for this version.
+declare module "viz-js-lib/lib/auth/ecc" {
+  export class PublicKey {
+    /** The address-prefixed public key string, e.g. "VIZ65QRp…" — matches key_auths. */
+    toString(addressPrefix?: string): string;
+  }
+  export class Signature {
+    static fromHex(hex: string): Signature;
+    /** Recover the signing public key from the ORIGINAL buffer (hashes sha256 internally). */
+    recoverPublicKeyFromBuffer(buffer: Buffer): PublicKey;
+  }
+}

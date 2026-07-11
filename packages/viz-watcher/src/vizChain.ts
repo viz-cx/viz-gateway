@@ -13,7 +13,7 @@ import {
   type VizDeposit,
   type VizReleaseProposal,
 } from "@gateway/common";
-import { buildReleaseTx, releaseTxId } from "./vizSign";
+import { buildReleaseTx, releaseTxId, selectAuthoritySignatures, type VizAuthority } from "./vizSign";
 
 /**
  * Live VizChain read path, backed by viz-js-lib against an HTTP(S) or WS node
@@ -301,21 +301,20 @@ export class VizJsChain implements VizChain {
   }
 
   /**
-   * The gateway account's active-authority weight_threshold — i.e. how many
-   * equal-weight operator signatures a transfer needs to be valid. The federation
-   * may collect MORE approvals than this (its own threshold can exceed the VIZ
-   * account's, e.g. when the same operator set also signs a higher-threshold remote
-   * authority), and VIZ rejects a transfer that carries a signature beyond its
-   * minimal satisfying set ("irrelevant signature included"). broadcastRelease uses
-   * this to attach exactly the required number of signatures.
+   * The gateway account's active authority (weight_threshold + key_auths). The federation
+   * may collect MORE approvals than this authority needs (its own threshold can exceed the
+   * VIZ account's, e.g. when the same operator set also signs a higher-threshold remote
+   * authority), and VIZ rejects a transfer that carries a signature beyond its minimal
+   * satisfying set ("irrelevant signature included"). broadcastRelease reads this to pick
+   * exactly the signatures whose keys are in key_auths, up to weight_threshold.
    */
-  async activeWeightThreshold(account: string): Promise<number> {
+  async activeAuthority(account: string): Promise<VizAuthority> {
     const accounts = await call<Account[]>((cb) => viz.api.getAccounts([account], cb));
-    const threshold = accounts?.[0]?.active_authority?.weight_threshold;
-    if (!threshold || threshold < 1) {
-      throw new Error(`activeWeightThreshold(${account}): no active authority found`);
+    const auth = accounts?.[0]?.active_authority;
+    if (!auth || !auth.weight_threshold || auth.weight_threshold < 1) {
+      throw new Error(`activeAuthority(${account}): no active authority found`);
     }
-    return threshold;
+    return { weight_threshold: auth.weight_threshold, key_auths: auth.key_auths };
   }
 
   /**
@@ -388,20 +387,15 @@ export class VizJsChain implements VizChain {
   async broadcastRelease(proposal: VizReleaseProposal, signatures: string[]): Promise<string> {
     if (signatures.length === 0) throw new Error("no signatures to broadcast");
     const tx = buildReleaseTx(proposal);
-    // VIZ rejects a transfer carrying more signatures than its active authority's
-    // minimal satisfying set ("irrelevant signature included"), and an ASYNC broadcast
-    // does not surface that apply-time rejection — the release just never lands. The
-    // federation can collect more approvals (its threshold) than the gateway account's
-    // active weight_threshold, so attach exactly the required number. Operator keys are
-    // equal-weight (weight 1), so any `weight_threshold` of the collected signatures
-    // form a valid minimal set.
-    const required = await this.activeWeightThreshold(proposal.from);
-    if (signatures.length < required) {
-      throw new Error(
-        `broadcastRelease(${proposal.from}): have ${signatures.length} signatures, authority needs ${required}`,
-      );
-    }
-    tx.signatures = signatures.slice(0, required);
+    // VIZ rejects a transfer carrying more signatures than its active authority's minimal
+    // satisfying set ("irrelevant signature included"), and an ASYNC broadcast does not
+    // surface that apply-time rejection — the release just never lands. The federation can
+    // collect more approvals than the gateway account's authority needs, so attribute each
+    // signature to its key via recovery and keep only a minimal in-authority subset (never
+    // trusting collection order — robust to a federation/authority mismatch during rotation).
+    // Throws fail-closed if the relevant signatures can't reach the threshold.
+    const authority = await this.activeAuthority(proposal.from);
+    tx.signatures = selectAuthoritySignatures(proposal, signatures, authority);
     const txid = releaseTxId(proposal); // deterministic; equals the on-chain id
     let broadcastErr = "";
     try {
