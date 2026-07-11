@@ -105,7 +105,15 @@ export function buildMintTransfer(
   return {
     type: "transfer",
     sendMode: SendMode.PAY_GAS_SEPARATELY,
-    message: internal({ to: minter, value: toNano("0.1"), body: mintBody }),
+    // value must cover the minter's compute gas (~5-10k units ≪ this) and let it
+    // forward the 0.05 above; the minter has no excess-return on the mint op, so
+    // anything beyond (0.05 + forward fee + gas) is stranded on the minter forever.
+    // 0.06 leaves ~0.01 headroom (>10x a realistic fee spike) while nearly zeroing
+    // that accumulation. It is SAFE against fee increases: with PAY_GAS_SEPARATELY
+    // the minter pays forward fees from its own balance, so a shortfall draws from
+    // its reserve rather than stranding the mint. The delivery-critical amount
+    // (0.05 for the recipient's wallet deploy) is unchanged.
+    message: internal({ to: minter, value: toNano("0.06"), body: mintBody }),
   };
 }
 
