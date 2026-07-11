@@ -83,6 +83,20 @@ export async function tonWvizBalance(cfg: E2eConfig, ownerAddress: string): Prom
   });
 }
 
+/**
+ * Current TON balance (nano) held by the wVIZ jetton minter contract. Used to
+ * observe per-mint accretion: the standard governed minter has no excess-return
+ * on the mint op, so it keeps `attached value − ton_amount − fees` per mint.
+ * PR #59 lowered the attached mint value 0.1→0.06 TON; this read lets a live run
+ * measure the resulting per-mint delta (~0.049 → ~0.008 TON expected).
+ */
+export async function minterTonBalance(cfg: E2eConfig): Promise<bigint> {
+  return withRetry(async () => {
+    const c = client(cfg);
+    return c.getBalance(Address.parse(cfg.gram.jettonMinterAddress));
+  });
+}
+
 export interface MinterData {
   totalSupply: bigint; // circulating wVIZ, base units (mVIZ)
   mintable: boolean;

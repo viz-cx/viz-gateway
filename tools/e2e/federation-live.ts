@@ -40,7 +40,7 @@ import { assertDelta } from "./deltas";
 import { pollUntil } from "./poll";
 import { launchStack, launchFederationStack } from "./stack";
 import { submitLock, vizBalanceMilliViz } from "./viz";
-import { submitBurn, tonWvizBalance } from "./ton";
+import { submitBurn, tonWvizBalance, minterTonBalance } from "./ton";
 import { Address } from "@ton/ton";
 
 // Live testnet latencies: the peg-in mint waits on VIZ irreversibility lag + 3
@@ -131,6 +131,11 @@ async function main() {
 
   const wvizBefore = await tonWvizBalance(cfg, tonOwner);
   const recvBefore = await vizBalanceMilliViz(cfg.viz.nodeUrl, recvAcct);
+  // PR #59 verification: snapshot the minter's TON balance so we can measure the
+  // per-mint accretion once the mint lands (expected ~0.008 TON with attached value
+  // lowered 0.1→0.06, vs the ~0.049 measured under the old 0.1 attach).
+  const minterTonBefore = await minterTonBalance(cfg);
+  console.log(`[fed-live]   minter TON before: ${minterTonBefore} nano`);
 
   // Bring up ONE stack: 3 signers + keyless coordinator, plus the watchers/dispatcher.
   const fed = await launchFederationStack(signerSpecs, coordinatorEnv, logDir);
@@ -150,6 +155,17 @@ async function main() {
     );
     assertDelta("ton-wviz (peg-in)", wvizBefore, wvizAfter, net);
     console.log(`[fed-live]   ✓ minted +${net} wVIZ`);
+
+    // PR #59 verification: measure minter TON accretion from THIS mint, before the
+    // peg-out burn perturbs the minter balance. Old attach (0.1) accreted ~0.049 TON;
+    // the 0.06 attach should land ~0.008 TON (~82% less). Report-only (does not gate
+    // the round-trip proof), since live gas/fee jitter makes an exact assert brittle.
+    const minterTonAfterMint = await minterTonBalance(cfg);
+    const mintAccretionNano = minterTonAfterMint - minterTonBefore;
+    console.log(
+      `[fed-live]   minter TON after mint: ${minterTonAfterMint} nano ` +
+        `(Δ=${mintAccretionNano} nano ≈ ${(Number(mintAccretionNano) / 1e9).toFixed(4)} TON per mint)`,
+    );
 
     // ── Peg-out: burn wVIZ (comment = VIZ recipient) → 2-of-3 VIZ release ─────────────
     console.log(`\n[fed-live] Peg-out: burn ${net} wVIZ → release VIZ to ${recvAcct} (3 sigs reach tester4's 2-of-3)`);
