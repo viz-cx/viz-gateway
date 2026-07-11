@@ -39,6 +39,37 @@ const ZERO_TRX = "0000000000000000000000000000000000000000";
 export const RPC_TIMEOUT_MS = 20_000;
 
 /**
+ * Bounded retry for TRANSIENT read failures. node.viz.cx is load-balanced across
+ * intermittently unhealthy backends and returns sporadic HTTP 502/503/504 — and 429
+ * (rate limit) once the coordinator + dispatcher + watcher all read the same node — and
+ * the transport occasionally wedges → RPC_TIMEOUT_MS abort. Without a retry, a single
+ * such blip anywhere in a MAX_BLOCKS_PER_SCAN sweep of getOpsInBlock rejects the
+ * WHOLE window — the loop then restarts the same window from the same cursor, so
+ * under a steady 502 rate the scan can churn for many minutes and never sweep past
+ * a deposit inside the peg-in timeout (observed live: the lock was on-chain but the
+ * mint never fired). Retrying the individual call lets a flaky node slow the scan
+ * instead of resetting it. Only transient errors are retried — application errors
+ * (operation_history's "unknown transaction" for an unconfirmed id) stay fast and
+ * fail-closed for getDeposit / confirmReleaseByTxId.
+ */
+export const RPC_MAX_ATTEMPTS = 4;
+export const RPC_RETRY_BASE_MS = 500;
+
+/**
+ * True for load-balancer/transport failures that a retry can clear: gateway 5xx,
+ * 429 rate limits (exponential backoff is exactly the right response), socket
+ * resets/timeouts, DNS blips, and our own RPC_TIMEOUT_MS abort. Deliberately does
+ * NOT match application-level errors (e.g. "unknown transaction"), so a legit
+ * not-found still returns promptly rather than after four backoffs.
+ */
+export function isTransientRpcError(err: unknown): boolean {
+  const msg = String((err as { message?: unknown })?.message ?? err);
+  return /\b(429|50[234])\b|too many requests|bad gateway|service unavailable|gateway time-?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|timed out after/i.test(
+    msg,
+  );
+}
+
+/**
  * Release-confirmation poll bound. The release is broadcast ASYNC (see broadcastRelease)
  * and confirmed by re-reading its exact id from the chain, because the synchronous
  * broadcast blocks until block inclusion — which node.viz.cx / its RPC proxy 504s (and
@@ -83,7 +114,7 @@ export function nextScanWindow(cursor: number, safeHead: number): { scannedTo: n
   return { scannedTo, caughtUp: scannedTo >= safeHead };
 }
 
-function call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
+function callOnce<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -99,6 +130,26 @@ function call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T>
       else resolve(res);
     });
   });
+}
+
+/**
+ * Every VIZ read/broadcast goes through here: one attempt (callOnce) plus bounded
+ * retry on transient failures with exponential backoff (500/1000/2000ms). Safe for
+ * the broadcast path too — the release id is deterministic and confirmReleaseByTxId
+ * dedupes, so a re-sent transfer is a no-op on the chain.
+ */
+async function call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= RPC_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callOnce(exec);
+    } catch (err) {
+      lastErr = err;
+      if (attempt === RPC_MAX_ATTEMPTS || !isTransientRpcError(err)) throw err;
+      await sleep(RPC_RETRY_BASE_MS * 2 ** (attempt - 1));
+    }
+  }
+  throw lastErr; // unreachable: the loop either returns or throws on the last attempt
 }
 
 /** "189.027 VIZ" -> 189027n (integer milli-VIZ). VIZ assets always have 3 decimals. */
