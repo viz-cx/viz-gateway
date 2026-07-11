@@ -1,28 +1,36 @@
-// SPIKE: the VIZ peg-out release attaches EXACTLY the gateway account's active
-// weight_threshold signatures — never more. The federation can collect more approvals
+// SPIKE: the VIZ peg-out release attaches a MINIMAL in-authority signature set — the
+// signatures whose recovered keys are actually in the gateway account's active authority,
+// up to its weight_threshold, and never one more. The federation can collect more approvals
 // than the VIZ account's authority needs: `federation-live.ts` forces a 3-of-3 federation
 // (so three operators reach a remote 3-of-5 minter on peg-IN), but the same operators are
 // a 2-of-3 authority on the VIZ gateway account. VIZ/graphene rejects a transfer that
 // carries a signature beyond its minimal satisfying set ("irrelevant signature included"),
 // and an ASYNC broadcastTransaction never surfaces that apply-time rejection — the release
 // is accepted into the pending pool, dropped at block production, and silently never lands
-// (observed live: "viz release <txid> not confirmed after 60s", retried forever). So
-// broadcastRelease MUST trim to weight_threshold before broadcasting.
+// (observed live: "viz release <txid> not confirmed after 60s", retried forever).
 //
-// Exercises the REAL compiled VizJsChain.broadcastRelease offline against a local JSON-RPC
+// broadcastRelease attributes each collected signature to a key via secp256k1 recovery, so
+// it is robust to collection ORDER and to a federation/authority mismatch — a signature from
+// an operator whose key is not (or not yet, mid-rotation) in the active authority is ignored
+// rather than blindly sliced into the broadcast. Exercises the REAL compiled
+// VizJsChain.broadcastRelease with REAL operator signatures, offline against a local JSON-RPC
 // server that serves get_accounts (a 2-of-3 authority), records the broadcast tx, and
 // confirms get_transaction so the poll resolves on the first tick:
-//   1) 3 collected sigs + 2-of-3 authority -> broadcast tx carries EXACTLY 2 sigs, and the
+//   1) 3 valid sigs + 2-of-3 authority -> broadcast tx carries EXACTLY 2 sigs, and the
 //      returned txid equals the deterministic releaseTxId (unaffected by the trim).
 //   2) exactly-threshold (2 sigs) is unchanged -> 2 sigs broadcast.
-//   3) fewer sigs than the authority needs (1 sig, 2-of-3) -> throws BEFORE broadcasting
-//      (no partial transfer put on the wire).
+//   3) an out-of-authority signature FIRST in the collected order ([D, A, B]) -> D is
+//      ignored, the two in-authority sigs (A, B) are broadcast (order-robust hardening).
+//   4) a duplicate signature ([A, A, B]) -> the repeat is skipped, A + B broadcast.
+//   5) too few relevant sigs (1 in-authority, or only outsiders) -> throws BEFORE
+//      broadcasting (no partial transfer put on the wire).
 //
 // Run: node tools/pegout-release-sigcount-spike.cjs   (after npm run build)
 const assert = require("node:assert");
 const http = require("node:http");
+const viz = require("viz-js-lib");
 const { VizJsChain } = require("../packages/viz-watcher/dist/vizChain");
-const { releaseTxId } = require("../packages/viz-watcher/dist/vizSign");
+const { releaseTxId, signRelease } = require("../packages/viz-watcher/dist/vizSign");
 const { buildGatewayAccounts, loadConfig } = require("../packages/common/dist");
 
 // Minimal gateway-accounts registry so the VizJsChain constructor is satisfied; the release
@@ -45,14 +53,25 @@ function accounts() {
   }
 }
 
-// A 2-of-3 active authority: three equal-weight (weight 1) operator keys, threshold 2.
+// Three in-authority operator keypairs (A, B, C) plus an OUTSIDER (D) whose key is not in
+// the authority — stand-in for a federation member not (yet) added to this account.
+const keypair = (seed) => {
+  const wif = viz.auth.toWif("gateway", `password-${seed}`, "active");
+  return { wif, pub: viz.auth.wifToPublic(wif) };
+};
+const A = keypair("op1");
+const B = keypair("op2");
+const C = keypair("op3");
+const D = keypair("outsider");
+
+// A 2-of-3 active authority over A, B, C (equal weight 1). D is deliberately absent.
 const ACTIVE_AUTHORITY = {
   weight_threshold: 2,
   account_auths: [],
   key_auths: [
-    ["VIZ65QRpXcP5TC4grAoB58U4JUSwr7TyPdJoEewYSFLEXf1jgCoJy", 1],
-    ["VIZ8KDgP7NqqSJDag78tGco7f5vrM4EFwqSoA2qoeX4CkwNkM5U5G", 1],
-    ["VIZ7UADKgSGMedvKCGPzkquaJd7AP7w3EPXmqLVdvRQV58T45cmjK", 1],
+    [A.pub, 1],
+    [B.pub, 1],
+    [C.pub, 1],
   ],
 };
 
@@ -65,6 +84,12 @@ const PROPOSAL = {
   amount: "15.904 VIZ",
   memo: "fe9880faacc40754336c8452039363a45903ddc19e5c495ed16b64bcb091666b",
 };
+
+// Real signatures over the exact proposal bytes — recoverable to each operator's key.
+const sigA = signRelease(PROPOSAL, A.wif);
+const sigB = signRelease(PROPOSAL, B.wif);
+const sigC = signRelease(PROPOSAL, C.wif);
+const sigD = signRelease(PROPOSAL, D.wif);
 
 // JSON-RPC server dispatching on the inner graphene method name (params = [api, method,
 // args]). Serves the 2-of-3 account, records the broadcast tx, and confirms any
@@ -108,12 +133,11 @@ function nodeServer() {
 async function trimsToThreshold(srv) {
   srv.reset();
   const chain = new VizJsChain(srv.url, accounts());
-  const sigs = ["sigA", "sigB", "sigC"]; // 3 collected, authority needs 2
-  const txid = await chain.broadcastRelease(PROPOSAL, sigs);
+  const txid = await chain.broadcastRelease(PROPOSAL, [sigA, sigB, sigC]); // 3 collected, needs 2
   const tx = srv.lastBroadcast();
   assert.ok(tx, "a transaction must have been broadcast");
   assert.strictEqual(tx.signatures.length, 2, `must broadcast exactly 2 sigs, saw ${tx.signatures.length}`);
-  assert.deepStrictEqual(tx.signatures, ["sigA", "sigB"], "keeps the first weight_threshold sigs");
+  assert.deepStrictEqual(tx.signatures, [sigA, sigB], "keeps the first weight_threshold in-authority sigs");
   assert.strictEqual(txid, releaseTxId(PROPOSAL), "txid is the deterministic id (trim does not change it)");
   console.log("[pegout-sigcount] 3 sigs + 2-of-3 -> broadcasts exactly 2 sigs, deterministic txid OK");
 }
@@ -121,21 +145,48 @@ async function trimsToThreshold(srv) {
 async function exactThresholdUnchanged(srv) {
   srv.reset();
   const chain = new VizJsChain(srv.url, accounts());
-  await chain.broadcastRelease(PROPOSAL, ["sigA", "sigB"]);
+  await chain.broadcastRelease(PROPOSAL, [sigA, sigB]);
   assert.strictEqual(srv.lastBroadcast().signatures.length, 2, "exactly-threshold passes through untrimmed");
   console.log("[pegout-sigcount] 2 sigs + 2-of-3 -> broadcasts 2 sigs OK");
+}
+
+async function ignoresOutsiderSigFirst(srv) {
+  srv.reset();
+  const chain = new VizJsChain(srv.url, accounts());
+  // The harmful case a blind slice(0, threshold) would mishandle: an out-of-authority
+  // signature at the FRONT of the collected order. Recovery attributes D to no authority
+  // key, so it's skipped and the two real sigs are broadcast — the release still lands.
+  await chain.broadcastRelease(PROPOSAL, [sigD, sigA, sigB]);
+  assert.deepStrictEqual(srv.lastBroadcast().signatures, [sigA, sigB], "outsider sig ignored, A+B broadcast");
+  console.log("[pegout-sigcount] [D,A,B] + 2-of-3 -> ignores outsider, broadcasts A+B OK");
+}
+
+async function skipsDuplicateSig(srv) {
+  srv.reset();
+  const chain = new VizJsChain(srv.url, accounts());
+  // A repeated signature recovers to the same key and must not double-count toward weight.
+  await chain.broadcastRelease(PROPOSAL, [sigA, sigA, sigB]);
+  assert.deepStrictEqual(srv.lastBroadcast().signatures, [sigA, sigB], "duplicate A skipped, A+B broadcast");
+  console.log("[pegout-sigcount] [A,A,B] + 2-of-3 -> skips duplicate, broadcasts A+B OK");
 }
 
 async function tooFewThrowsBeforeBroadcast(srv) {
   srv.reset();
   const chain = new VizJsChain(srv.url, accounts());
   await assert.rejects(
-    () => chain.broadcastRelease(PROPOSAL, ["sigA"]),
-    /have 1 signatures, authority needs 2/,
-    "fewer sigs than the authority needs must throw",
+    () => chain.broadcastRelease(PROPOSAL, [sigA]),
+    /relevant signatures reach weight 1, active authority needs 2/,
+    "one in-authority sig for a 2-of-3 must throw",
   );
   assert.strictEqual(srv.lastBroadcast(), null, "must NOT put a sub-threshold transfer on the wire");
-  console.log("[pegout-sigcount] 1 sig + 2-of-3 -> throws before broadcasting OK");
+  // Only outsiders => zero relevant weight => also throws, nothing on the wire.
+  await assert.rejects(
+    () => chain.broadcastRelease(PROPOSAL, [sigD, sigD]),
+    /relevant signatures reach weight 0, active authority needs 2/,
+    "only out-of-authority sigs must throw",
+  );
+  assert.strictEqual(srv.lastBroadcast(), null, "outsider-only set must not broadcast");
+  console.log("[pegout-sigcount] 1 in-authority sig (and outsiders-only) -> throws before broadcasting OK");
 }
 
 (async () => {
@@ -143,6 +194,8 @@ async function tooFewThrowsBeforeBroadcast(srv) {
   try {
     await trimsToThreshold(srv);
     await exactThresholdUnchanged(srv);
+    await ignoresOutsiderSigFirst(srv);
+    await skipsDuplicateSig(srv);
     await tooFewThrowsBeforeBroadcast(srv);
     console.log("[pegout-sigcount] ALL OK");
   } finally {
