@@ -301,6 +301,24 @@ export class VizJsChain implements VizChain {
   }
 
   /**
+   * The gateway account's active-authority weight_threshold — i.e. how many
+   * equal-weight operator signatures a transfer needs to be valid. The federation
+   * may collect MORE approvals than this (its own threshold can exceed the VIZ
+   * account's, e.g. when the same operator set also signs a higher-threshold remote
+   * authority), and VIZ rejects a transfer that carries a signature beyond its
+   * minimal satisfying set ("irrelevant signature included"). broadcastRelease uses
+   * this to attach exactly the required number of signatures.
+   */
+  async activeWeightThreshold(account: string): Promise<number> {
+    const accounts = await call<Account[]>((cb) => viz.api.getAccounts([account], cb));
+    const threshold = accounts?.[0]?.active_authority?.weight_threshold;
+    if (!threshold || threshold < 1) {
+      throw new Error(`activeWeightThreshold(${account}): no active authority found`);
+    }
+    return threshold;
+  }
+
+  /**
    * Build the shared release proposal: a deterministic transfer skeleton with
    * fixed TaPoS (from the current head) and expiration. The coordinator builds
    * this once and distributes it; every operator signs these exact bytes.
@@ -370,7 +388,20 @@ export class VizJsChain implements VizChain {
   async broadcastRelease(proposal: VizReleaseProposal, signatures: string[]): Promise<string> {
     if (signatures.length === 0) throw new Error("no signatures to broadcast");
     const tx = buildReleaseTx(proposal);
-    tx.signatures = signatures;
+    // VIZ rejects a transfer carrying more signatures than its active authority's
+    // minimal satisfying set ("irrelevant signature included"), and an ASYNC broadcast
+    // does not surface that apply-time rejection — the release just never lands. The
+    // federation can collect more approvals (its threshold) than the gateway account's
+    // active weight_threshold, so attach exactly the required number. Operator keys are
+    // equal-weight (weight 1), so any `weight_threshold` of the collected signatures
+    // form a valid minimal set.
+    const required = await this.activeWeightThreshold(proposal.from);
+    if (signatures.length < required) {
+      throw new Error(
+        `broadcastRelease(${proposal.from}): have ${signatures.length} signatures, authority needs ${required}`,
+      );
+    }
+    tx.signatures = signatures.slice(0, required);
     const txid = releaseTxId(proposal); // deterministic; equals the on-chain id
     let broadcastErr = "";
     try {
