@@ -52,9 +52,17 @@ declare module "viz-js-lib" {
     op: [string, Record<string, unknown>];
   }
 
+  export interface Authority {
+    weight_threshold: number;
+    account_auths: [string, number][];
+    key_auths: [string, number][];
+  }
+
   export interface Account {
     name: string;
     balance: string; // e.g. "189.027 VIZ"
+    /** The multisig authority that must sign transfers (the peg-out release path). */
+    active_authority: Authority;
   }
 
   interface VizApi {
