@@ -9,12 +9,17 @@ the last open item before real value moves on mainnet. All prior audits (the int
 ed25519 review, R-4/R-6 hardening) are *internal* and are **not** a substitute for
 independent third-party review.
 
-**Commit under review:** `a25f425` (main). Pin the exact hash with the auditor before
+**Commit under review:** `9b147bf` (main). Pin the exact hash with the auditor before
 work starts; re-pin on any change.
 
-**Prepared:** 2026-07-02. **Last refreshed:** 2026-07-05 — re-pinned `01bd1ad`→`a25f425`
-to cover the pre-audit hardening sweep (#30), the TON→GRAM internal rename (#31), and
-per-network backing accounts (#32). See §9 for the delta.
+**Prepared:** 2026-07-02. **Last refreshed:** 2026-07-11 — re-pinned `a25f425`→`9b147bf`
+to cover the two post-pin security rounds (#36/#38, incl. the now-*enforced* Solana
+upgrade-authority check and HTTP body-size limit), the at-rest keystore (#43), and the
+full peg-out robustness + release-signature arc (#52/#54/#55/#56/#57). The **VIZ release
+path changed materially** — async broadcast + poll-by-txid, and signature selection by
+key recovery — so re-read §5.A. See §9 for the complete delta. Prior refresh (2026-07-05,
+`a25f425`) covered the pre-audit sweep (#30), TON→GRAM rename (#31), and per-network
+backing accounts (#32).
 
 > **Naming note (read first):** the codebase uses **`GRAM`** as the internal
 > `RemoteChainId` for the **TON** network — a historical rename (#31) of the chain
@@ -165,18 +170,21 @@ Two independent custody gates:
 
 | Area | File(s) | Check |
 |---|---|---|
-| Peg-in detection | `packages/viz-watcher/src/vizChain.ts` (`irreversibleDepositsSince`, `getDeposit`) | Block-ranged scan (cap `MAX_BLOCKS_PER_SCAN`); confirms below `last_irreversible_block_num` (re-org safety); verifies `tx.transaction_id` matches (defends against a lying node); memo `"<chain>:<dest>"` fails closed on parse error. |
-| Release signing | `packages/viz-watcher/src/vizSign.ts` | Per-operator secp256k1 partial over identical bytes; deterministic tx id (sha256, first 20 bytes). |
-| Release broadcast | `packages/coordinator/src/adapters.ts` (`VizReleaseBroadcaster`) | Threshold-met merge; **persist txid before send**; recovery via `confirmReleaseByTxId`. |
+| Peg-in detection | `packages/viz-watcher/src/vizChain.ts` (`irreversibleDepositsSince`, `getDeposit`, `call`/`callOnce`) | Block-ranged scan (cap `MAX_BLOCKS_PER_SCAN`); confirms below `last_irreversible_block_num` (re-org safety); verifies `tx.transaction_id` matches (defends against a lying node); memo `"<chain>:<dest>"` fails closed on parse error. Every RPC has a per-call deadline (`RPC_TIMEOUT_MS`, #52) and bounded transient-only retry (`isTransientRpcError`, #55) so a flaky node slows the scan instead of hanging or resetting the window — application errors (unknown-tx) stay fail-fast/fail-closed. |
+| Release signing | `packages/viz-watcher/src/vizSign.ts` | Per-operator secp256k1 partial over identical bytes; deterministic tx id (sha256, first 20 bytes). `recoverReleaseSigner` / `selectAuthoritySignatures` (#57) attribute each collected signature to its signer by secp256k1 recovery and pick a **minimal in-authority subset** (only keys in the account's `active_authority.key_auths`, up to `weight_threshold`, duplicates skipped) — robust to collection order and to a federation/authority mismatch during a rotation window. |
+| Release broadcast | `packages/coordinator/src/adapters.ts` (`VizReleaseBroadcaster`), `vizChain.ts` (`broadcastRelease`, `activeAuthority`) | Threshold-met merge; **persist txid before send**. Broadcasts **async** then polls `confirmReleaseByTxId` for the deterministic id (~60s) — the sync broadcast 504s past ~20s inclusion lag (#54); attaches exactly the authority's minimal satisfying signature set and **fails closed** below `weight_threshold` (#56/#57), so an "irrelevant signature" can't silently drop the release. Idempotent: txid is a pure function of the unsigned proposal, so a retry is a chain no-op. |
 | TaPoS | `vizChain.ts` (`buildReleaseProposal`) | Uses **head, not LIB** (accepted low-risk, §8); 60s expiry. |
 | Active-set rotation | `packages/common/src/rotation.ts`, `setup-viz/src/rotate.ts` | `account_update` resets `active`+`regular` to sorted M-of-N keyset, **master omitted** (Graphene allows active-only change); co-sign validator re-derives the op and asserts JSON byte-equality; broadcaster re-checks live authority hash (anti-rollback). |
 | Key custody | `packages/common/src/config.ts` (`VIZ_SIGNING_WIF`), `packages/signer/src/keyedSigner.ts` | Raw WIF in signer memory (scaffold; comment says production wraps HSM/KMS). Master assumed held offline. |
 
 **Focus for auditor:** T2 (is the signer's VIZ node genuinely independent of coordinator
 input?), T6 (rotation validator completeness — can a co-signer be induced to sign an
-authority set different from the one it inspected?), and the master-key operational
+authority set different from the one it inspected?), the master-key operational
 assumption (a leaked *active* WIF at T-of-N can rotate the active set; master compromise
-is full takeover).
+is full takeover), and the new release **signature-selection** (`selectAuthoritySignatures`,
+#57) — confirm the secp256k1 recovery correctly attributes each partial to its key over
+the exact signed digest (`chain_id ++ toBuffer(trx)`), that only in-authority keys can
+satisfy the threshold, and that the minimal-set trim can never drop a *required* signature.
 
 ### B. TON chain (remote / mint-burn)
 
@@ -202,7 +210,7 @@ finality buffer assumes stable block time.
 | PDA deposit address | `packages/solana-watcher/src/depositAddress.ts` | `depositPubkey/Address/Ata` derive `PDA(["deposit", vizAccount_utf8], programId)` — **no private key anywhere**; `buildBurnDepositIx` encodes `(viz_account, amount)`. |
 | F2 re-derivation | `packages/signer/src/sourceValidator.ts` (Solana PEG_OUT branch) | Re-reads burn on operator's own node; looks up `store.depositAddressBy(burn.from)`; **re-derives** the PDA from `vizAccount + SOLANA_DEPOSIT_PROGRAM_ID` and asserts it equals the burn source (a tampered registry cannot pass). |
 | Lookup issuance gate | `packages/solana-watcher/src/lookupValidate.ts`, `lookup.ts` | Issues a deposit address only if `VizChain.accountExists` (non-existent → 404; VIZ node outage → fail-closed 500). Note `VIZ_ACCOUNT_RE` is a **loose** pre-filter (§8). |
-| Mint / provenance | `contracts/solana/PROVENANCE.md`, `contracts/solana/src/deployMint.ts` | Program ID `MCFeMZJY…`; Anchor 1.1.2 / rustc 1.89.0 pinned. **Upgrade authority must be set to the M-of-N multisig** post-deploy (RUNBOOK §5) — verify. |
+| Mint / provenance | `contracts/solana/PROVENANCE.md`, `contracts/solana/src/deployMint.ts` | Program ID `MCFeMZJY…`; Anchor 1.1.2 / rustc 1.89.0 pinned. **Upgrade authority must be the M-of-N multisig** post-deploy — now **enforced in code** (`contracts/solana/src/enforceProgramAuthority.ts`, `programAuthority.ts`, #38), not just RUNBOOK prose; re-check the enforcement (does it fail closed if the on-chain upgrade authority isn't the expected multisig?), covered by `solana-upgrade-authority-spike.cjs`. |
 | Operator rotation | `contracts/solana/src/rotateSolana.ts` | Two-phase SPL multisig handoff. |
 
 **Focus for auditor:** T5 — confirm there is genuinely no transfer/withdraw path
@@ -245,11 +253,15 @@ data-integrity failure.
   `package.json` → `packages/*`, `contracts/ton`, `contracts/solana`, `setup-viz`,
   `tools/e2e`).
 - **Test suite = offline `node:assert` spikes** wired into **`npm run verify`**
-  (~25 spikes incl. `signer-f2-spike`, `ton-pegout-f2-spike`, `idempotent-delivery-spike`,
+  (~43 spikes incl. `signer-f2-spike`, `ton-pegout-f2-spike`, `idempotent-delivery-spike`,
   `deposit-pda-spike`, `pegout-guard-spike`, `lookup-validate-spike`,
-  `fee-sweep-refund-spike`, plus `contracts/ton/tools/verify-offline.cjs`). Deterministic,
-  no network. Note: **pragmatic, gives no coverage signal** — treat as behavior fixtures,
-  not exhaustive.
+  `fee-sweep-refund-spike`, `solana-upgrade-authority-spike` (#38 authority enforcement),
+  `http-body-limit-spike` (#36 body cap), `viz-rpc-retry-spike` (#55) and
+  `pegout-release-sigcount-spike` (#56/#57 — signs with real operator keys and asserts the
+  minimal in-authority sig selection, incl. out-of-authority and duplicate cases), plus
+  `contracts/ton/tools/verify-offline.cjs`). Deterministic, no network. Also a compiled
+  unit-test target — `npm run test:unit` (65 tests) — run in CI (#38 BM1). Note the spikes
+  are **pragmatic, give no coverage signal** — treat as behavior fixtures, not exhaustive.
 - **Anchor program:** `contracts/solana` — Anchor `1.1.2`, rustc `1.89.0`
   (`rust-toolchain.toml`). Reproducible-build the `.so` and diff against the deployed
   program at `MCFeMZJY…`.
@@ -361,10 +373,30 @@ by this refreshed package — review them against the pinned head, not the dry-r
 | #31 (`41a6244`) | TON→GRAM internal rename | `RemoteChainId`, env vars (`GRAM_*`), package `gram-watcher`, and symbols renamed. **@ton/* SDK and `contracts/ton/` unchanged.** See the naming note at the top. |
 | #32 (`a25f425`) | Per-network backing accounts | Locked VIZ split into `gram.gate` / `solana.gate` via the injective `gatewayAccounts.ts` registry; recon is now per-chain (T7). New surface: `gatewayAccounts.ts` and its tests. |
 
+### Changes since this package's prior pin (`a25f425` → `9b147bf`, 2026-07-11 refresh)
+
+Seventeen PRs landed after the 07-05 pin. The audit-relevant ones are below. The remainder
+— #40 (docker log-dir crash fix), #41 (caps/threshold unit tests), #42 & #53 (e2e-harness
+GRAM drift fix / 3-of-3 live driver), #47 (Phase-1 handoff doc), #48–#51 (wVIZ token
+name/logo/links + explorer decision) — are tooling, tests, harness, and off-chain token
+metadata with no effect on the custody model; skim, don't scope.
+
+| PR | main | Change | Audit-relevant effect |
+|---|---|---|---|
+| #36 | `03d6046` | Security round-1 (broad) | Adds an **HTTP request body-size limit** (`packages/common/src/http.ts`) guarding the signer/coordinator POST endpoints against oversized-payload DoS; a `seenRecovery.ts` crash-window helper; store/caps-ordering/Solana-read hardening and structured-log redaction. New surface: `http.ts`, `seenRecovery.ts`. |
+| #38 | `7d4eec2` | Security round-2 (H3/M9) | **Solana upgrade-authority enforcement moved into code** (`contracts/solana/src/enforceProgramAuthority.ts`, `programAuthority.ts`) — §5.C's "must be the multisig" is now checked and fails closed, not merely documented; recon expected-remotes coverage (M9); CI now runs `test:unit`. Re-check §5.C against the enforcement, not the prose. |
+| #43 | `dabf76c` | At-rest keystore | Cross-platform passphrase keystore (`packages/common/src/keystore.ts`, `tools/keystore.cjs`, config hydrate) so no plaintext WIF/mnemonic/secret sits on disk or in env files — already reflected in §8 key custody. Keys stay **on-box** (the M-of-N federation is the custody control; HSM/KMS deliberately not planned). |
+| #52 | `0e5a2bd` | viz-watcher RPC timeout | Per-call deadline `RPC_TIMEOUT_MS` in `vizChain.ts call()`: a wedged VIZ transport is turned into a caught, retried error instead of hanging the scan loop silently. Liveness / self-heal. |
+| #54 | `1b3a8fe` | Peg-out robustness | VIZ release **async broadcast + ~60s poll-by-txid** (`broadcastRelease`) to dodge the sync-broadcast 504 past ~20s inclusion lag; TON toncenter timeout raised (`GRAM_RPC_TIMEOUT_MS`, all 4 `GramHttpChain` sites); signer `/approve` timeout direction-aware `{pegIn:180s, pegOut:30s}`; dispatcher peg-in budget derived from it. Release-confirm correctness — see §5.A. |
+| #55 | `1b05c91` | viz-watcher transient-RPC retry | `call()` splits into `callOnce()` + bounded exponential retry on **transient** LB failures only (`isTransientRpcError`: 5xx/429/socket/timeout); application errors (unknown-tx) stay fail-fast and fail-closed for `getDeposit`/`confirmReleaseByTxId`. Broadcast retry is safe (deterministic txid + dedupe). Verify the transient/non-transient classification. |
+| #56 | `84d644b` | Release signature count | `broadcastRelease` attaches exactly the VIZ authority's `weight_threshold` signatures (the federation may collect more than the account's authority needs) and **fails closed** below it — otherwise graphene silently drops the async release as an "irrelevant signature included". |
+| #57 | `9b147bf` | Release sig selection by key recovery | Supersedes #56's order-trusting `slice()`: partials are attributed to their signer via secp256k1 recovery and a **minimal in-authority subset** is chosen (out-of-authority sigs and duplicates skipped), robust to a federation/authority mismatch mid-rotation. New pure helpers `recoverReleaseSigner` / `selectAuthoritySignatures` in `vizSign.ts` — new crypto surface for T3/T6 (see §5.A focus). |
+
 ---
 
 _This package supersedes the whole-system scope of R-1. The retired-crypto internal
 review remains at `docs/audit-ed25519-additive-derivation.md` for historical context
 only. Re-pin the commit hash with the auditor before the engagement begins (the internal
-pre-audit above is at `2cfb7cc`; the current head `a25f425` includes the six VG fixes plus
-PRs #30/#31/#32 above)._
+pre-audit is at `2cfb7cc`; the current head `9b147bf` includes the six VG fixes, PRs
+#30/#31/#32, and the post-pin security + peg-out changes #36/#38/#43/#52/#54/#55/#56/#57
+tabled above)._
