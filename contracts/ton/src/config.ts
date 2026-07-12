@@ -64,7 +64,7 @@ export function loadDeployConfig(): DeployConfig {
     initialAdmin: opt("JETTON_INITIAL_ADMIN", ""),
 
     wviz: {
-      name: opt("WVIZ_NAME", "VIZ"),
+      name: opt("WVIZ_NAME", "Wrapped VIZ"),
       symbol: opt("WVIZ_SYMBOL", "wVIZ"),
       decimals: opt("WVIZ_DECIMALS", "3"),
       description: opt(

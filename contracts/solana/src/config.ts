@@ -41,7 +41,7 @@ export function loadSolanaDeployConfig(): SolanaDeployConfig {
     signers: list(opt("SOLANA_SIGNERS", "")).map((s) => new PublicKey(s)),
     threshold: int("SOLANA_THRESHOLD", 1),
     decimals: int("WVIZ_DECIMALS", 3),
-    name: opt("WVIZ_NAME", "VIZ"),
+    name: opt("WVIZ_NAME", "Wrapped VIZ"),
     symbol: opt("WVIZ_SYMBOL", "wVIZ"),
     uri: opt(
       "WVIZ_URI",

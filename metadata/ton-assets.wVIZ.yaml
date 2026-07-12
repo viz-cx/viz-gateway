@@ -14,7 +14,7 @@
 # Fields below mirror the canonical metadata/wviz.json (name/symbol) and a real
 # ton-assets entry (name, description, image, address, symbol, websites, social).
 
-name: VIZ
+name: Wrapped VIZ
 symbol: wVIZ
 description: "wVIZ is a 1:1 bridge claim on VIZ locked in the viz-gateway multisig. Each wVIZ is redeemable for exactly 1 VIZ on the VIZ blockchain."
 image: "https://raw.githubusercontent.com/viz-cx/viz-gateway/main/metadata/wviz.png"
