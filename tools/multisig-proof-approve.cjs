@@ -8,7 +8,13 @@
 //      (tries v4 + v5r1, uses whichever wallet is in the set),
 //   4. sends `approve`. When approvals reach the threshold the order self-executes.
 //
-// Env: TON_ENDPOINT, TON_API_KEY, ORDER_ADDRESS, MNEMONIC (24 words). SEND=1 to broadcast.
+// Env (accepts the real gateway runtime names so the operator's .env.mainnet is
+// directly reusable for the full run, with generic fallbacks):
+//   GRAM_ENDPOINT | TON_ENDPOINT      — TON node
+//   GRAM_API_KEY  | TON_API_KEY       — optional toncenter key
+//   GRAM_SIGNER_MNEMONIC | MNEMONIC   — this operator's 24-word wallet
+//   ORDER_ADDRESS                     — the proof order (proof-only, temporary)
+// SEND=1 to broadcast.
 const { TonClient, Address, WalletContractV4, WalletContractV5R1, Dictionary, loadMessageRelaxed, fromNano } = require("@ton/ton");
 const { mnemonicToPrivateKey } = require("@ton/crypto");
 const { Order } = require("../contracts/ton/dist/wrappers/Order.js");
@@ -40,14 +46,15 @@ function decodeOrder(orderCell) {
 }
 
 (async () => {
-  const endpoint = process.env.TON_ENDPOINT;
-  if (!endpoint) throw new Error("TON_ENDPOINT required");
+  const endpoint = process.env.GRAM_ENDPOINT || process.env.TON_ENDPOINT;
+  if (!endpoint) throw new Error("GRAM_ENDPOINT (or TON_ENDPOINT) required");
   const orderStr = process.env.ORDER_ADDRESS;
   if (!orderStr) throw new Error("ORDER_ADDRESS required (from step 1 output)");
-  const mnemonic = process.env.MNEMONIC;
-  if (!mnemonic) throw new Error("MNEMONIC (this operator's 24 words) required");
+  const mnemonic = process.env.GRAM_SIGNER_MNEMONIC || process.env.MNEMONIC;
+  if (!mnemonic) throw new Error("GRAM_SIGNER_MNEMONIC (or MNEMONIC) — this operator's 24 words — required");
 
-  const client = new TonClient({ endpoint, apiKey: process.env.TON_API_KEY || undefined, timeout: 30000 });
+  const apiKey = process.env.GRAM_API_KEY || process.env.TON_API_KEY || undefined;
+  const client = new TonClient({ endpoint, apiKey, timeout: 30000 });
   const orderAddr = Address.parse(orderStr);
   const order = client.open(Order.createFromAddress(orderAddr));
 
