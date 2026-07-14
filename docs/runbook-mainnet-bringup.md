@@ -196,8 +196,8 @@ selects the process — but keep it set so a container/entrypoint that dispatche
 `$SERVICE` also works.)
 
 Expect:
-- `[coordinator] listening on 0.0.0.0:8080; threshold=2-of-3; signers=3`
-  (GET `/health`).
+- `[coordinator] listening on 0.0.0.0:8080; threshold=2-of-3; awaiting 3 signer registration(s)`
+  (`GET /health` initially shows `registered=0, expected=3`; climbs as each signer starts).
 - `recon` reports per-chain `locked ≥ circulating + unswept`, `status=OK`. On an empty
   system this is `locked=0 circulating=0` for GRAM.
 
