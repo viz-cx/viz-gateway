@@ -31,6 +31,28 @@ interface ApproveRequest {
  */
 async function main(): Promise<void> {
   const cfg = loadConfig();
+
+  // Boot-time custody guard. A signer with NEITHER key can approve nothing: it can't
+  // propose/approve a TON peg-in mint (needs GRAM_SIGNER_MNEMONIC) nor sign a VIZ peg-out
+  // release (needs VIZ_SIGNING_WIF). Booting "healthy" in that state is a footgun — the
+  // daemon answers /approve and only fails at signing time, so a mis-sealed keystore looks
+  // fine until the first real transfer. Fail closed at start (seal both into FED_KEYSTORE;
+  // see docs/runbook-mainnet-bringup.md §3.3).
+  if (!cfg.viz.signingWif && !cfg.gram.signerMnemonic) {
+    throw new Error(
+      "signer has no signing key: set VIZ_SIGNING_WIF and GRAM_SIGNER_MNEMONIC (or a " +
+        "FED_KEYSTORE sealing both). A keyless signer can approve nothing.",
+    );
+  }
+  // Exactly one key present = direction-degraded (this operator can serve one leg only).
+  // Not fatal in an M-of-N where peers cover the other leg, but surface it loudly.
+  if (!cfg.viz.signingWif) {
+    console.warn("[signer] WARNING: VIZ_SIGNING_WIF unset — cannot sign VIZ peg-out releases (peg-out degraded).");
+  }
+  if (!cfg.gram.signerMnemonic) {
+    console.warn("[signer] WARNING: GRAM_SIGNER_MNEMONIC unset — cannot approve GRAM peg-in mints (peg-in degraded).");
+  }
+
   const accounts = buildGatewayAccounts(cfg);
   const store = createStore(cfg.storeUrl);
 
