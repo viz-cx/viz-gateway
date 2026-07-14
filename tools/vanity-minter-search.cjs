@@ -47,6 +47,12 @@ const content = buildWvizContent({
   image: env("WVIZ_IMAGE", ""),
 });
 const suffixes = env("VANITY_SUFFIXES", "_VIZ,_viz,wVIZ").split(",").map((s) => s.trim()).filter(Boolean);
+// Reject any address containing one of these chars anywhere (e.g. "-").
+const forbid = [...env("VANITY_FORBID", "")];
+// Reject these chars in the BODY (the address minus the matched suffix), so the
+// separator can appear in the suffix but nowhere else — e.g. VANITY_FORBID_BODY="_-"
+// with suffixes "_VIZ,-VIZ,_viz,-viz" => the sep before VIZ is the only _ or -.
+const forbidBody = [...env("VANITY_FORBID_BODY", "")];
 const outPath = env("VANITY_OUT", "contracts/ton/boc/minter-wviz-mainnet.data.boc");
 const maxTries = Number(env("VANITY_MAX", "200000000"));
 
@@ -82,7 +88,9 @@ for (let salt = 0; salt < maxTries && hits.length < wantCount; salt++) {
   const data = dataForSalt(salt);
   const addr = contractAddress(0, { code, data });
   const s = addr.toString(); // bounceable, urlSafe, mainnet => EQ…
-  if (suffixes.some((suf) => s.endsWith(suf))) {
+  const suf = suffixes.find((x) => s.endsWith(x));
+  const bodyOk = suf !== undefined && !forbidBody.some((c) => s.slice(0, -suf.length).includes(c));
+  if (suf !== undefined && bodyOk && !forbid.some((c) => s.includes(c))) {
     hits.push({ salt, addr: s, data });
     console.log(`[vanity]  ${addr.toString()}   salt=${salt}`);
   }
