@@ -82,6 +82,21 @@ match as sev-1). See `docs/AUDIT.md §F2` and `RUNBOOK.md §5 F2`.
 
 ---
 
+## 2b. Run every command from the repo root (relative paths)
+
+`.env.mainnet` uses **relative** paths — `FEDERATION_MANIFEST=./federation.json`,
+`STORE_URL=sqlite:./data/gateway.sqlite`, `FED_KEYSTORE=./keystore.mainnet.json`. Run
+all `npm run start:*` commands with the repo checkout as the working directory.
+
+> ⚠️ **Silent 1-of-1 hazard.** If `./federation.json` is not found (wrong CWD or a
+> missing file), `loadConfig` falls back to count-only synthesis and boots as **1-of-1
+> — no multisig protection**. It does not error. Your check that the real 2-of-3 loaded
+> is the boot line: a coordinator/signer MUST log `threshold=2-of-3`. **If you see
+> `threshold=1-of-1`, STOP** — the manifest was not found; fix the CWD/path before going
+> further (also re-confirmed at §5 step 4 via `/health`).
+
+---
+
 ## 3. Per-operator SIGNER box setup
 
 Do this on **each** operator's machine (op-1, op-2, op-3).
@@ -153,14 +168,26 @@ cp .env.mainnet.example .env.mainnet   # or reuse the op-1 file that already has
   unset on this box.
 
 ### 4.2 Run the five processes (each its own SERVICE)
+
+> **The processes do NOT auto-load `.env.mainnet`** (there is no dotenv). You must
+> inject the file into each process's environment — either via a process manager /
+> container `env_file`, or by prefixing the command as shown (same idiom as §3.4).
+> A bare `npm run start:*` boots on built-in defaults and fails closed on the missing
+> GRAM account — it does **not** silently run with wrong config.
+
 ```bash
-SERVICE=viz-watcher   npm run start:viz-watcher
-SERVICE=gram-watcher  npm run start:gram-watcher
-SERVICE=coordinator   npm run start:coordinator
-SERVICE=dispatcher    npm run start:dispatcher
-SERVICE=recon         npm run start:recon
+LOAD='env $(grep -v "^#" .env.mainnet | xargs)'   # inject .env.mainnet into the process
+
+eval "$LOAD" SERVICE=viz-watcher   npm run start:viz-watcher
+eval "$LOAD" SERVICE=gram-watcher  npm run start:gram-watcher
+eval "$LOAD" SERVICE=coordinator   npm run start:coordinator
+eval "$LOAD" SERVICE=dispatcher    npm run start:dispatcher
+eval "$LOAD" SERVICE=recon         npm run start:recon
 ```
-(Use a process manager / one container each; all read the same `.env.mainnet`.)
+(Run each under a process manager / one container each; all read the same
+`.env.mainnet`. `SERVICE=` is documentary for the npm path — the `start:*` script
+selects the process — but keep it set so a container/entrypoint that dispatches on
+`$SERVICE` also works.)
 
 Expect:
 - `[coordinator] listening on 0.0.0.0:8080; threshold=2-of-3; signers=3`
