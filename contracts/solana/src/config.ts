@@ -64,7 +64,10 @@ export function loadSolanaProgramAuthorityConfig(): SolanaProgramAuthorityConfig
     rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
     // Same program the lookup/scanner/signers already point at — one canonical env, not a new one.
     programId: opt("SOLANA_DEPOSIT_PROGRAM_ID", ""),
-    expectedMultisig: opt("SOLANA_UPGRADE_MULTISIG", ""),
+    // Trim once at load: the APPLY path builds `new PublicKey(expectedMultisig)` and does a raw
+    // string compare of the post-hand-off authority — untrimmed whitespace would throw
+    // "Non-base58 character" mid-hand-off instead of a clean verdict (issue #39).
+    expectedMultisig: opt("SOLANA_UPGRADE_MULTISIG", "").trim(),
     payer: loadPayer(opt("SOLANA_PAYER_SECRET", "")),
     apply: opt("APPLY", "0") === "1",
   };

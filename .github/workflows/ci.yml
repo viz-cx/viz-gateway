@@ -33,5 +33,7 @@ jobs:
       # BM1: the node:test unit suites (packages/*/test) use extensionless imports, so `node --test`
       # can't run them raw. Compile them via tsconfig.test.json to dist-test/, then run. The build
       # above already produced the dist/ the compiled tests resolve @gateway/* against.
+      # run-unit-tests.mjs discovers files recursively and fails loudly on zero matches (issue #39)
+      # so a broken outDir/glob can't silently no-op the whole tier while CI stays green.
       - name: Unit tests (node:test)
-        run: npx tsc -p tsconfig.test.json && node --test dist-test/packages/*/test/*.test.js
+        run: npx tsc -p tsconfig.test.json && node tools/run-unit-tests.mjs
