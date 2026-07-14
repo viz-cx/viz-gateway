@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { Address, beginCell, Cell, contractAddress, internal } from "@ton/core";
 import type { KeyPair } from "@ton/crypto";
 import { TonClient, WalletContractV4 } from "@ton/ton";
+import type { DeployerWallet } from "./wallet";
 
 /** Load a compiled contract code cell from a .boc file (built via Blueprint). */
 export function loadCodeBoc(path: string): Cell {
@@ -24,7 +25,7 @@ export function computeAddress(code: Cell, data: Cell): Address {
 export async function deployStateInit(params: {
   client: TonClient;
   keyPair: KeyPair;
-  wallet: WalletContractV4;
+  wallet: DeployerWallet;
   code: Cell;
   data: Cell;
   value: bigint; // nanoton to attach for deploy + storage
@@ -32,7 +33,9 @@ export async function deployStateInit(params: {
 }): Promise<Address> {
   const { client, keyPair, wallet, code, data, value, body } = params;
   const address = computeAddress(code, data);
-  const opened = client.open(wallet);
+  // Both V4 and V5R1 accept { seqno, secretKey, messages }; open() typing is
+  // pinned to one flavour but dispatch hits the real instance at runtime.
+  const opened = client.open(wallet as WalletContractV4);
   const seqno = await opened.getSeqno();
   await opened.sendTransfer({
     secretKey: keyPair.secretKey,
@@ -53,13 +56,13 @@ export async function deployStateInit(params: {
 export async function sendInternal(params: {
   client: TonClient;
   keyPair: KeyPair;
-  wallet: WalletContractV4;
+  wallet: DeployerWallet;
   to: Address;
   value: bigint;
   body: Cell;
 }): Promise<void> {
   const { client, keyPair, wallet, to, value, body } = params;
-  const opened = client.open(wallet);
+  const opened = client.open(wallet as WalletContractV4);
   const seqno = await opened.getSeqno();
   await opened.sendTransfer({
     secretKey: keyPair.secretKey,
