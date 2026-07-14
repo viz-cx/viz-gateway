@@ -5,6 +5,7 @@ dist/
 .env.*
 !.env.example
 !.env.e2e.example
+!.env.mainnet.example
 *.log
 data/
 *.sqlite

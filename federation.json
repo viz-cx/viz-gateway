@@ -1,0 +1,17 @@
+{
+  "chainId": "viz-gateway",
+  "n": 3,
+  "threshold": 2,
+  "_pairingUnconfirmed": "The vizPubkey<->operator pairing below is PROVISIONAL: vizPubkeys are listed in on-chain key_auths order (gram.gate active set), which need NOT match the op-1/2/3 order baked into the TON multisig signer array. tonPubkey holds each operator's mainnet v4/v5r1 WALLET ADDRESS (the public TON identity we have), not an ed25519 hex pubkey. Neither field is read on the sign/approve runtime path (the coordinator keys off operator id); both are used only by the rotation tooling. Confirm the true VIZ<->operator pairing with the operators and supply real ed25519 tonPubkeys BEFORE relying on this manifest for a rotation.",
+  "operators": [
+    { "id": "op-1", "vizPubkey": "VIZ66354NrsbxJgp8371cZYZRnqFEUS6ddz2GmkrUJGo6fq8uoasS", "tonPubkey": "EQAng1IaiIZDo0GFu7htyU-UZx-IPDHzC_YRObfoCui15kDk" },
+    { "id": "op-2", "vizPubkey": "VIZ7broTJHJjGtrtP4S2n5cmAV8sgAxm17P87o2yKhD2rBThHKfPV", "tonPubkey": "EQCk_GXtE7sJncngFk8CjXuXhwp99i3z5H0HcVnqdk5ZLuzz" },
+    { "id": "op-3", "vizPubkey": "VIZ81beKM3eDPMdQwNm1Nd65Pi9df5NY2MXbUypddhHg1TJM5gRBB", "tonPubkey": "EQAj-bGkyr-rmZJAEMaHUyjV_J7AJPNSVDbW6EK0UP8wOhR4" }
+  ],
+  "fees": {
+    "floorMilliViz": 10000,
+    "bps": 20,
+    "activationSurchargeMilliViz": { "SOLANA": 10000, "GRAM": 10000 },
+    "mintGasFloorMilliViz": { "SOLANA": 1000, "GRAM": 1000 }
+  }
+}
