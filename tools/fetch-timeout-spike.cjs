@@ -96,6 +96,7 @@ function configWiring() {
     "DISPATCHER_SUBMIT_TIMEOUT_MS",
     "DISPATCHER_SIGNING_TIMEOUT_MS",
     "FEDERATION_N",
+    "FEDERATION_MANIFEST",
   ];
   const saved = {};
   for (const k of KEYS) saved[k] = process.env[k];
@@ -105,10 +106,13 @@ function configWiring() {
       else process.env[k] = saved[k];
     }
   };
-  // A federation manifest is required to load; reuse the example if present, else skip the
-  // env portion gracefully (the socket tests above already cover the runtime behavior).
+  // These assertions exercise the count-only synthesis path (no manifest file), where
+  // FEDERATION_N governs the derived budget. Point FEDERATION_MANIFEST at a path that does
+  // NOT exist so the repo's real ./federation.json (the committed 2-of-3 mainnet manifest)
+  // does not shadow FEDERATION_N here — otherwise loadConfig reads n=3 and these break.
   try {
     for (const k of KEYS) delete process.env[k];
+    process.env.FEDERATION_MANIFEST = "./__fetch_timeout_spike_no_manifest__.json";
     process.env.FEDERATION_N = "1"; // pin the bootstrap size so the derived budget is deterministic
     const def = loadConfig();
     // Direction-aware defaults: PEG_IN wide (on-chain propose/approve), PEG_OUT tight (local sign).
@@ -148,7 +152,10 @@ function configWiring() {
     assert.strictEqual(pd.coordinator.signerApproveTimeoutMs.pegOut, 11000, "SIGNER_APPROVE_TIMEOUT_PEG_OUT_MS wins");
     console.log("[fetch-timeout] config defaults + env overrides OK");
   } catch (err) {
-    console.log(`[fetch-timeout] config wiring skipped (loadConfig needs a manifest): ${String(err).split("\n")[0]}`);
+    // Do NOT swallow: this section neutralizes the ambient manifest itself, so any
+    // throw here is a real config-wiring regression, not a missing-manifest skip.
+    restore();
+    throw err;
   } finally {
     restore();
   }
