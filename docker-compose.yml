@@ -32,6 +32,8 @@ services:
     environment:
       SERVICE: signer
       SIGNER_LISTEN: 0.0.0.0:8090
+      SIGNER_ADVERTISE_URL: http://signer:8090
+      COORDINATOR_URL: http://coordinator:8080
     restart: unless-stopped
     # Keep the signer off the public internet; expose only on the operator LAN.
     expose: ["8090"]
@@ -50,14 +52,13 @@ services:
   # For a solo / bootstrap operator the coordinator runs in the same stack, so
   # `docker compose up` is a complete working bridge. In a multi-operator
   # federation, run the coordinator separately (docker-compose.coordinator.yml)
-  # and point COORDINATOR_URL / SIGNER_ENDPOINTS across hosts.
+  # and point COORDINATOR_URL on each signer + each signer's SIGNER_ADVERTISE_URL.
   coordinator:
     image: viz-gateway:latest
     env_file: .env
     environment:
       SERVICE: coordinator
       COORDINATOR_LISTEN: 0.0.0.0:8080
-      SIGNER_ENDPOINTS: http://signer:8090
     restart: unless-stopped
     volumes:
       - gw-data:/app/data

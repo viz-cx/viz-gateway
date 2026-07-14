@@ -189,8 +189,9 @@ set. Note: `change_recovery_account` takes effect after VIZ's owner-recovery del
 `GRAM_ENDPOINT`/`GRAM_API_KEY`, `GRAM_MULTISIG_ADDRESS`,
 `GRAM_JETTON_MINTER_ADDRESS`, `GRAM_GATEWAY_JETTON_WALLET`,
 `GRAM_SIGNER_MNEMONIC` (your TON signer wallet), `FEDERATION_N=1`,
-`FEDERATION_THRESHOLD=1`, `SIGNER_ENDPOINTS=http://signer:8090`. Keep the fee/cap
-defaults (100 VIZ floor, 0.30%, 2,000 VIZ min; $500/$1k/$10k caps).
+`FEDERATION_THRESHOLD=1`. The solo signer self-registers via `SIGNER_ADVERTISE_URL` and
+`COORDINATOR_URL` (docker-compose sets these); the coordinator no longer takes `SIGNER_ENDPOINTS`.
+Keep the fee/cap defaults (100 VIZ floor, 0.30%, 2,000 VIZ min; $500/$1k/$10k caps).
 
 > **`VIZ_GATEWAY_ACCOUNT` is removed.** Replace it with the two per-chain variables
 > above. Both must be set; the gateway refuses to start with either missing or empty.
@@ -347,7 +348,8 @@ approve on-chain. Prereqs: `contracts/ton` built; five funded TON wallets.
    a TON peg-in unless its `GramApprover` is configured (minter + multisig + mnemonic).
 3. **Run the coordinator with NO `GRAM_SIGNER_MNEMONIC`** (it is keyless on TON and
    ignores it if set). It designates the **first** federation operator as proposer;
-   the harness orders `SIGNER_ENDPOINTS` op-1-first automatically. Driver:
+   each operator's signer self-registers via `SIGNER_ADVERTISE_URL` + `COORDINATOR_URL`.
+   Driver:
    `npm run e2e:federation:gram:live` runs criteria 1-3; criterion 4 (rotation) is
    gated on `FED_ROTATION_MODE=live` after the rotation ceremony (step 7).
 4. **Drive a peg-in** (send ≥ min VIZ to `viz-gateway` with the memo = a TON
