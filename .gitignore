@@ -21,3 +21,6 @@ docs/federation-keys.md
 docs/federation-ton-keys.md
 .worktrees/
 dist-test/
+
+# Local mainnet deployer secret — never commit
+mnemonics

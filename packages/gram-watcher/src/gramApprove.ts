@@ -1,4 +1,4 @@
-import { Address, TonClient, WalletContractV4, toNano } from "@ton/ton";
+import { Address, TonClient, WalletContractV4, WalletContractV5R1, toNano } from "@ton/ton";
 import { Multisig, Order } from "@gateway/contracts-ton";
 import type { GramMintProposal } from "@gateway/common";
 import { buildMintTransfer, mintOrderCell } from "./gramChain";
@@ -106,19 +106,39 @@ export class GramApprover implements GramApprovalClient {
       );
     }
 
-    // Derive THIS operator's wallet + signer index from its own mnemonic.
+    // Derive THIS operator's wallet + signer index from its own mnemonic. Operators
+    // may run either a v4 or a v5r1 (W5) wallet, and the multisig stores only the
+    // resolved address — so try both flavours and use whichever address is actually
+    // in the on-chain signer set. Keeps a mixed-wallet-version federation working
+    // (e.g. op-1 on W5, others on v4) without per-operator version config.
     const { publicKey, secretKey } = await keyPairFromMnemonic(this.mnemonic);
-    const wallet = WalletContractV4.create({ workchain: 0, publicKey: Buffer.from(publicKey) });
+    const pk = Buffer.from(publicKey);
+    const candidates = [
+      WalletContractV4.create({ workchain: 0, publicKey: pk }),
+      WalletContractV5R1.create({ workchain: 0, publicKey: pk }),
+    ];
     const md = await this.client.open(Multisig.createFromAddress(this.multisigAddr)).getMultisigData();
-    const myIdx = md.signers.findIndex((s) => s.equals(wallet.address));
-    if (myIdx < 0) {
+    let wallet: WalletContractV4 | WalletContractV5R1 | undefined;
+    let myIdx = -1;
+    for (const cand of candidates) {
+      const idx = md.signers.findIndex((s) => s.equals(cand.address));
+      if (idx >= 0) {
+        wallet = cand;
+        myIdx = idx;
+        break;
+      }
+    }
+    if (!wallet || myIdx < 0) {
       throw new Error(
-        `TON approve: operator wallet ${wallet.address.toString()} is not in the multisig signer set`,
+        `TON approve: operator wallet (v4 ${candidates[0]!.address.toString()} / ` +
+          `v5r1 ${candidates[1]!.address.toString()}) is not in the multisig signer set`,
       );
     }
 
     const orderAddr = Address.parse(proposal.orderAddr);
-    const openedWallet = this.client.open(wallet);
+    // Union type: open() typing is pinned to one flavour but runtime dispatch hits
+    // the resolved instance; both expose the same sender()/send methods we use.
+    const openedWallet = this.client.open(wallet as WalletContractV4);
     const sender = openedWallet.sender(Buffer.from(secretKey));
 
     // --- Propose (only the designated proposer, only if the order is absent) ---
