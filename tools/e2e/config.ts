@@ -85,6 +85,12 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     // Federation: solo 1-of-1
     FEDERATION_N: "1",
     FEDERATION_THRESHOLD: "1",
+    // Neutralize the repo's committed ./federation.json (the real 2-of-3 mainnet
+    // manifest) so the harness's FEDERATION_N/THRESHOLD govern sizing for BOTH the
+    // parent and every spawned child (this shared env is spread into each). A manifest
+    // file, when present, wins over FEDERATION_N — point at a path that does not exist
+    // so loadConfig falls back to count-only synthesis. Overridden per federation below.
+    FEDERATION_MANIFEST: "./__e2e_no_manifest__.json",
     OPERATOR_ID: "op-1",
     // Persistent store across runs (matches production) so idempotency memory
     // survives: a peg-out burn already released on a prior run is NOT re-released
