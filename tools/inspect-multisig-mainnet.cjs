@@ -1,7 +1,12 @@
 // Read-only inspection of the mainnet 2-of-3 multisig: balance + get_multisig_data.
+// Env: GRAM_ENDPOINT | TON_ENDPOINT, GRAM_API_KEY | TON_API_KEY (so an operator's
+// runtime .env.mainnet is reused verbatim; mirrors multisig-proof-{submit,approve}).
 const { TonClient, Address, Dictionary, fromNano } = require("@ton/ton");
 (async () => {
-  const c = new TonClient({ endpoint: process.env.TON_ENDPOINT, apiKey: process.env.TON_API_KEY || undefined });
+  const endpoint = process.env.GRAM_ENDPOINT || process.env.TON_ENDPOINT;
+  if (!endpoint) throw new Error("GRAM_ENDPOINT (or TON_ENDPOINT) required");
+  const apiKey = process.env.GRAM_API_KEY || process.env.TON_API_KEY || undefined;
+  const c = new TonClient({ endpoint, apiKey });
   const ms = Address.parse(process.env.MS || "EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0");
   const state = await c.getContractState(ms);
   console.log("address   :", ms.toString());
