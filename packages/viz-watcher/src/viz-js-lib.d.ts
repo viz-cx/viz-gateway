@@ -127,8 +127,17 @@ declare module "viz-js-lib/lib/auth/ecc" {
     /** The address-prefixed public key string, e.g. "VIZ65QRp…" — matches key_auths. */
     toString(addressPrefix?: string): string;
   }
+  export class PrivateKey {
+    static fromWif(wif: string): PrivateKey;
+    static fromSeed(seed: string): PrivateKey;
+    toWif(): string;
+    toPublicKey(): PublicKey;
+  }
   export class Signature {
     static fromHex(hex: string): Signature;
+    /** Sign a buffer (hashes sha256 internally). */
+    static signBuffer(buffer: Buffer, privateKey: PrivateKey): Signature;
+    toHex(): string;
     /** Recover the signing public key from the ORIGINAL buffer (hashes sha256 internally). */
     recoverPublicKeyFromBuffer(buffer: Buffer): PublicKey;
   }
