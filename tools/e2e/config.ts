@@ -1,3 +1,6 @@
+import { writeFileSync, mkdirSync } from "node:fs";
+import viz from "viz-js-lib";
+
 export interface E2eConfig {
   chain: "gram" | "solana";
   runId: string;
@@ -88,9 +91,17 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     // Neutralize the repo's committed ./federation.json (the real 2-of-3 mainnet
     // manifest) so the harness's FEDERATION_N/THRESHOLD govern sizing for BOTH the
     // parent and every spawned child (this shared env is spread into each). A manifest
-    // file, when present, wins over FEDERATION_N — point at a path that does not exist
-    // so loadConfig falls back to count-only synthesis. Overridden per federation below.
-    FEDERATION_MANIFEST: "./__e2e_no_manifest__.json",
+    // file, when present, wins over FEDERATION_N — write a real 1-of-1 solo manifest
+    // from the gateway WIF so SignerRegistry.idOfPubkey is populated and register()
+    // succeeds. Overridden per federation below.
+    FEDERATION_MANIFEST: (() => {
+      const vizPubkey = viz.auth.wifToPublic(cfg.viz.gatewayWif);
+      const manifest = { n: 1, threshold: 1, operators: [{ id: "op-1", vizPubkey, tonPubkey: "", solanaPubkey: "" }] };
+      mkdirSync("./data", { recursive: true });
+      const path = `./data/e2e-manifest-solo-${cfg.runId}.json`;
+      writeFileSync(path, JSON.stringify(manifest));
+      return path;
+    })(),
     OPERATOR_ID: "op-1",
     // Persistent store across runs (matches production) so idempotency memory
     // survives: a peg-out burn already released on a prior run is NOT re-released
