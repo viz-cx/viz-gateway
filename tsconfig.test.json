@@ -6,7 +6,7 @@
   // composite/declaration), so it never touches the shipped dist/ outputs.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "composite": false,
     "declaration": false,
     "declarationMap": false,
