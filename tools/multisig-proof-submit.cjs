@@ -9,7 +9,8 @@
 // This proves the full propose→approve→execute pipeline WITHOUT touching the
 // wVIZ minter, so we can safely gate the one-way set-minter-admin handoff on it.
 //
-// Env: TON_ENDPOINT, TON_API_KEY, DEPLOYER_MNEMONIC (op-1, 24 words),
+// Env: GRAM_ENDPOINT | TON_ENDPOINT, GRAM_API_KEY | TON_API_KEY,
+//      DEPLOYER_MNEMONIC (op-1, 24 words),
 //      MULTISIG_ADDRESS (default = mainnet), PROOF_TO (default op-1),
 //      PROOF_AMOUNT (default 0.02), ORDER_VALUE (default 0.1).
 const { TonClient, Address, WalletContractV4, WalletContractV5R1, toNano, fromNano, internal, SendMode } = require("@ton/ton");
@@ -20,11 +21,12 @@ const DEFAULT_MS = "EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const endpoint = process.env.TON_ENDPOINT;
-  if (!endpoint) throw new Error("TON_ENDPOINT required");
+  const endpoint = process.env.GRAM_ENDPOINT || process.env.TON_ENDPOINT;
+  if (!endpoint) throw new Error("GRAM_ENDPOINT (or TON_ENDPOINT) required");
   const mnemonic = process.env.DEPLOYER_MNEMONIC;
   if (!mnemonic) throw new Error("DEPLOYER_MNEMONIC (op-1, 24 words) required");
-  const client = new TonClient({ endpoint, apiKey: process.env.TON_API_KEY || undefined, timeout: 30000 });
+  const apiKey = process.env.GRAM_API_KEY || process.env.TON_API_KEY || undefined;
+  const client = new TonClient({ endpoint, apiKey, timeout: 30000 });
   const multisigAddr = Address.parse(process.env.MULTISIG_ADDRESS || DEFAULT_MS);
 
   const kp = await mnemonicToPrivateKey(mnemonic.trim().split(/\s+/));
