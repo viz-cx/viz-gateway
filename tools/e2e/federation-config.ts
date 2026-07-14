@@ -77,6 +77,7 @@ export function buildFederationRunEnv(
       FEDERATION_N: String(cfg.n),
       FEDERATION_THRESHOLD: String(cfg.threshold),
       SIGNER_LISTEN: `127.0.0.1:${port}`,
+      SIGNER_ADVERTISE_URL: `http://127.0.0.1:${port}`,
     };
     if (op.solanaSecret) env["SOLANA_SIGNER_SECRET"] = op.solanaSecret;
     // Each operator approves GRAM peg-ins from its OWN wallet: override the shared
@@ -89,7 +90,6 @@ export function buildFederationRunEnv(
     ...sharedEnv,
     FEDERATION_N: String(cfg.n),
     FEDERATION_THRESHOLD: String(cfg.threshold),
-    // SIGNER_ENDPOINTS is assembled by launchFederationStack from signerSpecs.
   };
 
   return { signerSpecs, coordinatorEnv };

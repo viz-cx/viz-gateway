@@ -111,9 +111,9 @@ async function main() {
   const store = createStore(baseEnv.STORE_URL!);
   const logDir = `tools/e2e/logs/fed-ton-live-${cfg.runId}`;
 
-  // The coordinator is KEYLESS on TON: strip any TON mnemonic from its env. It
-  // designates the FIRST federation operator as proposer, so signerSpecs order
-  // (op-1 first) puts the proposer's endpoint first in SIGNER_ENDPOINTS.
+  // The coordinator is KEYLESS on TON: strip any TON mnemonic from its env.
+  // (op-1 first) — the coordinator orders signers by federation operator order, so the
+  // designated proposer (operators[0]) is contacted first once it has registered.
   const { signerSpecs, coordinatorEnv } = buildFederationRunEnv(fedCfg, {
     ...baseEnv,
     COORDINATOR_LISTEN: "127.0.0.1:8080",
