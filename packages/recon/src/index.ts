@@ -93,16 +93,29 @@ async function main(): Promise<void> {
   // unchecked while circulating wVIZ still exists. Fail closed: pause the whole gateway + alert.
   // Fatal at startup (refuse to run half-covered); in the loop, pause+alert but keep monitoring the
   // covered chains rather than crashing recon entirely (which would stop all checking).
+  // Dedup the coverage alert: the loop re-checks every tick, so without this an uncovered
+  // active chain would page staff + re-log CRITICAL on every interval (alert storm) until
+  // fixed. Alert once on transition into an uncovered state (or when the uncovered set
+  // changes), and reset when coverage is restored so a later regression re-alerts. The
+  // pause is left as-is: store.pause() is idempotent and must persist while uncovered.
+  let lastCoverageAlert = "";
   const enforceActiveChainCoverage = async (fatal: boolean): Promise<void> => {
     const uncovered = uncoveredActiveChains(await store.activeRemoteChains(), coveredChains);
-    if (uncovered.length === 0) return;
+    if (uncovered.length === 0) {
+      lastCoverageAlert = "";
+      return;
+    }
     const reason =
       `[recon] active chain(s) [${uncovered.join(",")}] have minted wVIZ but are not covered by recon ` +
       `(covered: [${[...coveredChains].join(",")}]). A chain with live circulating wVIZ must never drop out ` +
       `of recon — restore its config (GRAM_JETTON_MINTER_ADDRESS / SOLANA_WVIZ_MINT).`;
     await store.pause(reason);
-    console.error(`[recon] CRITICAL: ${reason}`);
-    notifyStaff("recon", reason, { uncovered, covered: [...coveredChains] });
+    const signature = [...uncovered].sort().join(",");
+    if (signature !== lastCoverageAlert) {
+      lastCoverageAlert = signature;
+      console.error(`[recon] CRITICAL: ${reason}`);
+      notifyStaff("recon", reason, { uncovered, covered: [...coveredChains] });
+    }
     if (fatal) throw new Error(reason);
   };
   await enforceActiveChainCoverage(true);
