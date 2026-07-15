@@ -18,6 +18,7 @@ import { KeyedSigner } from "./keyedSigner";
 import { routeApproval } from "./routeApproval";
 import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
 import { startRegisterLoop } from "./register";
+import { resolveOperatorId } from "./resolveOperatorId";
 
 interface ApproveRequest {
   action: Record<string, unknown>;
@@ -46,6 +47,11 @@ async function main(): Promise<void> {
   if (!cfg.viz.signingWif) {
     throw new Error("VIZ_SIGNING_WIF is required to self-register (the challenge is signed with the operator's VIZ key).");
   }
+
+  // This box's operator slot is DERIVED from its VIZ key (looked up in federation.json),
+  // not hand-set — the key is the identity, so an operator never has to know or type their
+  // slot. OPERATOR_ID remains optional + advisory (warns + is overridden if it disagrees).
+  const operatorId = resolveOperatorId(cfg.viz.signingWif, cfg.federation.operators, process.env.OPERATOR_ID);
 
   // Boot-time custody guard. A signer with NEITHER key can approve nothing: it can't
   // propose/approve a TON peg-in mint (needs GRAM_SIGNER_MNEMONIC) nor sign a VIZ peg-out
@@ -162,7 +168,7 @@ async function main(): Promise<void> {
       : null;
 
   const signer = new KeyedSigner(
-    cfg.operatorId,
+    operatorId,
     cfg.viz.signingWif,
     cfg.gram.signerMnemonic,
     cfg.fees,
@@ -213,11 +219,11 @@ async function main(): Promise<void> {
   let stopRegister: (() => void) | undefined;
   server.listen(port, host, () => {
     console.log(
-      `[signer] operator=${cfg.operatorId} listening on ${host}:${port} (federation ${cfg.federation.threshold}-of-${cfg.federation.n})`,
+      `[signer] operator=${operatorId} listening on ${host}:${port} (federation ${cfg.federation.threshold}-of-${cfg.federation.n})`,
     );
     stopRegister = startRegisterLoop({
       coordinatorUrl: cfg.coordinator.url,
-      operatorId: cfg.operatorId,
+      operatorId,
       advertiseUrl: cfg.signerAdvertiseUrl,
       wif: cfg.viz.signingWif,
       heartbeatMs: cfg.registration.heartbeatMs,

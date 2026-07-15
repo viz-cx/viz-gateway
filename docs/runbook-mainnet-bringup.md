@@ -27,18 +27,19 @@ accounts): `VIZ66354Nrsb…`, `VIZ7broTJHJj…`, `VIZ81beKM3eD…`.
 Operator TON signer wallets (op-1/2/3, order baked into the multisig address):
 `EQAng1Ia…`, `EQCk_GXt…`, `EQAj-bGk…`.
 
-> ⚠️ **VIZ↔operator pairing in `federation.json` is provisional but runtime-enforced.**
-> The on-chain VIZ `key_auths` order need not match the op-1/2/3 TON signer order, so the
-> `op-N` labels here are a best guess. As of PR #71 the coordinator's `SignerRegistry` is
-> **key-anchored**: at registration it recovers each signer's VIZ key from the challenge
-> signature and requires the operator id that key is labeled for in `federation.json` to
-> equal that signer's `OPERATOR_ID`. A wrong pairing therefore does **not** fail silently —
-> the affected signer is rejected loudly at bring-up (`registration key mismatch: this box
-> claims OPERATOR_ID 'op-N' but its VIZ key is labeled 'op-M'`). Fix it by correcting either
-> `OPERATOR_ID` on that box or the manifest pairing. You need not pre-confirm the pairing to
-> launch safely, but until it is correct the affected operator **cannot register**, so you
-> cannot reach threshold. The rotation tooling likewise depends on the pairing — confirm the
-> true VIZ↔operator↔TON-wallet mapping with the operators.
+> ⚠️ **VIZ↔operator pairing in `federation.json` is provisional; the op-N labels here are a
+> best guess.** The on-chain VIZ `key_auths` order need not match the op-1/2/3 TON signer
+> order. Each signer's slot is **derived from its VIZ key**, not hand-set: at boot the signer
+> looks up its own pubkey in `federation.json` to find its `op-N`, and the coordinator's
+> key-anchored `SignerRegistry` independently confirms it at registration. So an operator
+> never sets `OPERATOR_ID` (it's optional + advisory — supplied-but-wrong just warns and is
+> overridden by the key). A key that isn't in the manifest at all fails loudly and closed at
+> bring-up (`VIZ signing key (VIZ…) is not in federation.json's operator set`) — nothing
+> silent. **What auto-derivation does *not* catch** is the manifest labeling the *wrong human*
+> under a slot (both the label and your expectation come from the same guess): the signer will
+> happily register under whatever slot its key is labeled for. So after each signer registers,
+> confirm the `op-N` it logged matches the operator you expect. The rotation tooling likewise
+> depends on the pairing — confirm the true VIZ↔operator↔TON-wallet mapping with the operators.
 
 ---
 
@@ -120,7 +121,9 @@ npm ci && npm run build
 cp .env.mainnet.example .env.mainnet
 ```
 Fill it in:
-- `SERVICE=signer`, `OPERATOR_ID=op-N` (your slot — must match `federation.json`).
+- `SERVICE=signer`. (No `OPERATOR_ID` needed — the signer derives its slot from your VIZ
+  key via `federation.json`. Set it only to assert a slot; a wrong value warns and is
+  overridden by the key.)
 - `SIGNER_LISTEN=0.0.0.0:8090` (bind so the coordinator can reach `/approve`; put it
   behind mTLS/VPN — it is an authenticated-by-network surface).
 - `VIZ_NODE_URL` = **your own** VIZ node (F2).

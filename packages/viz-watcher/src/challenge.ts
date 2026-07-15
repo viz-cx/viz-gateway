@@ -13,6 +13,12 @@ export function challengeMessage(operatorId: string, url: string, nonce: string)
   return `${DOMAIN}\n${operatorId}\n${url}\n${nonce}`;
 }
 
+/** Derive the VIZ public key ("VIZ…", matching key_auths) that a WIF signs for. */
+export function pubkeyFromWif(wif: string): string {
+  if (!wif) throw new Error("VIZ signing key (WIF) not set; cannot derive public key");
+  return PrivateKey.fromWif(wif).toPublicKey().toString();
+}
+
 /** Sign the challenge with the operator's VIZ WIF; returns a hex signature. */
 export function signChallenge(operatorId: string, url: string, nonce: string, wif: string): string {
   if (!wif) throw new Error("VIZ signing key (WIF) not set; cannot sign registration challenge");

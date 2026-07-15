@@ -5,7 +5,6 @@ We're doing the first live mainnet smoke round-trip (small value). All on-chain 
 *The whole point of 2-of-3 is that your signer runs on YOUR hardware with YOUR keys and YOUR RPC nodes — never mine.* If your signer points at my nodes or I hold your keys, the multisig is fake. Please keep it independent.
 
 *Repo:* `https://github.com/viz-cx/viz-gateway`
-*You are:* `op-N` ← I'll tell you your slot (op-2 or op-3).
 *You need:*
 - Your *VIZ active WIF* (one of the three keys on `gram.gate`) and your *24-word TON mnemonic* (your multisig signer wallet).
 - Your *own VIZ node URL* and *own toncenter (TON) API key*.
@@ -34,7 +33,6 @@ It asks for a passphrase (you'll re-enter it when the signer starts). The mnemon
 *3. Create `.env.mainnet` in the repo root.* Fill in the `<...>` values; the addresses below are public and fixed — copy them verbatim:
 ```
 SERVICE=signer
-OPERATOR_ID=op-N                       # ← your slot (op-2 or op-3)
 SIGNER_LISTEN=0.0.0.0:8090             # bind so I can reach /approve (put behind VPN/mTLS)
 SIGNER_ADVERTISE_URL=http://<your-host>:8090   # the URL I can reach you at
 COORDINATOR_URL=<coordinator URL I send you>   # e.g. http://coord-host:8080
@@ -61,15 +59,15 @@ env $(grep -v '^#' .env.mainnet | xargs) npm run start:signer
 ```
 Enter your keystore passphrase when prompted.
 
-It should print:
+It should print (`op-N` = the slot it worked out from *your* VIZ key — you don't set it):
 ```
 [signer] operator=op-N listening on 0.0.0.0:8090 (federation 2-of-3)
 ```
-and self-register with me within ~20s. I'll confirm on my side that `registered` climbed and I see `registered op-N -> http://<your-host>:8090`.
+and self-register with me within ~20s. I'll confirm on my side that `registered` climbed and I see `registered op-N -> http://<your-host>:8090`. Tell me which `op-N` it printed so we can double-check the labels match what I expect.
 
 ---
 
-⚠️ *If you see* `registration key mismatch: this box claims OPERATOR_ID 'op-N' but its VIZ key is labeled 'op-M'` *— stop and ping me.* It means the VIZ-key↔operator labels in `federation.json` need a swap (I'll fix `OPERATOR_ID` or the manifest). It's a loud, safe failure — nothing is lost.
+⚠️ *If it exits with* `VIZ signing key (VIZ…) is not in federation.json's operator set` *— stop and ping me.* It means the key you sealed isn't one of the three in the manifest (wrong key sealed, or the manifest needs your real pubkey). Loud, safe failure — nothing is lost, nothing signed.
 
 *Once all three signers show registered,* I'll run a tiny peg-in (VIZ → `gram.gate`) and peg-out (burn wVIZ) and we'll confirm the mint/release + recon. Then a couple of quick drills.
 
