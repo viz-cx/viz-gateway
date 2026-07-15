@@ -19,7 +19,7 @@ gateway on mainnet: one coordinator box plus one signer daemon per operator.
 | wVIZ Jetton minter | `EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ` | admin = multisig, mintable, supply 0 |
 | gateway jetton wallet | `EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy` | derived; watched for peg-out burns |
 | `gram.gate` (GRAM backing) | VIZ active+master **2-of-3** | 0 VIZ (fills from peg-ins) |
-| `fees.gate` (swept fees) | VIZ active+master **2-of-3** | 60 VIZ |
+| `fees.gate` (swept fees) | VIZ active+master **2-of-3** | 70 VIZ |
 | `solana.gate` (dormant) | VIZ active+master **2-of-3** | 0 VIZ (Phase 2) |
 
 Operator VIZ keyset (weight 1 each, threshold 2 — the same set on all three gate
@@ -27,10 +27,18 @@ accounts): `VIZ66354Nrsb…`, `VIZ7broTJHJj…`, `VIZ81beKM3eD…`.
 Operator TON signer wallets (op-1/2/3, order baked into the multisig address):
 `EQAng1Ia…`, `EQCk_GXt…`, `EQAj-bGk…`.
 
-> ⚠️ **VIZ↔operator pairing is provisional in `federation.json`.** The on-chain VIZ
-> `key_auths` order need not match the op-1/2/3 TON signer order. The runtime does
-> **not** depend on this (the coordinator keys off operator **id**), but the rotation
-> tooling does — confirm the true pairing with the operators before any rotation.
+> ⚠️ **VIZ↔operator pairing in `federation.json` is provisional but runtime-enforced.**
+> The on-chain VIZ `key_auths` order need not match the op-1/2/3 TON signer order, so the
+> `op-N` labels here are a best guess. As of PR #71 the coordinator's `SignerRegistry` is
+> **key-anchored**: at registration it recovers each signer's VIZ key from the challenge
+> signature and requires the operator id that key is labeled for in `federation.json` to
+> equal that signer's `OPERATOR_ID`. A wrong pairing therefore does **not** fail silently —
+> the affected signer is rejected loudly at bring-up (`registration key mismatch: this box
+> claims OPERATOR_ID 'op-N' but its VIZ key is labeled 'op-M'`). Fix it by correcting either
+> `OPERATOR_ID` on that box or the manifest pairing. You need not pre-confirm the pairing to
+> launch safely, but until it is correct the affected operator **cannot register**, so you
+> cannot reach threshold. The rotation tooling likewise depends on the pairing — confirm the
+> true VIZ↔operator↔TON-wallet mapping with the operators.
 
 ---
 
@@ -103,7 +111,7 @@ Do this on **each** operator's machine (op-1, op-2, op-3).
 
 ### 3.1 Checkout + build
 ```bash
-git clone <repo> && cd viz-gateway
+git clone https://github.com/viz-cx/viz-gateway.git && cd viz-gateway
 npm ci && npm run build
 ```
 
