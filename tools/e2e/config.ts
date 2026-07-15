@@ -95,7 +95,11 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     // from the gateway WIF so SignerRegistry.idOfPubkey is populated and register()
     // succeeds. Overridden per federation below.
     FEDERATION_MANIFEST: (() => {
-      const vizPubkey = viz.auth.wifToPublic(cfg.viz.gatewayWif);
+      // Guard: spike/test contexts may supply a placeholder WIF that fails base58 decode.
+      // With vizPubkey="" the SignerRegistry rejects all registrations (correct fail-closed
+      // behaviour); real e2e runs always supply a valid WIF so this branch is never taken.
+      let vizPubkey = "";
+      try { vizPubkey = viz.auth.wifToPublic(cfg.viz.gatewayWif); } catch { /* placeholder WIF */ }
       const manifest = { n: 1, threshold: 1, operators: [{ id: "op-1", vizPubkey, tonPubkey: "", solanaPubkey: "" }] };
       mkdirSync("./data", { recursive: true });
       const path = `./data/e2e-manifest-solo-${cfg.runId}.json`;
