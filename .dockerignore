@@ -1,0 +1,30 @@
+# Keep the build context lean and — critically — keep SECRETS out of the image.
+# The Dockerfile COPYs whole source dirs (packages/ contracts/ setup-viz/ tools/) plus
+# federation.json; everything below is excluded from what the daemon ever sees.
+
+# Dependencies + build output: rebuilt inside the image (npm ci + npm run build).
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+
+# Secrets — NEVER bake into an image. Keys live in a sealed keystore mounted at runtime.
+.env
+.env.*
+keystore*.json
+*.wif
+mnemonics
+
+# Local runtime state (sqlite store, rotated logs) — provided by the mounted volume.
+data
+**/*.sqlite
+**/*.sqlite-*
+
+# VCS + tooling noise.
+.git
+.gitignore
+.github
+.kamal
+coverage
+*.log
+.DS_Store

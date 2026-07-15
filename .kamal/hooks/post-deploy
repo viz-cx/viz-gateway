@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Attach this app's freshly-deployed containers to platform_net so the coordinator↔signer
+# hop works. The shared mongo/postgres live on platform_net, but this gateway uses NEITHER —
+# the network is needed purely so the KEYLESS coordinator (web role) can reach the KEYED
+# signer's /approve endpoint at the stable private alias `signer-op1`.
+#
+# Container names are version-suffixed and not stable DNS targets, so:
+#   - coordinator app: attach all roles to platform_net (only `web` strictly needs it;
+#     attaching the workers too is harmless).
+#   - signer app:      attach with `--alias signer-op1` so SIGNER_ADVERTISE_URL resolves.
+#
+# Kamal runs hooks LOCALLY, so we SSH to each host. Kamal 2 hook env: KAMAL_SERVICE /
+# KAMAL_VERSION / KAMAL_HOSTS. KAMAL_ROLE is unreliable for a multi-role deploy, so we
+# discover the just-deployed containers by name (service prefix) + version suffix instead
+# of reconstructing exact names.
+set -euo pipefail
+
+alias_args=""
+if [ "${KAMAL_SERVICE}" = "viz-gateway-signer" ]; then
+  alias_args="--alias signer-op1"
+fi
+
+IFS=',' read -ra hosts <<< "${KAMAL_HOSTS:?}"
+for host in "${hosts[@]}"; do
+  # deploy is in the docker group (no sudo); ssh port 666 per inventory.yml.
+  # Re-attach is idempotent (|| true swallows "already exists").
+  ssh -p 666 "deploy@${host}" bash -s -- "${KAMAL_SERVICE}" "${KAMAL_VERSION}" "${alias_args}" <<'REMOTE'
+set -euo pipefail
+# $3 (alias_args) is empty for the coordinator; SSH joins argv into one string and the
+# remote shell drops a trailing empty word, so guard with ${3:-} rather than $3 under set -u.
+service="$1"; version="$2"; alias_args="${3:-}"
+for c in $(docker ps --format '{{.Names}}' --filter "name=${service}" | grep -F "${version}" || true); do
+  # shellcheck disable=SC2086  # alias_args must word-split into flags.
+  docker network connect ${alias_args} platform_net "$c" 2>/dev/null || true
+done
+REMOTE
+done
