@@ -14,7 +14,7 @@ import {
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
-import type { Broadcaster, BuildResult, Proposal, SignerClient } from "./orchestrator";
+import type { Broadcaster, BuildContext, BuildResult, Proposal, SignerClient } from "./orchestrator";
 
 /** Calls an operator's signer /approve endpoint over HTTP (push model). */
 export class HttpSignerClient implements SignerClient {
@@ -62,7 +62,7 @@ export class VizReleaseBroadcaster implements Broadcaster {
     private readonly store: IdempotencyStore,
   ) {}
 
-  async buildProposal(action: CanonicalAction): Promise<BuildResult> {
+  async buildProposal(action: CanonicalAction, _ctx: BuildContext): Promise<BuildResult> {
     if (!action.remoteChain) throw new Error(`release ${action.id} missing remoteChain — cannot select backing account`);
     const from = this.accounts.accountFor(action.remoteChain);
     // PEG_OUT / FEE_SWEEP / REFUND are all fee-free VIZ releases.
@@ -115,11 +115,20 @@ export class GramMintBroadcaster implements Broadcaster {
     private readonly chain: GramHttpChain,
     private readonly fees: GatewayFeeConfig,
     private readonly store: IdempotencyStore,
-    /** Operator designated to send `new_order` (single-proposer seqno ordering). */
-    private readonly proposerOperatorId: string,
   ) {}
 
-  async buildProposal(action: CanonicalAction): Promise<BuildResult> {
+  async buildProposal(action: CanonicalAction, ctx: BuildContext): Promise<BuildResult> {
+    // Designated proposer = the FIRST LIVE operator (proposer-first; see BuildContext).
+    // Dynamic, not a boot-pinned operators[0]: any signer can open the order (the seqno
+    // is the multisig's global counter, independent of who proposes), so as long as ONE
+    // live operator proposes and the rest approve, the mint proceeds. Pinning operators[0]
+    // deadlocked the whole mint leg whenever that one operator was offline, even with the
+    // threshold otherwise met. Exactly one proposer per action is still guaranteed: only
+    // the signer whose id matches proposal.proposerOperatorId sends new_order.
+    const proposerOperatorId = ctx.liveOperatorIds[0];
+    if (!proposerOperatorId) {
+      throw new Error(`PEG_IN ${action.id}: no live operator available to propose the TON mint order`);
+    }
     // Read destination provisioning ONCE and pin it; compute NET from gross+policy.
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
     const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "GRAM"));
@@ -156,7 +165,7 @@ export class GramMintBroadcaster implements Broadcaster {
       destProvisioned,
       orderHashHex,
       actionId: action.id,
-      proposerOperatorId: this.proposerOperatorId,
+      proposerOperatorId,
     };
     return { proposal, feeMilliViz: q.b.fee };
   }
@@ -204,7 +213,7 @@ export class SolanaMintBroadcaster implements Broadcaster {
     private readonly store: IdempotencyStore,
   ) {}
 
-  async buildProposal(action: CanonicalAction): Promise<BuildResult> {
+  async buildProposal(action: CanonicalAction, _ctx: BuildContext): Promise<BuildResult> {
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
     const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "SOLANA"));
     if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
