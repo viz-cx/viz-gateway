@@ -163,12 +163,12 @@ export class KeyedSigner implements Signer {
     // pinned destProvisioned flag for the activation surcharge.
     this.assertNet(action, "GRAM", proposal.destProvisioned, proposal.amountMilliViz);
     if (!this.gramApprover) throw new Error("GRAM approver not configured on this signer; refusing to approve");
-    // On-chain effect: propose (if this operator is the designated proposer and the
-    // order is absent) or approve, from THIS operator's own wallet. The approver
-    // re-derives the order cell and asserts its hash matches proposal.orderHashHex,
-    // binding the on-chain action to the recipient/amount validated above.
-    const isProposer = proposal.proposerOperatorId === this.operatorId;
-    const receipt = await this.gramApprover.approveMint(proposal, isProposer);
+    // On-chain effect from THIS operator's own wallet: open the order if it is still
+    // absent when we are asked (no single designated proposer — the role fails over across
+    // live operators), otherwise approve it. The approver re-derives the order cell and
+    // asserts its hash matches proposal.orderHashHex, binding the on-chain action to the
+    // recipient/amount validated above.
+    const receipt = await this.gramApprover.approveMint(proposal);
     return { actionId: action.id, operatorId: this.operatorId, signature: encodeReceipt(receipt) };
   }
 

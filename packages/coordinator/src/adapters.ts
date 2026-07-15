@@ -115,8 +115,6 @@ export class GramMintBroadcaster implements Broadcaster {
     private readonly chain: GramHttpChain,
     private readonly fees: GatewayFeeConfig,
     private readonly store: IdempotencyStore,
-    /** Operator designated to send `new_order` (single-proposer seqno ordering). */
-    private readonly proposerOperatorId: string,
   ) {}
 
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
@@ -156,7 +154,6 @@ export class GramMintBroadcaster implements Broadcaster {
       destProvisioned,
       orderHashHex,
       actionId: action.id,
-      proposerOperatorId: this.proposerOperatorId,
     };
     return { proposal, feeMilliViz: q.b.fee };
   }

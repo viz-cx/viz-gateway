@@ -37,8 +37,10 @@ async function main(): Promise<void> {
     cfg.registration.nonceTtlMs,
   );
   // Built fresh per action from the LIVE registry so a just-registered / just-expired
-  // operator is reflected immediately, and always in federation operator order (so the
-  // TON designated proposer = operators[0] is contacted first when registered).
+  // operator is reflected immediately, and always in federation operator order. The
+  // orchestrator contacts these signers sequentially; for a TON mint, whichever live
+  // operator is asked first while the order is still absent opens it (no single
+  // designated proposer — the role fails over across live operators; see GramApprover).
   const currentSigners = (): HttpSignerClient[] =>
     registry.live().map((r) => new HttpSignerClient(r.operatorId, r.url, cfg.coordinator.signerApproveTimeoutMs));
 
@@ -46,34 +48,28 @@ async function main(): Promise<void> {
   const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
   const vizBroadcaster = new VizReleaseBroadcaster(vizChain, accounts, store);
 
-  // The single designated TON proposer = first federation operator (see GramMintBroadcaster).
-  const tonProposerId = cfg.federation.operators[0]?.id;
   // Keyless on TON: no signer mnemonic. The coordinator only DESCRIBES the mint order;
-  // operators approve it on-chain from their own wallets. The designated proposer (the
-  // one operator that sends `new_order`) is the first federation operator — the signer
-  // list must be ordered so this operator is contacted first (harness + deploy invariant).
-  if (cfg.gram.jettonMinterAddress && !tonProposerId) {
-    throw new Error("TON minter configured but no federation operators to designate as proposer");
-  }
-  const tonBroadcaster =
-    cfg.gram.jettonMinterAddress && tonProposerId
-      ? new GramMintBroadcaster(
-          new GramHttpChain(
-            cfg.gram.endpoint,
-            cfg.gram.apiKey,
-            cfg.gram.jettonMinterAddress,
-            cfg.gram.gatewayJettonWallet,
-            cfg.gram.multisigAddress,
-            cfg.gram.finalityConfirmations,
-            cfg.gram.scanMaxTransactions,
-            cfg.gram.maxScanPages,
-            cfg.gram.rpcTimeoutMs,
-          ),
-          cfg.fees,
-          store,
-          tonProposerId,
-        )
-      : null;
+  // operators open/approve it on-chain from their own wallets. There is no designated
+  // proposer — the first live operator contacted opens the order and the role fails over
+  // to the next operator if that one is offline/unfunded, so the mint no longer deadlocks
+  // when any single operator is down.
+  const tonBroadcaster = cfg.gram.jettonMinterAddress
+    ? new GramMintBroadcaster(
+        new GramHttpChain(
+          cfg.gram.endpoint,
+          cfg.gram.apiKey,
+          cfg.gram.jettonMinterAddress,
+          cfg.gram.gatewayJettonWallet,
+          cfg.gram.multisigAddress,
+          cfg.gram.finalityConfirmations,
+          cfg.gram.scanMaxTransactions,
+          cfg.gram.maxScanPages,
+          cfg.gram.rpcTimeoutMs,
+        ),
+        cfg.fees,
+        store,
+      )
+    : null;
   const solanaBroadcaster =
     cfg.solana.wvizMint && cfg.solana.multisig && cfg.solana.submitterSecret
       ? new SolanaMintBroadcaster(
