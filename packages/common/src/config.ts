@@ -83,7 +83,6 @@ export interface GatewayConfig {
   coordinator: {
     url: string;
     listen: string;
-    signerEndpoints: string[];
     /** Per-signer /approve HTTP timeout, direction-aware. A blackhole signer (socket
      * accepted, no response) must become a caught error, not an unbounded await that
      * wedges the whole sequential approval loop — and thus every /submit behind it. But
@@ -108,6 +107,14 @@ export interface GatewayConfig {
   };
   /** Service VIZ account that collects swept peg-in fees (single-key, no multisig). */
   feesGateAccount: string;
+  /** This signer's own externally-reachable URL, advertised to the coordinator on registration. */
+  signerAdvertiseUrl: string;
+  /** Self-registration timing (signer discovery). */
+  registration: {
+    leaseMs: number; // coordinator drops a registration not refreshed within this window
+    heartbeatMs: number; // signer re-registers on this cadence (must be < leaseMs)
+    nonceTtlMs: number; // validity window for an issued challenge nonce
+  };
   caps: CapPolicy;
   fees: GatewayFeeConfig;
   storeUrl: string;
@@ -406,11 +413,6 @@ export function loadConfig(): GatewayConfig {
     coordinator: {
       url: opt("COORDINATOR_URL", "http://coordinator:8080"),
       listen: opt("COORDINATOR_LISTEN", "0.0.0.0:8080"),
-      // Signer /approve endpoints the coordinator calls. Solo: one local signer.
-      signerEndpoints: opt("SIGNER_ENDPOINTS", "http://signer:8090")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
       // Direction-aware per-signer /approve ceilings; see the hoisted definition above
       // (the dispatcher peg-in budget is derived from these).
       signerApproveTimeoutMs,
@@ -445,6 +447,12 @@ export function loadConfig(): GatewayConfig {
       submitTimeoutMs: int("DISPATCHER_SUBMIT_TIMEOUT_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", pegInOrchestrationBudgetMs)),
     },
     feesGateAccount: opt("FEES_GATE_ACCOUNT", "fees.gate"),
+    signerAdvertiseUrl: opt("SIGNER_ADVERTISE_URL", ""),
+    registration: {
+      leaseMs: int("REGISTRATION_LEASE_MS", 60000),
+      heartbeatMs: int("REGISTRATION_HEARTBEAT_MS", 20000),
+      nonceTtlMs: int("REGISTRATION_NONCE_TTL_MS", 30000),
+    },
     // Conservative bootstrap caps (1 VIZ ~ $0.005): $500 / $1,000 / $10,000.
     // Raise as TVL and the federation grow.
     caps: {

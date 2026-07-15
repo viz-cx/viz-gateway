@@ -5,6 +5,7 @@ import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { Orchestrator } from "./orchestrator";
 import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
+import { SignerRegistry } from "./registry";
 
 /**
  * coordinator: UNTRUSTED. On POST /submit { action } it builds the one shared
@@ -30,9 +31,16 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const store = createStore(cfg.storeUrl);
 
-  const signers = cfg.coordinator.signerEndpoints.map(
-    (ep, i) => new HttpSignerClient(`signer-${i + 1}`, ep, cfg.coordinator.signerApproveTimeoutMs),
+  const registry = new SignerRegistry(
+    cfg.federation.operators,
+    cfg.registration.leaseMs,
+    cfg.registration.nonceTtlMs,
   );
+  // Built fresh per action from the LIVE registry so a just-registered / just-expired
+  // operator is reflected immediately, and always in federation operator order (so the
+  // TON designated proposer = operators[0] is contacted first when registered).
+  const currentSigners = (): HttpSignerClient[] =>
+    registry.live().map((r) => new HttpSignerClient(r.operatorId, r.url, cfg.coordinator.signerApproveTimeoutMs));
 
   const accounts = buildGatewayAccounts(cfg);
   const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
@@ -103,7 +111,7 @@ async function main(): Promise<void> {
     return new Orchestrator(
       cfg.federation.threshold,
       cfg.federation.operators.map((o) => o.id),
-      signers,
+      currentSigners(),
       broadcaster,
       (id, feeMilliViz) => store.setFee(id, feeMilliViz),
     ).process(action);
@@ -118,7 +126,39 @@ async function main(): Promise<void> {
       res.end(JSON.stringify(obj));
     };
     if (req.method === "GET" && req.url === "/health") {
-      void store.isPaused().then((paused) => json(200, { ok: true, paused, signers: signers.length }));
+      const { registered, expected } = registry.count();
+      void store.isPaused().then((paused) => json(200, { ok: true, paused, registered, expected }));
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/register/challenge")) {
+      try {
+        const operator = new URL(req.url, "http://x").searchParams.get("operator") ?? "";
+        json(200, registry.issueChallenge(operator));
+      } catch (err) {
+        json(400, { error: String(err) });
+      }
+      return;
+    }
+    if (req.method === "POST" && req.url === "/register") {
+      void (async () => {
+        let body: string;
+        try {
+          body = await readLimitedBody(req);
+        } catch (err) {
+          json(err instanceof BodyError ? err.statusCode : 400, { error: String(err) });
+          return;
+        }
+        try {
+          const { operator, url, nonce, sig } = JSON.parse(body) as {
+            operator: string; url: string; nonce: string; sig: string;
+          };
+          const reg = registry.register(operator, url, nonce, sig);
+          console.log(`[coordinator] registered ${operator} -> ${url} (expires ${new Date(reg.expiresAt).toISOString()})`);
+          json(200, { ok: true, expiresAt: reg.expiresAt });
+        } catch (err) {
+          json(400, { error: String(err) });
+        }
+      })();
       return;
     }
     if (req.method === "POST" && req.url === "/submit") {
@@ -152,7 +192,7 @@ async function main(): Promise<void> {
 
   server.listen(port, host, () => {
     console.log(
-      `[coordinator] listening on ${host}:${port}; threshold=${cfg.federation.threshold}-of-${cfg.federation.n}; signers=${signers.length}`,
+      `[coordinator] listening on ${host}:${port}; threshold=${cfg.federation.threshold}-of-${cfg.federation.n}; awaiting ${cfg.federation.n} signer registration(s)`,
     );
   });
 

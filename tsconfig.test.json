@@ -6,6 +6,7 @@
   // composite/declaration), so it never touches the shipped dist/ outputs.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "ignoreDeprecations": "5.0",
     "composite": false,
     "declaration": false,
     "declarationMap": false,
@@ -18,5 +19,5 @@
     "rootDir": ".",
     "outDir": "dist-test"
   },
-  "include": ["packages/*/test/**/*.ts"]
+  "include": ["packages/*/test/**/*.ts", "packages/*/src/**/*.d.ts"]
 }

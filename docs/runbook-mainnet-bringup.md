@@ -118,8 +118,12 @@ Fill it in:
 - `VIZ_NODE_URL` = **your own** VIZ node (F2).
 - `GRAM_ENDPOINT` = **your own** TON node; keep the public `GRAM_*` addresses as shipped.
 - `GRAM_API_KEY` = your own toncenter key.
-- Leave the coordinator-only vars (`SIGNER_ENDPOINTS`, `COORDINATOR_LISTEN`) at defaults;
-  the signer ignores them.
+- `SIGNER_ADVERTISE_URL` = the URL the coordinator can reach this signer at
+  (e.g. `http://op-N-host:8090`) — the coordinator discovers you by self-registration.
+- `COORDINATOR_URL` = the coordinator box's reachable URL (e.g. `http://coord-host:8080`).
+- `VIZ_SIGNING_WIF` must be set (sealed in FED_KEYSTORE): the registration challenge is
+  signed with your VIZ operator key and verified against your `vizPubkey` in federation.json.
+- The coordinator no longer needs a `SIGNER_ENDPOINTS` list.
 
 ### 3.3 Seal your keys (no plaintext secrets on disk)
 Put your two secrets in the env **temporarily**, seal, then unset:
@@ -155,8 +159,10 @@ returns **423**. Confirm the coordinator box can reach `http://<op-N-host>:8090/
 ```bash
 cp .env.mainnet.example .env.mainnet   # or reuse the op-1 file that already has this block
 ```
-- `SIGNER_ENDPOINTS=http://op-1-host:8090,http://op-2-host:8090,http://op-3-host:8090`
-  (all three operators' reachable signer URLs).
+- No `SIGNER_ENDPOINTS`: signers self-register. `GET /health` reports
+  `{registered, expected}`; wait for `registered` to reach the threshold before smoke-testing.
+- `REGISTRATION_LEASE_MS` / `REGISTRATION_HEARTBEAT_MS` / `REGISTRATION_NONCE_TTL_MS` may be
+  left at defaults (60s / 20s / 30s).
 - `COORDINATOR_LISTEN=0.0.0.0:8080`, `COORDINATOR_URL=http://127.0.0.1:8080`.
 - `FEDERATION_MANIFEST=./federation.json` (2-of-3 is read from here).
 - `RECON_EXPECTED_REMOTES=GRAM` (TON-only launch — recon fails closed if GRAM is missing
@@ -190,8 +196,8 @@ selects the process — but keep it set so a container/entrypoint that dispatche
 `$SERVICE` also works.)
 
 Expect:
-- `[coordinator] listening on 0.0.0.0:8080; threshold=2-of-3; signers=3`
-  (GET `/health`).
+- `[coordinator] listening on 0.0.0.0:8080; threshold=2-of-3; awaiting 3 signer registration(s)`
+  (`GET /health` initially shows `registered=0, expected=3`; climbs as each signer starts).
 - `recon` reports per-chain `locked ≥ circulating + unswept`, `status=OK`. On an empty
   system this is `locked=0 circulating=0` for GRAM.
 
@@ -199,13 +205,11 @@ Expect:
 
 ## 5. Launch order
 
-1. All three **signers** up and reachable (`/approve` answers; 3.4 confirmed).
-2. Multisig funded with TON for mint gas (~0.05–0.1 TON per first-time peg-in; the
-   multisig currently holds ~0.577 TON).
-3. Coordinator box: start `recon` first and confirm `status=OK`, then `coordinator`,
-   `dispatcher`, and the two watchers.
-4. Confirm `coordinator /health` shows `threshold=2-of-3; signers=3` and no signer is
-   unreachable.
+1. Start the coordinator; `GET /health` shows `registered=0, expected=N`.
+2. Start each operator's signer. Each self-registers within one heartbeat; watch
+   `[coordinator] registered op-N -> http://…` and `/health` `registered` climb to N.
+3. Multisig funded for mint gas (as before).
+4. Confirm `/health` shows `registered=N` (≥ threshold) before the smoke proof.
 
 ---
 

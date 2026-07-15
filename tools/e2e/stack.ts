@@ -35,8 +35,13 @@ export async function launchStack(
     child.stderr?.pipe(out);
     procs.push(child);
   }
-  // Give signer + coordinator a moment to bind their ports before watchers connect.
-  await new Promise((r) => setTimeout(r, 2000));
+  const coordUrl = (runEnv["COORDINATOR_URL"] ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const threshold = Number.parseInt(runEnv["FEDERATION_THRESHOLD"] ?? "1", 10);
+  if (services.includes("coordinator") && services.includes("signer")) {
+    await waitForRegistrations(coordUrl, threshold, 30000);
+  } else {
+    await new Promise((r) => setTimeout(r, 2000));
+  }
   return {
     async stop() {
       for (const p of procs) p.kill("SIGTERM");
@@ -121,19 +126,18 @@ export async function launchFederationStack(
     });
   }
 
-  const signerEndpoints = signerSpecs.map((s) => `http://127.0.0.1:${s.port}`).join(",");
   const coordProc = spawnProc(
     ENTRY["coordinator"]!,
-    {
-      ...coordinatorEnv,
-      SIGNER_ENDPOINTS: signerEndpoints,
-      SERVICE: "coordinator",
-    },
+    { ...coordinatorEnv, SERVICE: "coordinator" },
     join(logDir, "coordinator.log"),
   );
 
-  // Give processes time to bind their ports.
-  await new Promise((r) => setTimeout(r, 2500));
+  // Coordinator + signers race to boot; then signers self-register. Wait until at least
+  // `threshold` operators have registered before returning, so the first /submit isn't
+  // rejected under-threshold on a cold stack.
+  const coordUrl = (coordinatorEnv["COORDINATOR_URL"] ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const threshold = Number.parseInt(coordinatorEnv["FEDERATION_THRESHOLD"] ?? "1", 10);
+  await waitForRegistrations(coordUrl, threshold, 30000);
 
   return {
     signers: signerHandles,
@@ -149,4 +153,23 @@ export async function launchFederationStack(
       await new Promise((r) => setTimeout(r, 500));
     },
   };
+}
+
+async function waitForRegistrations(coordUrl: string, threshold: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const res = await fetch(`${coordUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const h = (await res.json()) as { registered?: number };
+        if ((h.registered ?? 0) >= threshold) return;
+      }
+    } catch {
+      /* coordinator not up yet */
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`only <${threshold} signers registered within ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }

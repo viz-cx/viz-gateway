@@ -15,6 +15,8 @@
 //   VIZ_NODE_URL, VIZ_GATEWAY_ACCOUNT, STORE_URL, COORDINATOR_LISTEN, COORDINATOR_URL
 //   (passed through from the parent e2e runEnv or process.env)
 
+import { writeFileSync, mkdirSync } from "node:fs";
+import viz from "viz-js-lib";
 import type { SignerSpec } from "./stack";
 
 export interface FederationConfig {
@@ -77,6 +79,7 @@ export function buildFederationRunEnv(
       FEDERATION_N: String(cfg.n),
       FEDERATION_THRESHOLD: String(cfg.threshold),
       SIGNER_LISTEN: `127.0.0.1:${port}`,
+      SIGNER_ADVERTISE_URL: `http://127.0.0.1:${port}`,
     };
     if (op.solanaSecret) env["SOLANA_SIGNER_SECRET"] = op.solanaSecret;
     // Each operator approves GRAM peg-ins from its OWN wallet: override the shared
@@ -89,8 +92,21 @@ export function buildFederationRunEnv(
     ...sharedEnv,
     FEDERATION_N: String(cfg.n),
     FEDERATION_THRESHOLD: String(cfg.threshold),
-    // SIGNER_ENDPOINTS is assembled by launchFederationStack from signerSpecs.
   };
+
+  const manifestOperators = signerSpecs.map((s) => ({
+    id: s.operatorId,
+    vizPubkey: viz.auth.wifToPublic(s.env["VIZ_SIGNING_WIF"] ?? ""),
+    tonPubkey: "",
+    solanaPubkey: "",
+  }));
+  const manifestJson = JSON.stringify({ n: cfg.n, threshold: cfg.threshold, operators: manifestOperators });
+  mkdirSync("./data", { recursive: true });
+  writeFileSync("./data/e2e-manifest-federation.json", manifestJson);
+  coordinatorEnv["FEDERATION_MANIFEST"] = "./data/e2e-manifest-federation.json";
+  for (const spec of signerSpecs) {
+    spec.env["FEDERATION_MANIFEST"] = "./data/e2e-manifest-federation.json";
+  }
 
   return { signerSpecs, coordinatorEnv };
 }
