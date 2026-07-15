@@ -35,7 +35,7 @@ It asks for a passphrase (you'll re-enter it when the signer starts). The mnemon
 SERVICE=signer
 SIGNER_LISTEN=0.0.0.0:8101             # bind so I can reach /approve (put behind VPN/mTLS)
 SIGNER_ADVERTISE_URL=http://<your-host>:8101   # the URL I can reach you at
-COORDINATOR_URL=<coordinator URL I send you>   # e.g. http://coord-host:8100
+COORDINATOR_URL=https://gateway.viz.cx         # the live coordinator (public, TLS)
 
 FEDERATION_MANIFEST=./federation.json
 FED_KEYSTORE=./keystore.mainnet.json
@@ -65,7 +65,7 @@ It should print (`op-N` = the slot it worked out from *your* VIZ key — you don
 ```
 [signer] operator=op-N listening on 0.0.0.0:8101 (federation 2-of-3)
 ```
-and self-register with me within ~20s. I'll confirm on my side that `registered` climbed and I see `registered op-N -> http://<your-host>:8101`. Tell me which `op-N` it printed so we can double-check the labels match what I expect.
+and self-register with me within ~20s. You can watch it land yourself — `curl -s https://gateway.viz.cx/health` shows `{"registered":N,"expected":3}`; your start bumps `registered` by one. I'll also see `registered op-N -> http://<your-host>:8101` on my side. Tell me which `op-N` it printed so we can double-check the labels match what I expect.
 
 ---
 
