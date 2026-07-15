@@ -89,4 +89,13 @@ export class SignerRegistry {
   count(): { registered: number; expected: number } {
     return { registered: this.live().length, expected: this.order.length };
   }
+
+  /** Which operators are currently live vs missing, in the manifest's fixed order. */
+  roster(): { live: string[]; missing: string[] } {
+    const liveIds = new Set(this.live().map((r) => r.operatorId));
+    return {
+      live: this.order.filter((id) => liveIds.has(id)),
+      missing: this.order.filter((id) => !liveIds.has(id)),
+    };
+  }
 }

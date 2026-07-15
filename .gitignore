@@ -25,3 +25,6 @@ dist-test/
 
 # Local mainnet deployer secret — never commit
 mnemonics
+# Sealed operator keystore + raw key material — never commit
+keystore*.json
+viz-secrey-key
