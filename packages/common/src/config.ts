@@ -408,11 +408,11 @@ export function loadConfig(): GatewayConfig {
       scanAddressBatch: int("SOLANA_SCAN_ADDRESS_BATCH", 50),
       submitterMinLamports: int("SOLANA_SUBMITTER_MIN_LAMPORTS", 50_000_000), // ~0.05 SOL
       depositProgramId: opt("SOLANA_DEPOSIT_PROGRAM_ID", ""),
-      lookupListen: opt("LOOKUP_LISTEN", "127.0.0.1:8095"),
+      lookupListen: opt("LOOKUP_LISTEN", "127.0.0.1:8110"),
     },
     coordinator: {
-      url: opt("COORDINATOR_URL", "http://coordinator:8080"),
-      listen: opt("COORDINATOR_LISTEN", "0.0.0.0:8080"),
+      url: opt("COORDINATOR_URL", "http://coordinator:8100"),
+      listen: opt("COORDINATOR_LISTEN", "0.0.0.0:8100"),
       // Direction-aware per-signer /approve ceilings; see the hoisted definition above
       // (the dispatcher peg-in budget is derived from these).
       signerApproveTimeoutMs,

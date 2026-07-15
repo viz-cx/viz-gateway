@@ -115,9 +115,9 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
       ? `sqlite:./data/${cfg.runId}.sqlite`
       : `sqlite:./data/e2e.sqlite`,
     // Coordinator/signer wiring (loopback, solo)
-    COORDINATOR_LISTEN: "127.0.0.1:8080",
-    COORDINATOR_URL: "http://127.0.0.1:8080",
-    SIGNER_LISTEN: "127.0.0.1:8090",
-    SIGNER_ADVERTISE_URL: "http://127.0.0.1:8090",
+    COORDINATOR_LISTEN: "127.0.0.1:8100",
+    COORDINATOR_URL: "http://127.0.0.1:8100",
+    SIGNER_LISTEN: "127.0.0.1:8101",
+    SIGNER_ADVERTISE_URL: "http://127.0.0.1:8101",
   };
 }

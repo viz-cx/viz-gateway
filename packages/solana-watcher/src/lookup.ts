@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   const store = createStore(cfg.storeUrl);
   const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
   const [host, portStr] = cfg.solana.lookupListen.split(":");
-  const port = Number.parseInt(portStr ?? "8095", 10);
+  const port = Number.parseInt(portStr ?? "8110", 10);
 
   const server = createServer((req, res) => {
     const json = (code: number, obj: unknown) => {
