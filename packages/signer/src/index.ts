@@ -178,8 +178,11 @@ async function main(): Promise<void> {
     gramApprover,
     accounts,
   );
-  const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8090").split(":");
-  const port = Number.parseInt(portStr ?? "8090", 10);
+  // Default 8100 (not 8090): a gateway operator runs a VIZ node on the same or a nearby
+  // box, and viz-cpp-node binds 8090/8091 (HTTP/WS RPC) + 8092/8093 (snapshot/wallet). The
+  // 810x block stays clear of that range.
+  const [host, portStr] = (process.env.SIGNER_LISTEN ?? "127.0.0.1:8100").split(":");
+  const port = Number.parseInt(portStr ?? "8100", 10);
 
   const server = createServer((reqStream, res) => {
     if (reqStream.method !== "POST" || reqStream.url !== "/approve") {

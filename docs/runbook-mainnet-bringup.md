@@ -124,13 +124,15 @@ Fill it in:
 - `SERVICE=signer`. (No `OPERATOR_ID` needed — the signer derives its slot from your VIZ
   key via `federation.json`. Set it only to assert a slot; a wrong value warns and is
   overridden by the key.)
-- `SIGNER_LISTEN=0.0.0.0:8090` (bind so the coordinator can reach `/approve`; put it
-  behind mTLS/VPN — it is an authenticated-by-network surface).
+- `SIGNER_LISTEN=0.0.0.0:8100` (bind so the coordinator can reach `/approve`; put it
+  behind mTLS/VPN — it is an authenticated-by-network surface). Default is `8100`, not
+  `8090`: a co-located `viz-cpp-node` owns `8090`/`8091` (HTTP/WS RPC) and `8092`/`8093`
+  (snapshot/wallet), so the `810x` block avoids an `EADDRINUSE` on the same host.
 - `VIZ_NODE_URL` = **your own** VIZ node (F2).
 - `GRAM_ENDPOINT` = **your own** TON node; keep the public `GRAM_*` addresses as shipped.
 - `GRAM_API_KEY` = your own toncenter key.
 - `SIGNER_ADVERTISE_URL` = the URL the coordinator can reach this signer at
-  (e.g. `http://op-N-host:8090`) — the coordinator discovers you by self-registration.
+  (e.g. `http://op-N-host:8100`) — the coordinator discovers you by self-registration.
 - `COORDINATOR_URL` = the coordinator box's reachable URL (e.g. `http://coord-host:8080`).
 - `VIZ_SIGNING_WIF` must be set (sealed in FED_KEYSTORE): the registration challenge is
   signed with your VIZ operator key and verified against your `vizPubkey` in federation.json.
@@ -158,9 +160,9 @@ FED_KEYSTORE=./keystore.mainnet.json
 ```bash
 env $(grep -v '^#' .env.mainnet | xargs) npm run start:signer
 ```
-Expect: `[signer] operator=op-N listening on 0.0.0.0:8090 (federation 2-of-3)`.
+Expect: `[signer] operator=op-N listening on 0.0.0.0:8100 (federation 2-of-3)`.
 Health/behaviour: `POST /approve` is the only route; when the gateway is paused it
-returns **423**. Confirm the coordinator box can reach `http://<op-N-host>:8090/approve`.
+returns **423**. Confirm the coordinator box can reach `http://<op-N-host>:8100/approve`.
 
 ---
 

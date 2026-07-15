@@ -31,12 +31,13 @@ services:
     env_file: .env
     environment:
       SERVICE: signer
-      SIGNER_LISTEN: 0.0.0.0:8090
-      SIGNER_ADVERTISE_URL: http://signer:8090
+      SIGNER_LISTEN: 0.0.0.0:8100
+      SIGNER_ADVERTISE_URL: http://signer:8100
       COORDINATOR_URL: http://coordinator:8080
     restart: unless-stopped
     # Keep the signer off the public internet; expose only on the operator LAN.
-    expose: ["8090"]
+    # 8100 (not 8090) so it never collides with a co-located viz-cpp-node's RPC ports.
+    expose: ["8100"]
     volumes:
       - gw-data:/app/data
     depends_on: [viz-watcher]

@@ -117,7 +117,7 @@ export function buildRunEnv(cfg: E2eConfig): Record<string, string> {
     // Coordinator/signer wiring (loopback, solo)
     COORDINATOR_LISTEN: "127.0.0.1:8080",
     COORDINATOR_URL: "http://127.0.0.1:8080",
-    SIGNER_LISTEN: "127.0.0.1:8090",
-    SIGNER_ADVERTISE_URL: "http://127.0.0.1:8090",
+    SIGNER_LISTEN: "127.0.0.1:8100",
+    SIGNER_ADVERTISE_URL: "http://127.0.0.1:8100",
   };
 }
