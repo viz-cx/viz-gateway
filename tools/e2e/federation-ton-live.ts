@@ -131,6 +131,7 @@ async function main() {
     ...baseEnv,
     FEDERATION_N: String(fedCfg.n),
     FEDERATION_THRESHOLD: String(fedCfg.threshold),
+    FEDERATION_MANIFEST: coordinatorEnv["FEDERATION_MANIFEST"]!,
     COORDINATOR_URL: "http://127.0.0.1:8080",
     // Don't refund a mint that is still legitimately collecting on-chain approvals.
     DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),

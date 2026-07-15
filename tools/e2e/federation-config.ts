@@ -104,6 +104,9 @@ export function buildFederationRunEnv(
   mkdirSync("./data", { recursive: true });
   writeFileSync("./data/e2e-manifest-federation.json", manifestJson);
   coordinatorEnv["FEDERATION_MANIFEST"] = "./data/e2e-manifest-federation.json";
+  for (const spec of signerSpecs) {
+    spec.env["FEDERATION_MANIFEST"] = "./data/e2e-manifest-federation.json";
+  }
 
   return { signerSpecs, coordinatorEnv };
 }
