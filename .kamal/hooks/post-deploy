@@ -15,19 +15,28 @@
 # of reconstructing exact names.
 set -euo pipefail
 
-alias_args=""
+# Pass the alias NAME (a single word), never the pre-assembled "--alias <name>" flag pair:
+# SSH flattens the remote argv into one string and the login shell RE-SPLITS it on
+# whitespace, so a two-word positional arrives as two params ($3=--alias, $4=signer-op1).
+# That made `docker network connect --alias platform_net <c>` consume platform_net as the
+# alias value and fail with "requires 2 arguments". A single-word name survives the boundary
+# intact; the remote assembles the flag itself.
+alias_name=""
 if [ "${KAMAL_SERVICE}" = "viz-gateway-signer" ]; then
-  alias_args="--alias signer-op1"
+  alias_name="signer-op1"
 fi
 
 IFS=',' read -ra hosts <<< "${KAMAL_HOSTS:?}"
 for host in "${hosts[@]}"; do
   # deploy is in the docker group (no sudo); ssh port 666 per inventory.yml.
-  ssh -p 666 "deploy@${host}" bash -s -- "${KAMAL_SERVICE}" "${KAMAL_VERSION}" "${alias_args}" <<'REMOTE'
+  ssh -p 666 "deploy@${host}" bash -s -- "${KAMAL_SERVICE}" "${KAMAL_VERSION}" "${alias_name}" <<'REMOTE'
 set -euo pipefail
-# $3 (alias_args) is empty for the coordinator; SSH joins argv into one string and the
-# remote shell drops a trailing empty word, so guard with ${3:-} rather than $3 under set -u.
-service="$1"; version="$2"; alias_args="${3:-}"
+# $3 (alias_name) is empty for the coordinator; guard with ${3:-} under set -u. Build the
+# --alias flag here from the single-word name (see outer comment for why it isn't passed
+# pre-assembled).
+service="$1"; version="$2"; alias_name="${3:-}"
+alias_args=""
+[ -n "$alias_name" ] && alias_args="--alias $alias_name"
 
 # Do NOT blanket `|| true` the connect: that once swallowed a REAL failure, left the signer
 # off platform_net, and the coordinator silently lost its /approve route while the deploy
