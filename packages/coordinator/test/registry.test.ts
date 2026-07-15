@@ -89,3 +89,22 @@ test("unknown operator cannot get a challenge", () => {
   const r = reg(() => 1000);
   assert.throws(() => r.issueChallenge("op-9"), /unknown operator/);
 });
+
+test("roster() reports live vs missing in manifest order", () => {
+  let t = 1000;
+  const r = reg(() => t);
+  assert.deepEqual(r.roster(), { live: [], missing: ["op-1", "op-2"] });
+  const { nonce } = r.issueChallenge("op-2");
+  r.register("op-2", "http://op-2:8090", nonce, signChallenge("op-2", "http://op-2:8090", nonce, k2.wif));
+  assert.deepEqual(r.roster(), { live: ["op-2"], missing: ["op-1"] });
+});
+
+test("roster() drops an expired lease back to missing", () => {
+  let t = 1000;
+  const r = reg(() => t);
+  const { nonce } = r.issueChallenge("op-1");
+  r.register("op-1", "http://op-1:8090", nonce, signChallenge("op-1", "http://op-1:8090", nonce, k1.wif));
+  assert.deepEqual(r.roster(), { live: ["op-1"], missing: ["op-2"] });
+  t += 60001; // past leaseMs
+  assert.deepEqual(r.roster(), { live: [], missing: ["op-1", "op-2"] });
+});
