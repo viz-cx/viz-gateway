@@ -1,6 +1,6 @@
 # Telegram announcement — wVIZ on TON
 
-_Post to t.me/viz_world and t.me/viz_cx. ~150 words. Placeholders `{{...}}` filled at launch._
+_Post to t.me/viz_world and t.me/viz_cx. ~150 words. Only `{{USER_GUIDE_LINK}}` (published guide URL) remains to fill._
 
 ---
 
@@ -10,14 +10,14 @@ You can now move your **VIZ** onto **TON** as **wVIZ**, and back again, at a tru
 **1:1 rate**. Hold VIZ in Tonkeeper, use it across the TON ecosystem, and redeem for
 real VIZ whenever you want.
 
-**→ VIZ to TON:** send VIZ to `{{GRAM_GATE_ACCOUNT}}` with your TON address in the
+**→ VIZ to TON:** send VIZ to `gram.gate` with your TON address in the
 memo. wVIZ lands in your TON wallet in ~40s.
 
 **← TON to VIZ:** send wVIZ back with your VIZ account name in the comment. VIZ
 returns to you — **free**.
 
-🔒 **Backed 1:1, secured by a 5-of-7 operator federation.** No single party can move
-funds, and an automatic reconciliation watchdog halts everything on any mismatch.
+🔒 **Backed 1:1, secured by an independent operator federation.** No single party can
+move funds, and an automatic reconciliation watchdog halts everything on any mismatch.
 
 📖 Full step-by-step guide: {{USER_GUIDE_LINK}}
 
@@ -30,6 +30,6 @@ Questions? Drop them below 👇
 🌉 **wVIZ is live** — VIZ on TON, 1:1.
 
 Send VIZ → get wVIZ in Tonkeeper (~40s). Send wVIZ back → get VIZ, free. Backed 1:1,
-secured by a 5-of-7 federation.
+secured by an independent operator federation.
 
 Guide 👉 {{USER_GUIDE_LINK}}

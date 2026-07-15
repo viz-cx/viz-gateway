@@ -3,8 +3,8 @@
 The gateway lets you move **VIZ** onto **TON** as **wVIZ** — and back again — at a
 1:1 rate. This guide walks you through both directions step by step.
 
-> **Placeholders:** values in `{{DOUBLE_BRACES}}` (addresses, fee rates, links) are
-> filled in at launch. Everything else is final.
+> **Note:** addresses, fee rates, and links below are live mainnet values. Only the
+> published guide URL is still a placeholder.
 
 ---
 
@@ -38,7 +38,7 @@ You send VIZ on the VIZ chain, and receive wVIZ in your TON wallet.
 
 1. **Copy your TON address** from your TON wallet. It looks like
    `EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG` (starts with `EQ` or `UQ`).
-2. **Send VIZ** from your VIZ wallet to the gateway account **`{{GRAM_GATE_ACCOUNT}}`**.
+2. **Send VIZ** from your VIZ wallet to the gateway account **`gram.gate`**.
 3. **Put your TON address in the memo** — exactly, and nothing else.
    - ✅ `EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG`
    - ❌ empty memo, extra words, or any `:` character → the deposit is skipped.
@@ -51,20 +51,21 @@ You send VIZ on the VIZ chain, and receive wVIZ in your TON wallet.
 You receive **wVIZ = VIZ sent − fee**. The fee is taken in VIZ at conversion time so
 the 1:1 backing always holds.
 
-- **Fee** = `max({{FEE_FLOOR}} VIZ, {{FEE_RATE}} of the amount)`.
-- **First-time surcharge** = a small one-time `{{ACTIVATION_SURCHARGE}} VIZ` the very
+- **Fee** = `max(10 VIZ, 0.20% of the amount)`.
+- **First-time surcharge** = a small one-time `10 VIZ` the very
   first time your TON wallet receives wVIZ (covers deploying your token wallet). Zero
   on every peg-in after that.
-- **Minimum peg-in** = **{{MIN_PEGIN}} VIZ** (~$10). Below this, network gas would eat
-  most of it, so smaller deposits are flagged for refund instead of minted.
+- **Minimum peg-in** = there's no fixed floor — you just need to cover the fee, so
+  roughly **21 VIZ your first time** (10 fee + 10 first-wallet surcharge + gas) and
+  **~11 VIZ after**. Deposits too small to cover the fee are refunded, not minted.
 
 **Worked example** — send **3,000 VIZ**, first time ever:
 
 | Item | Amount |
 |---|---|
 | You send | 3,000 VIZ |
-| Fee | `max({{FEE_FLOOR}}, {{FEE_RATE}})` VIZ |
-| First-time surcharge | `{{ACTIVATION_SURCHARGE}}` VIZ |
+| Fee | `max(10, 0.20%)` = 10 VIZ |
+| First-time surcharge | 10 VIZ |
 | **You receive** | **≈ 2,980 wVIZ** |
 
 > ⚠️ **Double-check your TON address.** The memo is where your wVIZ is sent. A wrong
@@ -80,7 +81,7 @@ You send wVIZ on TON, and receive VIZ on the VIZ chain. **Peg-out is free.**
 
 1. **Know your VIZ account name** (e.g. `your-viz-account`).
 2. **Send your wVIZ** from your TON wallet to the gateway's wVIZ address
-   **`{{GATEWAY_JETTON_WALLET}}`**.
+   **`EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy`**.
 3. **Put your VIZ account name in the comment/message** of the transfer — exactly.
    - ✅ `your-viz-account`
    - ❌ empty or a wrong name → the release can't be routed.
@@ -102,9 +103,9 @@ You send wVIZ on TON, and receive VIZ on the VIZ chain. **Peg-out is free.**
 
 | | Peg-in (VIZ → wVIZ) | Peg-out (wVIZ → VIZ) |
 |---|---|---|
-| **Fee** | `max({{FEE_FLOOR}} VIZ, {{FEE_RATE}})`, taken in VIZ | **Free** |
-| **First-time surcharge** | `{{ACTIVATION_SURCHARGE}} VIZ` once per TON wallet | — |
-| **Minimum** | {{MIN_PEGIN}} VIZ | None |
+| **Fee** | `max(10 VIZ, 0.20%)`, taken in VIZ | **Free** |
+| **First-time surcharge** | `10 VIZ` once per TON wallet | — |
+| **Minimum** | ~21 VIZ first time, ~11 VIZ after | None |
 | **Rate** | 1:1 (minus fee) | 1:1 |
 | **Typical time** | ~40s + mint | seconds + release |
 | **Where to route** | memo = your **TON address** | comment = your **VIZ account** |
@@ -114,9 +115,9 @@ You send wVIZ on TON, and receive VIZ on the VIZ chain. **Peg-out is free.**
 ## FAQ
 
 **Is it safe? Who controls my funds in transit?**
-No single party can. The gateway is run by an independent **5-of-7 operator
-federation** — funds only move when at least 5 of 7 operators independently agree on
-the exact same action, verified against the chain. A separate reconciliation process
+No single party can. The gateway is run by an independent **operator federation** —
+funds only move when the operators independently agree on the exact same action,
+verified against the chain. A separate reconciliation process
 continuously checks that locked VIZ equals circulating wVIZ and **auto-pauses the
 whole system** on any mismatch. See the [security overview](#) for details.
 
@@ -143,6 +144,6 @@ for the wVIZ side.
 
 ## Links
 
-- Website: [viz.cx]({{WEBSITE_VIZ_CX}}) · [viz.world]({{WEBSITE_VIZ_WORLD}})
-- Community: [t.me/viz_world]({{TELEGRAM_VIZ_WORLD}}) · [t.me/viz_cx]({{TELEGRAM_VIZ_CX}})
-- wVIZ token: `{{WVIZ_MINTER_ADDRESS}}` (verify before use)
+- Website: [viz.cx](https://viz.cx) · [viz.world](https://viz.world)
+- Community: [t.me/viz_world](https://t.me/viz_world) · [t.me/viz_cx](https://t.me/viz_cx)
+- wVIZ token: `EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ` (verify before use)
