@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# The image runs as non-root gw (uid 100, gid 101), but a Kamal bind-mounted volume dir
+# (/opt/<service>/data) is created root-owned — a bind mount does NOT inherit the image
+# path's ownership (a named volume would). So gw can't create gateway.sqlite and every
+# process crashes at boot with SQLITE errcode 14 "unable to open database file". Ensure the
+# dir exists and is gw-owned BEFORE the container boots. Idempotent; runs every deploy.
+#
+# Kamal runs hooks LOCALLY, so SSH to each host and chown via a throwaway root container
+# (deploy is in the docker group but is not root on the host). Kamal 2 sets KAMAL_SERVICE /
+# KAMAL_VERSION / KAMAL_HOSTS for every hook.
+set -euo pipefail
+IFS=',' read -ra hosts <<< "${KAMAL_HOSTS:?}"
+for host in "${hosts[@]}"; do
+  ssh -p 666 "deploy@${host}" \
+    "docker run --rm -v /opt/${KAMAL_SERVICE}:/host alpine sh -c 'mkdir -p /host/data && chown -R 100:101 /host/data'"
+done
