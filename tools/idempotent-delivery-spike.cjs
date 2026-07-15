@@ -616,24 +616,22 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     console.log("[21] TON actionExecuted false + no RPC when no order address persisted OK");
   }
 
-  // 22. buildProposal PINS the deterministic order address BEFORE any operator proposes,
-  //     designates the proposer (= first LIVE operator in the build context), and REUSES
-  //     the pinned address on a re-build (a re-drive targets the SAME order — the
-  //     crash-after-propose double-mint guard).
+  // 22. buildProposal PINS the deterministic order address BEFORE any operator opens the
+  //     order, and REUSES the pinned address on a re-build (a re-drive targets the SAME
+  //     order — the crash-after-open double-mint guard). No proposer is designated: the
+  //     first live operator contacted opens the order on-chain (see GramApprover).
   {
     const store = new InMemoryGatewayStore();
     const id = "ton2:0";
-    // op-1 offline: live set is [op-2, op-3], so the proposer is op-2 (not boot operators[0]).
-    const ctx = { liveOperatorIds: ["op-2", "op-3"] };
     await enqueueTonPegIn(store, id);
     const chain = mockTonChain({ nextAddr: "ORDER_ADDR_2" });
     const b = new GramMintBroadcaster(chain, FEES, store);
-    const { proposal } = await b.buildProposal(tonAction(id), ctx);
+    const { proposal } = await b.buildProposal(tonAction(id));
     assert.strictEqual(proposal.orderAddr, "ORDER_ADDR_2", "proposal pins the next order address");
-    assert.strictEqual(proposal.proposerOperatorId, "op-2", "proposer = first LIVE operator, not boot operators[0]");
+    assert.strictEqual(proposal.proposerOperatorId, undefined, "no proposer is designated in the proposal");
     assert.strictEqual((await store.get(id)).txid, "ORDER_ADDR_2", "order address persisted BEFORE approvals");
     const before = chain.nextOrderAddressCalls();
-    const again = await b.buildProposal(tonAction(id), ctx);
+    const again = await b.buildProposal(tonAction(id));
     assert.strictEqual(again.proposal.orderAddr, "ORDER_ADDR_2", "re-build reuses the pinned order address");
     assert.strictEqual(chain.nextOrderAddressCalls(), before, "re-build does NOT reserve a new order address");
     console.log("[22] TON buildProposal pins order addr before approvals + reuses on re-drive OK");

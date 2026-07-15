@@ -145,6 +145,32 @@ async function totalSupply(blockchain, minterAddr) {
   assert.ok(reData.executed, "recovery sees the order already executed -> skip re-broadcast");
   console.log("[proof] recovery: deterministic order addr + executed flag -> idempotent OK");
 
+  // --- Opener is NOT privileged: a SECOND order opened by a DIFFERENT signer (op3, idx 2,
+  //     not op1) executes identically. This is the on-chain premise behind opener-failover:
+  //     whichever live operator opens the order works, so a stuck operators[0] cannot block
+  //     the mint (coordinator-side failover proven in gram-proposer-fallback-spike). ---
+  {
+    const md2 = await multisig.getMultisigData();
+    const seqno2 = md2.nextOrderSeqno; // 1n (advanced by the first order)
+    assert.strictEqual(Number(seqno2), 1, "second order takes the next seqno");
+    const addr2 = await multisig.getOrderAddress(seqno2);
+    const amt2 = 500n;
+    const supplyBefore = await totalSupply(blockchain, minterAddr);
+    // op3 (idx 2) OPENS the order — not the operator that opened the first one.
+    await multisig.sendNewOrder(ops[2].getSender(), [buildMintTransfer(minterAddr, user.address, amt2)], expiration, toNano("1"));
+    const order2 = blockchain.openContract(Order.createFromAddress(addr2));
+    let od2 = await order2.getOrderData();
+    assert.ok(od2.inited, "order opened by a non-first signer must init");
+    assert.strictEqual(od2.approvals_num, 1, "opener's approve_on_init counts (idx 2)");
+    // Two more distinct signers approve -> 3/3 -> executes.
+    await order2.sendApprove(ops[0].getSender(), 0);
+    await order2.sendApprove(ops[1].getSender(), 1);
+    od2 = await order2.getOrderData();
+    assert.strictEqual(od2.executed, true, "executes at 3/3 regardless of who opened");
+    assert.strictEqual(await totalSupply(blockchain, minterAddr), supplyBefore + amt2, "second mint lands (NET)");
+    console.log("[proof] order opened by a NON-first signer (op3) executes at 3/3 -> opener not privileged OK");
+  }
+
   console.log("\n[proof] TON on-chain 3-of-5 approval routing PROVEN (all assertions passed).");
 })().catch((e) => {
   console.error("SPIKE FAILED:", e);

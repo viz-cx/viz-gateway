@@ -110,19 +110,20 @@ export interface VizReleaseProposal {
  * `orderHashHex` is the REAL packed order cell hash; every operator rebuilds the
  * mint order from (minter, toAddress, net) and asserts it matches before acting,
  * binding the on-chain effect to the recipient/amount it independently validated.
- * `proposerOperatorId` is the single operator the coordinator designates to send
- * `new_order` (single-proposer seqno ordering); the rest send `approve`.
+ * There is no designated proposer: whichever live operator the coordinator contacts
+ * first while the order is still absent opens it (`new_order`); the rest `approve`.
+ * The role therefore fails over across operators, so one stuck/unfunded/offline
+ * operator cannot deadlock the mint.
  */
 export interface GramMintProposal {
   orderSeqno: string; // multisig nextOrderSeqno at build time ("" if reused on recovery)
   orderAddr: string; // deterministic order address f(multisig, orderSeqno) — the idempotency key
   toAddress: string; // recipient TON address
   amountMilliViz: string; // = NET (gross − fee); the amount actually minted
-  /** Pinned by the proposer: was the destination jetton-wallet already provisioned? */
+  /** Pinned when the order is built: was the destination jetton-wallet already provisioned? */
   destProvisioned: boolean;
   orderHashHex: string; // exact 32-byte packed order cell hash operators rebuild + verify (hex)
   actionId: string; // canonical action id (idempotency / traceability)
-  proposerOperatorId: string; // the operator designated to send new_order; others approve
 }
 
 /**

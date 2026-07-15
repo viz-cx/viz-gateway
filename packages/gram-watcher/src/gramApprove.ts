@@ -13,10 +13,14 @@ import { keyPairFromMnemonic } from "./gramSign";
  *
  * multisig-v2 has no off-chain signature aggregation — an approval IS an on-chain
  * `Order.approve` from `signers[myIdx]`'s wallet. So:
- *   - exactly ONE operator (the coordinator-designated proposer) sends `new_order`
- *     with approve_on_init (its own approval counts immediately); this fixes the
- *     order seqno so all operators target the same deterministic order address;
- *   - every other operator sends `approve` at its own signer index;
+ *   - the FIRST live operator contacted while the order is still absent opens it with
+ *     `new_order` + approve_on_init (its own approval counts immediately); the order
+ *     seqno is pinned in the proposal, so every operator targets the same deterministic
+ *     order address. There is no single hardcoded proposer: whichever live operator is
+ *     asked first opens the order, so a stuck/unfunded/offline operator no longer
+ *     deadlocks the mint — the role fails over to the next operator the coordinator
+ *     contacts (see docs/plan-ton-onchain-approval.md);
+ *   - every other operator sees the order already exists and sends `approve`;
  *   - the order self-executes the moment approvals_num == threshold.
  *
  * Idempotency: the order address is f(multisig, seqno) and is pinned in the
@@ -37,7 +41,7 @@ export interface GramApprovalReceipt {
 
 /** The on-chain approval surface KeyedSigner depends on (injectable for tests). */
 export interface GramApprovalClient {
-  approveMint(proposal: GramMintProposal, isProposer: boolean): Promise<GramApprovalReceipt>;
+  approveMint(proposal: GramMintProposal): Promise<GramApprovalReceipt>;
 }
 
 /** TTL for a new multisig order (1 hour covers any realistic signing latency). */
@@ -92,7 +96,7 @@ export class GramApprover implements GramApprovalClient {
     return (await this.client.getContractState(orderAddr)).state === "active";
   }
 
-  async approveMint(proposal: GramMintProposal, isProposer: boolean): Promise<GramApprovalReceipt> {
+  async approveMint(proposal: GramMintProposal): Promise<GramApprovalReceipt> {
     const toAddr = Address.parse(proposal.toAddress);
     const amountBaseUnits = BigInt(proposal.amountMilliViz);
 
@@ -141,23 +145,21 @@ export class GramApprover implements GramApprovalClient {
     const openedWallet = this.client.open(wallet as WalletContractV4);
     const sender = openedWallet.sender(Buffer.from(secretKey));
 
-    // --- Propose (only the designated proposer, only if the order is absent) ---
+    // --- Open-or-wait (no single designated proposer; role fails over across operators) ---
+    // Whichever live operator is contacted while the order is still absent opens it. The
+    // coordinator contacts live operators sequentially and each opener blocks on
+    // waitForOrderInited, so the order is confirmed present-or-absent before the next
+    // operator is asked: a stuck/unfunded/offline operator simply fails its turn and the
+    // NEXT operator opens the order instead — no deadlock, no double order.
     if (!(await this.orderIsInited(orderAddr))) {
-      if (!isProposer) {
-        // Wait for the designated proposer's new_order to land, then fall through to approve.
-        await this.waitForOrderInited(orderAddr, proposal.actionId);
-      } else {
-        // Drift guard: the order must be the NEXT one this multisig will create, or a
-        // foreign order slipped in at our seqno — fail closed rather than mint at the wrong
-        // seqno (single-purpose gateway multisig: nothing else should create orders).
-        const liveNext = await this.client
-          .open(Multisig.createFromAddress(this.multisigAddr))
-          .getOrderAddress(md.nextOrderSeqno);
-        if (!liveNext.equals(orderAddr)) {
-          throw new Error(
-            `TON propose aborted for ${proposal.actionId}: pinned order ${orderAddr.toString()} != live next ${liveNext.toString()} (seqno drift)`,
-          );
-        }
+      // Drift guard: our pinned order must still be the NEXT one this multisig will create.
+      // If our seqno is free, WE open the order. If it advanced (a foreign order took the
+      // seqno) our pinned order will never appear — waitForOrderInited then fails closed
+      // rather than minting at the wrong seqno (single-purpose gateway multisig).
+      const liveNext = await this.client
+        .open(Multisig.createFromAddress(this.multisigAddr))
+        .getOrderAddress(md.nextOrderSeqno);
+      if (liveNext.equals(orderAddr)) {
         const mintTransfer = buildMintTransfer(this.minter, toAddr, amountBaseUnits);
         const withConfig = new Multisig(this.multisigAddr, undefined, {
           threshold: Number(md.threshold),
@@ -166,13 +168,16 @@ export class GramApprover implements GramApprovalClient {
           allowArbitrarySeqno: false,
         });
         const expiration = Math.floor(Date.now() / 1000) + ORDER_TTL_SEC;
-        // approve_on_init=true → the proposer's own approval counts immediately.
+        // approve_on_init=true → the opener's own approval counts immediately.
         await this.client
           .open(withConfig)
           .sendNewOrder(sender, [mintTransfer], expiration, this.orderValueNano, myIdx, true);
         await this.waitForOrderInited(orderAddr, proposal.actionId);
         return { orderAddr: proposal.orderAddr, myIdx, role: "propose" };
       }
+      // Seqno advanced without our order appearing: wait for our pinned order (it may be
+      // an in-flight open that is merely lagging) and fail closed if it never lands.
+      await this.waitForOrderInited(orderAddr, proposal.actionId);
     }
 
     // --- Approve (order exists) ---

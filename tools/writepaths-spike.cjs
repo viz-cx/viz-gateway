@@ -4,9 +4,10 @@
 //        keys (=> they merge), and a tampered proposal must be rejected.
 //   TON (Phase B): a TON mint approval is an ON-CHAIN effect, not an off-chain
 //        signature. This spike proves the signer's glue: it validates net +
-//        recipient, computes isProposer from proposerOperatorId, delegates the
-//        on-chain effect to the injected GramApprover, and encodes the receipt.
-//        The real contract state machine is proven in ton-onchain-approval-spike.
+//        recipient, delegates the on-chain effect to the injected GramApprover
+//        (which opens the order if absent, else approves — no designated proposer),
+//        and encodes the receipt. The real contract state machine is proven in
+//        ton-onchain-approval-spike.
 //
 // Run: node tools/writepaths-spike.cjs
 const assert = require("node:assert");
@@ -88,37 +89,40 @@ const { KeyedSigner, DISABLED_SOURCE_VALIDATION } = require("../packages/signer/
     destProvisioned: true,
     orderHashHex,
     actionId: pegIn.id,
-    proposerOperatorId: "op-1",
   };
 
-  // Inject a fake on-chain approver: the signer must validate net+recipient, compute
-  // isProposer from proposerOperatorId, delegate the effect, and encode the receipt.
-  let seenIsProposer = null;
+  // Inject a fake on-chain approver: the signer must validate net+recipient, delegate the
+  // effect (no isProposer flag — the approver itself decides open-vs-approve on-chain), and
+  // encode whatever receipt the approver returns.
+  let approveCalls = 0;
   const fakeApprover = {
-    approveMint: async (p, isProposer) => {
-      seenIsProposer = isProposer;
+    approveMint: async function (p) {
+      approveCalls++;
+      // The signer must delegate with ONLY the proposal — no isProposer flag (open-vs-approve
+      // is decided on-chain inside the approver, not by the coordinator).
+      assert.strictEqual(arguments.length, 1, "approveMint takes only the proposal");
       assert.strictEqual(p.orderHashHex, orderHashHex, "approver receives the pinned order hash");
       return { orderAddr: p.orderAddr, myIdx: 0, role: "propose" };
     },
   };
   const opTon = new KeyedSigner("op-1", "", "", FEES, null, DISABLED_SOURCE_VALIDATION, null, fakeApprover);
   const tonAppr = await opTon.approveGramMint(pegIn, mintProposal);
-  assert.strictEqual(seenIsProposer, true, "op-1 is the designated proposer");
   assert.ok(tonAppr.signature.startsWith("ton:EQorder_addr:0:propose"), "on-chain receipt encoded into approval");
   assert.strictEqual(tonAppr.operatorId, "op-1");
-  console.log("[ton] signer validates + delegates on-chain approval as PROPOSER, encodes receipt OK");
+  console.log("[ton] signer validates + delegates on-chain approval, encodes receipt OK");
 
-  // a non-proposer operator must compute isProposer=false
+  // ANY operator delegates identically — no operator is a privileged proposer.
   const opTon2 = new KeyedSigner("op-2", "", "", FEES, null, DISABLED_SOURCE_VALIDATION, null, fakeApprover);
-  await opTon2.approveGramMint(pegIn, mintProposal);
-  assert.strictEqual(seenIsProposer, false, "op-2 is not the designated proposer -> approve, not propose");
+  const tonAppr2 = await opTon2.approveGramMint(pegIn, mintProposal);
+  assert.strictEqual(tonAppr2.operatorId, "op-2", "op-2 delegates the same way (role decided on-chain)");
+  assert.strictEqual(approveCalls, 2, "both operators delegated to the approver");
 
   // net mismatch must be rejected BEFORE any on-chain effect
   await assert.rejects(opTon.approveGramMint(pegIn, { ...mintProposal, amountMilliViz: "1" }), /net/);
   // a signer with NO approver configured must refuse (never silently unauthorized)
   const opNoTon = new KeyedSigner("op-1", "", "", FEES, null, DISABLED_SOURCE_VALIDATION);
   await assert.rejects(opNoTon.approveGramMint(pegIn, mintProposal), /approver not configured/);
-  console.log("[ton] non-proposer role + net mismatch + missing-approver all handled OK");
+  console.log("[ton] operator-agnostic delegation + net mismatch + missing-approver all handled OK");
 
   console.log("\nRESULT: VIZ release signing+merge works; TON mint approval delegates the");
   console.log("on-chain effect through the real signer. Order execution is proven in");

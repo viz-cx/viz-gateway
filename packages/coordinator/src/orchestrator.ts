@@ -21,21 +21,9 @@ export interface BuildResult {
   feeMilliViz: bigint;
 }
 
-/** Per-action context the coordinator supplies when building a proposal. */
-export interface BuildContext {
-  /**
-   * Operator ids currently live, in the EXACT order the orchestrator will contact
-   * them (see `process`). The GRAM mint uses `liveOperatorIds[0]` as the on-chain
-   * proposer, so the designated proposer is always the first signer contacted —
-   * proposer-first, and derived from the same snapshot as the contact loop so the
-   * two cannot disagree. Empty only if no signer is registered.
-   */
-  liveOperatorIds: string[];
-}
-
 /** Builds the shared proposal for an action and broadcasts it once signed. */
 export interface Broadcaster {
-  buildProposal(action: CanonicalAction, ctx: BuildContext): Promise<BuildResult>;
+  buildProposal(action: CanonicalAction): Promise<BuildResult>;
   broadcast(action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string>;
   /**
    * Check whether this action was already executed on the destination chain. Called
@@ -92,9 +80,6 @@ export class Orchestrator {
   }
 
   async process(action: CanonicalAction): Promise<OrchestrationResult> {
-    // The proposer/contact order both come from this ONE live snapshot, so the GRAM
-    // designated proposer (liveOperatorIds[0]) is exactly the first signer contacted.
-    const ctx: BuildContext = { liveOperatorIds: this.signers.map((s) => s.operatorId) };
     // Idempotency: if the action already landed on-chain (e.g. the process crashed
     // after broadcast but before CONFIRMED), short-circuit to avoid a double-mint or
     // double-release. buildProposal is still called for the fee amount (PEG_IN).
@@ -107,7 +92,7 @@ export class Orchestrator {
       // already persisted the real fee at first delivery, so sweep accounting is unaffected.
       let feeMilliViz = 0n;
       try {
-        ({ feeMilliViz } = await this.broadcaster.buildProposal(action, ctx));
+        ({ feeMilliViz } = await this.broadcaster.buildProposal(action));
         await this.pinFee(action, feeMilliViz);
       } catch (err) {
         console.warn(`[orchestrator] ${action.id} executed but fee rebuild failed (using 0): ${String(err)}`);
@@ -123,7 +108,7 @@ export class Orchestrator {
       };
     }
 
-    const { proposal, feeMilliViz } = await this.broadcaster.buildProposal(action, ctx);
+    const { proposal, feeMilliViz } = await this.broadcaster.buildProposal(action);
     const fee = feeMilliViz.toString();
     // Pin the fee before broadcast so it survives a lost response / crash: recovery
     // reads it back rather than stranding the withheld fee as un-swept surplus.

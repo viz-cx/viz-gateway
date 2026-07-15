@@ -37,9 +37,10 @@ async function main(): Promise<void> {
     cfg.registration.nonceTtlMs,
   );
   // Built fresh per action from the LIVE registry so a just-registered / just-expired
-  // operator is reflected immediately, and always in federation operator order. The TON
-  // proposer is chosen per-action as the first LIVE signer in this list (see
-  // GramMintBroadcaster), so it is always the operator contacted first.
+  // operator is reflected immediately, and always in federation operator order. The
+  // orchestrator contacts these signers sequentially; for a TON mint, whichever live
+  // operator is asked first while the order is still absent opens it (no single
+  // designated proposer — the role fails over across live operators; see GramApprover).
   const currentSigners = (): HttpSignerClient[] =>
     registry.live().map((r) => new HttpSignerClient(r.operatorId, r.url, cfg.coordinator.signerApproveTimeoutMs));
 
@@ -48,9 +49,10 @@ async function main(): Promise<void> {
   const vizBroadcaster = new VizReleaseBroadcaster(vizChain, accounts, store);
 
   // Keyless on TON: no signer mnemonic. The coordinator only DESCRIBES the mint order;
-  // operators approve it on-chain from their own wallets. The designated proposer (the
-  // one operator that sends `new_order`) is chosen per-action as the first LIVE operator,
-  // so the mint no longer deadlocks when any single operator is offline.
+  // operators open/approve it on-chain from their own wallets. There is no designated
+  // proposer — the first live operator contacted opens the order and the role fails over
+  // to the next operator if that one is offline/unfunded, so the mint no longer deadlocks
+  // when any single operator is down.
   const tonBroadcaster = cfg.gram.jettonMinterAddress
     ? new GramMintBroadcaster(
         new GramHttpChain(
