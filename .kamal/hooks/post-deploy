@@ -26,7 +26,9 @@ for host in "${hosts[@]}"; do
   # Re-attach is idempotent (|| true swallows "already exists").
   ssh -p 666 "deploy@${host}" bash -s -- "${KAMAL_SERVICE}" "${KAMAL_VERSION}" "${alias_args}" <<'REMOTE'
 set -euo pipefail
-service="$1"; version="$2"; alias_args="$3"
+# $3 (alias_args) is empty for the coordinator; SSH joins argv into one string and the
+# remote shell drops a trailing empty word, so guard with ${3:-} rather than $3 under set -u.
+service="$1"; version="$2"; alias_args="${3:-}"
 for c in $(docker ps --format '{{.Names}}' --filter "name=${service}" | grep -F "${version}" || true); do
   # shellcheck disable=SC2086  # alias_args must word-split into flags.
   docker network connect ${alias_args} platform_net "$c" 2>/dev/null || true
