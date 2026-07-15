@@ -35,6 +35,12 @@ COPY --from=build /app/packages ./packages
 COPY --from=build /app/contracts ./contracts
 COPY --from=build /app/setup-viz ./setup-viz
 COPY --from=build /app/tools ./tools
+# The committed federation manifest (2-of-3) travels with the image. Runtime reads
+# FEDERATION_MANIFEST=./federation.json (config.ts) relative to WORKDIR /app; if it is
+# absent, loadConfig() silently falls back to count-only 1-of-1 synthesis — a signer would
+# register against the wrong operator set. Copied from the build CONTEXT (the build stage
+# never needs it), so it is NOT gated behind .dockerignore's env/keystore excludes.
+COPY federation.json ./federation.json
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && mkdir -p /app/data && chown -R gw:gw /app/data
 USER gw

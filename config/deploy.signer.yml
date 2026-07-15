@@ -1,0 +1,78 @@
+# Kamal 2 — op-1's KEYED signer app on axveer (co-located with, but isolated from, the
+# keyless coordinator). Separate Kamal service = separate image env + secrets file, so the
+# keyless/keyed custody split is never blurred.
+#
+# KEYS: op-1's VIZ active-authority WIF + GRAM (W5) mnemonic are sealed into a passphrase
+# keystore placed OUT-OF-BAND on the mounted volume at /app/data/keystore.mainnet.json
+# (never committed, never in the image). config.hydrateKeystore() decrypts it at boot using
+# FED_KEYSTORE_PASSPHRASE. The signer derives its op-1 slot from the VIZ key (PR #72).
+#
+# REACHABILITY: the coordinator pushes /approve to this signer over the private platform_net
+# docker network via the stable alias `signer-op1` (set by .kamal/hooks/post-deploy — the
+# container name is version-suffixed and not a stable target). SIGNER_ADVERTISE_URL is that
+# alias; self-registration to the coordinator goes out to the public host.
+
+service: viz-gateway-signer
+image: chiliec/viz-gateway
+
+# The app has a single non-web role; tell Kamal which role is primary (default is `web`).
+primary_role: signer
+
+ssh:
+  user: deploy
+  port: 666
+
+registry:
+  server: ghcr.io
+  username: chiliec
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  remote: ssh://axveer-builder
+  local: false
+
+# op-1's own local store + sealed keystore + logs. Independent of the coordinator's volume.
+volumes:
+  - "/opt/viz-gateway-signer/data:/app/data"
+
+servers:
+  signer:
+    hosts:
+      - axveer.io
+    proxy: false                      # not public; reached privately via platform_net alias
+    env:
+      clear:
+        SERVICE: signer
+
+env:
+  clear:
+    NODE_ENV: production
+    STORE_URL: sqlite:/app/data/gateway.sqlite
+    LOG_DIR: /app/data/logs
+    FEDERATION_MANIFEST: ./federation.json
+    # --- Signer listen + advertise (coordinator reaches /approve at the platform_net alias) ---
+    SIGNER_LISTEN: 0.0.0.0:8101
+    SIGNER_ADVERTISE_URL: http://signer-op1:8101
+    COORDINATOR_URL: https://gateway.viz.cx
+    # --- Sealed key custody (secret vars come from the keystore, not the env) ---
+    FED_KEYSTORE: /app/data/keystore.mainnet.json
+    # --- VIZ chain (op-1 self-trusts node.viz.cx this launch; F2 independence rests on
+    #     op-2/op-3 running separate hardware/keys/nodes) ---
+    VIZ_NODE_URL: https://node.viz.cx
+    VIZ_GATEWAY_ACCOUNT_GRAM: gram.gate
+    VIZ_GATEWAY_ACCOUNT_SOLANA: solana.gate
+    FEES_GATE_ACCOUNT: fees.gate
+    # --- GRAM (TON) runtime ---
+    GRAM_ENDPOINT: https://toncenter.com/api/v2/jsonRPC
+    GRAM_JETTON_MINTER_ADDRESS: EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
+    GRAM_MULTISIG_ADDRESS: EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
+    GRAM_GATEWAY_JETTON_WALLET: EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
+    # --- Caps: UNLIMITED (MUST match the coordinator app) ---
+    CAP_PER_TX_MILLI_VIZ: "1000000000000000000000000000000"
+    CAP_24H_MILLI_VIZ: "1000000000000000000000000000000"
+    MANUAL_REVIEW_ABOVE_MILLI_VIZ: "1000000000000000000000000000000"
+  secret:
+    - GRAM_API_KEY                    # signer does live GRAM propose/approve → needs toncenter key
+    - FED_KEYSTORE_PASSPHRASE         # unseals keystore.mainnet.json at boot

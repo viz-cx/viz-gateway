@@ -1,0 +1,117 @@
+# Kamal 2 — op-1's KEYLESS coordinator app on axveer.
+#
+# Five processes off ONE image, each a Kamal role selecting its service via env SERVICE
+# (docker-entrypoint.sh switches on $SERVICE): coordinator (web, proxied at gateway.viz.cx)
+# + viz-watcher / gram-watcher / dispatcher / recon (workers, no proxy).
+#
+# STORE: sqlite on a SHARED host volume, NOT postgres. createStore() only implements
+# sqlite:/memory: ("Postgres … is a future driver") — a postgres:// URL crashes at boot.
+# All five roles bind-mount the SAME host dir (/opt/viz-gateway-coordinator/data) → one
+# gateway.sqlite file, which SqliteGatewayStore documents as shared across processes.
+#
+# CUSTODY: this app holds NO keys. Never add VIZ_SIGNING_WIF / GRAM_SIGNER_MNEMONIC /
+# FED_KEYSTORE_* here — those live only in the separate viz-gateway-signer app.
+
+service: viz-gateway-coordinator
+image: chiliec/viz-gateway            # → ghcr.io/chiliec/viz-gateway via registry.server
+
+ssh:
+  user: deploy
+  port: 666                           # hardened sshd (inventory.yml); root:22 is locked out
+
+registry:
+  server: ghcr.io
+  username: chiliec
+  password:
+    - KAMAL_REGISTRY_PASSWORD         # GHCR PAT — SOPS shared.enc.yaml docker_registry_password
+
+builder:
+  arch: amd64
+  remote: ssh://axveer-builder        # native amd64 remote builder (deploy@65.109.104.157:666)
+  local: false
+
+# kamal-proxy owns :443 on axveer and terminates TLS for gateway.viz.cx (clean LE cert,
+# no cross-box hop — vpn-amnezia can't serve :443). Applies to the `web` role only; the
+# worker roles set proxy: false below.
+proxy:
+  ssl: true
+  hosts:
+    - gateway.viz.cx
+  app_port: 8100
+  healthcheck:
+    path: /health                     # coordinator serves GET /health (index.ts)
+
+# One shared sqlite file + rotated logs for all five roles. Host dir is created by Kamal.
+volumes:
+  - "/opt/viz-gateway-coordinator/data:/app/data"
+
+servers:
+  web:                                # the coordinator HTTP service (registration + /approve fan-out)
+    hosts:
+      - axveer.io
+    env:
+      clear:
+        SERVICE: coordinator
+  viz-watcher:
+    hosts:
+      - axveer.io
+    proxy: false
+    env:
+      clear:
+        SERVICE: viz-watcher
+  gram-watcher:
+    hosts:
+      - axveer.io
+    proxy: false
+    env:
+      clear:
+        SERVICE: gram-watcher
+  dispatcher:
+    hosts:
+      - axveer.io
+    proxy: false
+    env:
+      clear:
+        SERVICE: dispatcher
+  recon:
+    hosts:
+      - axveer.io
+    proxy: false
+    env:
+      clear:
+        SERVICE: recon
+
+# Shared across every role (merged with the per-role SERVICE above). PUBLIC values only.
+env:
+  clear:
+    NODE_ENV: production
+    # --- Storage (sqlite on the shared volume; see header) ---
+    STORE_URL: sqlite:/app/data/gateway.sqlite
+    LOG_DIR: /app/data/logs
+    # --- Federation (committed manifest wins over count-only synthesis) ---
+    FEDERATION_MANIFEST: ./federation.json
+    # --- Coordinator <-> signers (self-registration; PR #71/#72) ---
+    # Signers push their SIGNER_ADVERTISE_URL here; the dispatcher drains the outbox here.
+    # Co-located + op-2/op-3 signers all target the public host.
+    COORDINATOR_LISTEN: 0.0.0.0:8100
+    COORDINATOR_URL: https://gateway.viz.cx
+    # --- VIZ chain (home: lock/release). Read-only for the keyless coordinator side. ---
+    VIZ_NODE_URL: https://node.viz.cx
+    VIZ_GATEWAY_ACCOUNT_GRAM: gram.gate
+    VIZ_GATEWAY_ACCOUNT_SOLANA: solana.gate    # dormant this launch, but the registry requires it
+    FEES_GATE_ACCOUNT: fees.gate
+    # --- GRAM (TON) runtime — mainnet wVIZ minter + 2-of-3 multisig ---
+    GRAM_ENDPOINT: https://toncenter.com/api/v2/jsonRPC
+    GRAM_JETTON_MINTER_ADDRESS: EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
+    GRAM_MULTISIG_ADDRESS: EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
+    GRAM_GATEWAY_JETTON_WALLET: EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
+    # --- Caps: UNLIMITED at launch (Phase 0 decision, risk accepted). MUST match the
+    #     signer app or an approval the coordinator allows gets rejected downstream. ---
+    CAP_PER_TX_MILLI_VIZ: "1000000000000000000000000000000"
+    CAP_24H_MILLI_VIZ: "1000000000000000000000000000000"
+    MANUAL_REVIEW_ABOVE_MILLI_VIZ: "1000000000000000000000000000000"
+    # --- Reconciliation: TON-only launch (recon fails closed if GRAM is missing) ---
+    RECON_EXPECTED_REMOTES: GRAM
+  secret:
+    - GRAM_API_KEY                    # toncenter API key (rate limits) — SOPS app secret
+    # STAFF_WEBHOOK_URL: add to .kamal/secrets + the SOPS file to wire fail-closed alerts.
