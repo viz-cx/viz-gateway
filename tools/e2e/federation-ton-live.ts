@@ -116,8 +116,8 @@ async function main() {
   // designated proposer (operators[0]) is contacted first once it has registered.
   const { signerSpecs, coordinatorEnv } = buildFederationRunEnv(fedCfg, {
     ...baseEnv,
-    COORDINATOR_LISTEN: "127.0.0.1:8080",
-    COORDINATOR_URL: "http://127.0.0.1:8080",
+    COORDINATOR_LISTEN: "127.0.0.1:8100",
+    COORDINATOR_URL: "http://127.0.0.1:8100",
     // Each signer's GramApprover waits for its proposed order / approval to land
     // on-chain. Testnet inclusion + toncenter view lag exceed the 60s default
     // (observed: order did not appear within 60s), so widen it for the live run.
@@ -132,7 +132,7 @@ async function main() {
     FEDERATION_N: String(fedCfg.n),
     FEDERATION_THRESHOLD: String(fedCfg.threshold),
     FEDERATION_MANIFEST: coordinatorEnv["FEDERATION_MANIFEST"]!,
-    COORDINATOR_URL: "http://127.0.0.1:8080",
+    COORDINATOR_URL: "http://127.0.0.1:8100",
     // Don't refund a mint that is still legitimately collecting on-chain approvals.
     DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),
   };

@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   };
 
   const [host, portStr] = cfg.coordinator.listen.split(":");
-  const port = Number.parseInt(portStr ?? "8080", 10);
+  const port = Number.parseInt(portStr ?? "8100", 10);
 
   const server = createServer((req, res) => {
     const json = (code: number, obj: unknown) => {

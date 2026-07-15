@@ -94,8 +94,8 @@ async function main() {
   // proposer (op-1, first in signerSpecs), so strip any TON mnemonic from its env.
   const { signerSpecs, coordinatorEnv } = buildFederationRunEnv(fedCfg, {
     ...baseEnv,
-    COORDINATOR_LISTEN: "127.0.0.1:8080",
-    COORDINATOR_URL: "http://127.0.0.1:8080",
+    COORDINATOR_LISTEN: "127.0.0.1:8100",
+    COORDINATOR_URL: "http://127.0.0.1:8100",
     GRAM_APPROVE_MAX_WAIT_MS: String(GRAM_APPROVE_MAX_WAIT_MS),
     GRAM_ORDER_VALUE_NANO: String(GRAM_ORDER_VALUE_NANO),
   });
@@ -105,7 +105,7 @@ async function main() {
     ...baseEnv,
     FEDERATION_N: String(fedCfg.n),
     FEDERATION_THRESHOLD: String(fedCfg.threshold),
-    COORDINATOR_URL: "http://127.0.0.1:8080",
+    COORDINATOR_URL: "http://127.0.0.1:8100",
     DISPATCHER_WINDOW_MS: String(DISPATCHER_WINDOW_MS),
     DISPATCHER_SUBMIT_TIMEOUT_MS: String(DISPATCHER_SUBMIT_TIMEOUT_MS),
     DISPATCHER_SIGNING_TIMEOUT_PEG_IN_MS: String(DISPATCHER_SUBMIT_TIMEOUT_MS),

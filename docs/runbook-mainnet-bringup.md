@@ -73,6 +73,19 @@ Operator TON signer wallets (op-1/2/3, order baked into the multisig address):
 > assumes ≥ a strict-majority of signers are on independent hardware under independent
 > people. At 2-of-3, at least op-2 and op-3 must be genuinely independent.
 
+**Port map (gateway = the `81xx` block; firewall it as one).** Deliberately clear of a
+co-located `viz-cpp-node`, which owns `8090`/`8091` (HTTP/WS RPC) and `8092`/`8093`
+(snapshot/wallet):
+
+| Port | Process | Box |
+|---|---|---|
+| `8100` | coordinator (`COORDINATOR_LISTEN`) | coordinator box |
+| `8110` | deposit-address lookup (`LOOKUP_LISTEN`, loopback) | coordinator box |
+| `8101` | signer (`SIGNER_LISTEN`) | each signer box (all use `8101`; own hardware) |
+
+(In the single-box e2e harness the signers instead climb `8101, 8102, …` from
+`FED_BASE_PORT` so they don't collide with each other or the coordinator.)
+
 ---
 
 ## 2. F2 independence invariant (read before configuring any signer)
@@ -124,16 +137,16 @@ Fill it in:
 - `SERVICE=signer`. (No `OPERATOR_ID` needed — the signer derives its slot from your VIZ
   key via `federation.json`. Set it only to assert a slot; a wrong value warns and is
   overridden by the key.)
-- `SIGNER_LISTEN=0.0.0.0:8100` (bind so the coordinator can reach `/approve`; put it
-  behind mTLS/VPN — it is an authenticated-by-network surface). Default is `8100`, not
+- `SIGNER_LISTEN=0.0.0.0:8101` (bind so the coordinator can reach `/approve`; put it
+  behind mTLS/VPN — it is an authenticated-by-network surface). Default is `8101`, not
   `8090`: a co-located `viz-cpp-node` owns `8090`/`8091` (HTTP/WS RPC) and `8092`/`8093`
   (snapshot/wallet), so the `810x` block avoids an `EADDRINUSE` on the same host.
 - `VIZ_NODE_URL` = **your own** VIZ node (F2).
 - `GRAM_ENDPOINT` = **your own** TON node; keep the public `GRAM_*` addresses as shipped.
 - `GRAM_API_KEY` = your own toncenter key.
 - `SIGNER_ADVERTISE_URL` = the URL the coordinator can reach this signer at
-  (e.g. `http://op-N-host:8100`) — the coordinator discovers you by self-registration.
-- `COORDINATOR_URL` = the coordinator box's reachable URL (e.g. `http://coord-host:8080`).
+  (e.g. `http://op-N-host:8101`) — the coordinator discovers you by self-registration.
+- `COORDINATOR_URL` = the coordinator box's reachable URL (e.g. `http://coord-host:8100`).
 - `VIZ_SIGNING_WIF` must be set (sealed in FED_KEYSTORE): the registration challenge is
   signed with your VIZ operator key and verified against your `vizPubkey` in federation.json.
 - The coordinator no longer needs a `SIGNER_ENDPOINTS` list.
@@ -160,9 +173,9 @@ FED_KEYSTORE=./keystore.mainnet.json
 ```bash
 env $(grep -v '^#' .env.mainnet | xargs) npm run start:signer
 ```
-Expect: `[signer] operator=op-N listening on 0.0.0.0:8100 (federation 2-of-3)`.
+Expect: `[signer] operator=op-N listening on 0.0.0.0:8101 (federation 2-of-3)`.
 Health/behaviour: `POST /approve` is the only route; when the gateway is paused it
-returns **423**. Confirm the coordinator box can reach `http://<op-N-host>:8100/approve`.
+returns **423**. Confirm the coordinator box can reach `http://<op-N-host>:8101/approve`.
 
 ---
 
@@ -176,7 +189,7 @@ cp .env.mainnet.example .env.mainnet   # or reuse the op-1 file that already has
   `{registered, expected}`; wait for `registered` to reach the threshold before smoke-testing.
 - `REGISTRATION_LEASE_MS` / `REGISTRATION_HEARTBEAT_MS` / `REGISTRATION_NONCE_TTL_MS` may be
   left at defaults (60s / 20s / 30s).
-- `COORDINATOR_LISTEN=0.0.0.0:8080`, `COORDINATOR_URL=http://127.0.0.1:8080`.
+- `COORDINATOR_LISTEN=0.0.0.0:8100`, `COORDINATOR_URL=http://127.0.0.1:8100`.
 - `FEDERATION_MANIFEST=./federation.json` (2-of-3 is read from here).
 - `RECON_EXPECTED_REMOTES=GRAM` (TON-only launch — recon fails closed if GRAM is missing
   and does not expect a Solana remote yet).
@@ -209,7 +222,7 @@ selects the process — but keep it set so a container/entrypoint that dispatche
 `$SERVICE` also works.)
 
 Expect:
-- `[coordinator] listening on 0.0.0.0:8080; threshold=2-of-3; awaiting 3 signer registration(s)`
+- `[coordinator] listening on 0.0.0.0:8100; threshold=2-of-3; awaiting 3 signer registration(s)`
   (`GET /health` initially shows `registered=0, expected=3`; climbs as each signer starts).
 - `recon` reports per-chain `locked ≥ circulating + unswept`, `status=OK`. On an empty
   system this is `locked=0 circulating=0` for GRAM.

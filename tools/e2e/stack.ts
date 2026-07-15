@@ -35,7 +35,7 @@ export async function launchStack(
     child.stderr?.pipe(out);
     procs.push(child);
   }
-  const coordUrl = (runEnv["COORDINATOR_URL"] ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const coordUrl = (runEnv["COORDINATOR_URL"] ?? "http://127.0.0.1:8100").replace(/\/$/, "");
   const threshold = Number.parseInt(runEnv["FEDERATION_THRESHOLD"] ?? "1", 10);
   if (services.includes("coordinator") && services.includes("signer")) {
     await waitForRegistrations(coordUrl, threshold, 30000);
@@ -135,7 +135,7 @@ export async function launchFederationStack(
   // Coordinator + signers race to boot; then signers self-register. Wait until at least
   // `threshold` operators have registered before returning, so the first /submit isn't
   // rejected under-threshold on a cold stack.
-  const coordUrl = (coordinatorEnv["COORDINATOR_URL"] ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const coordUrl = (coordinatorEnv["COORDINATOR_URL"] ?? "http://127.0.0.1:8100").replace(/\/$/, "");
   const threshold = Number.parseInt(coordinatorEnv["FEDERATION_THRESHOLD"] ?? "1", 10);
   await waitForRegistrations(coordUrl, threshold, 30000);
 

@@ -118,7 +118,7 @@ async function runTopologyTests(stack: FederationStack, _runId: string): Promise
   }
 
   // Verify coordinator /health
-  const coordUrl = process.env["COORDINATOR_URL"] ?? "http://127.0.0.1:8080";
+  const coordUrl = process.env["COORDINATOR_URL"] ?? "http://127.0.0.1:8100";
   const health = await httpGet(`${coordUrl}/health`);
   if (health.ok) {
     pass(`coordinator /health responding at ${coordUrl}`);
@@ -171,7 +171,7 @@ async function runUnderThresholdFaultTest(
   // POST a synthetic action to the coordinator. With < threshold signers running
   // (and all rejecting at F2 on unknown actions), the coordinator MUST return
   // {broadcast: false}.
-  const coordUrl = process.env["COORDINATOR_URL"] ?? "http://127.0.0.1:8080";
+  const coordUrl = process.env["COORDINATOR_URL"] ?? "http://127.0.0.1:8100";
   const result = await httpPost(`${coordUrl}/submit`, {
     action: syntheticPegOutAction(runId),
   });
@@ -236,8 +236,8 @@ async function main() {
   const baseEnv = buildRunEnv(baseCfg);
   const { signerSpecs, coordinatorEnv } = buildFederationRunEnv(fedCfg, {
     ...baseEnv,
-    COORDINATOR_LISTEN: process.env["COORDINATOR_LISTEN"] ?? "127.0.0.1:8080",
-    COORDINATOR_URL: process.env["COORDINATOR_URL"] ?? "http://127.0.0.1:8080",
+    COORDINATOR_LISTEN: process.env["COORDINATOR_LISTEN"] ?? "127.0.0.1:8100",
+    COORDINATOR_URL: process.env["COORDINATOR_URL"] ?? "http://127.0.0.1:8100",
   });
 
   const logDir = `tools/e2e/logs/fed-${baseCfg.runId}`;

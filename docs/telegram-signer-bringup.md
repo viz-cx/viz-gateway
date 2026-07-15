@@ -33,9 +33,9 @@ It asks for a passphrase (you'll re-enter it when the signer starts). The mnemon
 *3. Create `.env.mainnet` in the repo root.* Fill in the `<...>` values; the addresses below are public and fixed — copy them verbatim:
 ```
 SERVICE=signer
-SIGNER_LISTEN=0.0.0.0:8100             # bind so I can reach /approve (put behind VPN/mTLS)
-SIGNER_ADVERTISE_URL=http://<your-host>:8100   # the URL I can reach you at
-COORDINATOR_URL=<coordinator URL I send you>   # e.g. http://coord-host:8080
+SIGNER_LISTEN=0.0.0.0:8101             # bind so I can reach /approve (put behind VPN/mTLS)
+SIGNER_ADVERTISE_URL=http://<your-host>:8101   # the URL I can reach you at
+COORDINATOR_URL=<coordinator URL I send you>   # e.g. http://coord-host:8100
 
 FEDERATION_MANIFEST=./federation.json
 FED_KEYSTORE=./keystore.mainnet.json
@@ -53,7 +53,7 @@ GRAM_GATEWAY_JETTON_WALLET=EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
 
 ⚠️ *F2 independence:* `VIZ_NODE_URL` and `GRAM_ENDPOINT` MUST be your own nodes. Your signer re-reads every peg-in/peg-out from these before signing — if they point at mine, your independent check is gone.
 
-ℹ️ *Port note:* the signer listens on *8100*, not 8090. If your VIZ node runs on the same box, it already owns 8090/8091 (its HTTP/WS RPC) — 8100 stays clear of it. Pick any free port if 8100 is taken; just keep `SIGNER_LISTEN` and `SIGNER_ADVERTISE_URL` on the same one.
+ℹ️ *Port note:* the signer listens on *8101*, not 8090. If your VIZ node runs on the same box, it already owns 8090/8091 (its HTTP/WS RPC) — 8101 stays clear of it. Pick any free port if 8101 is taken; just keep `SIGNER_LISTEN` and `SIGNER_ADVERTISE_URL` on the same one.
 
 *4. Start your signer* (run from the repo root):
 ```
@@ -63,9 +63,9 @@ Enter your keystore passphrase when prompted.
 
 It should print (`op-N` = the slot it worked out from *your* VIZ key — you don't set it):
 ```
-[signer] operator=op-N listening on 0.0.0.0:8100 (federation 2-of-3)
+[signer] operator=op-N listening on 0.0.0.0:8101 (federation 2-of-3)
 ```
-and self-register with me within ~20s. I'll confirm on my side that `registered` climbed and I see `registered op-N -> http://<your-host>:8100`. Tell me which `op-N` it printed so we can double-check the labels match what I expect.
+and self-register with me within ~20s. I'll confirm on my side that `registered` climbed and I see `registered op-N -> http://<your-host>:8101`. Tell me which `op-N` it printed so we can double-check the labels match what I expect.
 
 ---
 

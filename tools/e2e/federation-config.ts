@@ -3,7 +3,7 @@
 // Env vars (all required unless noted):
 //   FED_N              — total operator count (e.g. 3)
 //   FED_THRESHOLD      — signing threshold (e.g. 2)
-//   FED_BASE_PORT      — first signer port; subsequent signers get +1, +2, … (default 8100,
+//   FED_BASE_PORT      — first signer port; subsequent signers get +1, +2, … (default 8101,
 //                        clear of a co-located viz-cpp-node's 8090-8093 RPC/snapshot/wallet)
 //   FED_OP<i>_ID       — operator id for signer i (1-indexed, e.g. FED_OP1_ID=op-1)
 //   FED_OP<i>_WIF      — VIZ signing WIF for signer i
@@ -50,7 +50,7 @@ function opt(env: NodeJS.ProcessEnv, name: string): string | undefined {
 export function loadFederationConfig(env: NodeJS.ProcessEnv): FederationConfig {
   const n = Number.parseInt(req(env, "FED_N"), 10);
   const threshold = Number.parseInt(req(env, "FED_THRESHOLD"), 10);
-  const basePort = Number.parseInt(env["FED_BASE_PORT"] ?? "8100", 10);
+  const basePort = Number.parseInt(env["FED_BASE_PORT"] ?? "8101", 10);
   if (!Number.isInteger(n) || n < 1) throw new Error(`FED_N must be a positive integer, got: ${env["FED_N"]}`);
   if (!Number.isInteger(threshold) || threshold < 1 || threshold > n)
     throw new Error(`FED_THRESHOLD must be in 1..${n}, got: ${env["FED_THRESHOLD"]}`);
