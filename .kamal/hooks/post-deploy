@@ -23,15 +23,39 @@ fi
 IFS=',' read -ra hosts <<< "${KAMAL_HOSTS:?}"
 for host in "${hosts[@]}"; do
   # deploy is in the docker group (no sudo); ssh port 666 per inventory.yml.
-  # Re-attach is idempotent (|| true swallows "already exists").
   ssh -p 666 "deploy@${host}" bash -s -- "${KAMAL_SERVICE}" "${KAMAL_VERSION}" "${alias_args}" <<'REMOTE'
 set -euo pipefail
 # $3 (alias_args) is empty for the coordinator; SSH joins argv into one string and the
 # remote shell drops a trailing empty word, so guard with ${3:-} rather than $3 under set -u.
 service="$1"; version="$2"; alias_args="${3:-}"
+
+# Do NOT blanket `|| true` the connect: that once swallowed a REAL failure, left the signer
+# off platform_net, and the coordinator silently lost its /approve route while the deploy
+# reported success. Instead: treat only "already attached" as benign, surface any other
+# connect error, and — the real guarantee — VERIFY membership afterwards, failing the hook
+# loudly if the container isn't on platform_net.
+found=0
 for c in $(docker ps --format '{{.Names}}' --filter "name=${service}" | grep -F "${version}" || true); do
+  found=1
   # shellcheck disable=SC2086  # alias_args must word-split into flags.
-  docker network connect ${alias_args} platform_net "$c" 2>/dev/null || true
+  if ! err="$(docker network connect ${alias_args} platform_net "$c" 2>&1)"; then
+    # Re-attach across redeploys is expected; only "already exists" is benign.
+    if ! grep -qiE 'already exists|already attached' <<<"$err"; then
+      echo "post-deploy: failed to attach ${c} to platform_net: ${err}" >&2
+      exit 1
+    fi
+  fi
+  # Fail closed unless the container is genuinely on platform_net now.
+  if ! docker inspect -f '{{range $n,$_ := .NetworkSettings.Networks}}{{$n}}{{"\n"}}{{end}}' "$c" \
+       | grep -qx platform_net; then
+    echo "post-deploy: ${c} is NOT on platform_net after connect — coordinator↔signer hop is broken" >&2
+    exit 1
+  fi
 done
+
+if [ "$found" -eq 0 ]; then
+  echo "post-deploy: no running '${service}' container matched version '${version}' — nothing attached to platform_net" >&2
+  exit 1
+fi
 REMOTE
 done
