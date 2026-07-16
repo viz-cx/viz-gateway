@@ -55,9 +55,23 @@ const tonConnectUI = new TonConnectUI({
 const ton = new TonClient({ endpoint: CONFIG.rpc.toncenter });
 let userAddress = null; // friendly string when connected
 
+// toncenter's public endpoint rate-limits hard (HTTP 429) and flakes; retry with
+// exponential backoff so balance/deployment reads survive transient failures.
+async function withRetry(fn, { tries = 6, delay = 700 } = {}) {
+  let wait = delay;
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (i >= tries - 1) throw e;
+      await new Promise((r) => setTimeout(r, wait));
+      wait *= 2;
+    }
+  }
+}
+
 async function walletAddressOf(owner) {
   const master = ton.open(JettonMaster.create(Address.parse(CONFIG.wviz.minter)));
-  return master.getWalletAddress(Address.parse(owner));
+  return withRetry(() => master.getWalletAddress(Address.parse(owner)));
 }
 
 /* ---------- Peg-out ---------- */
@@ -146,14 +160,20 @@ async function onWalletChange() {
   copyEl.classList.remove("hidden");
   try {
     const jw = await walletAddressOf(userAddress);
-    // Deployment check via plain REST — authoritative, independent of get-method availability
-    const r = await fetch(`https://toncenter.com/api/v2/getAddressInformation?address=${encodeURIComponent(jw.toString())}`);
-    const active = (await r.json())?.result?.state === "active";
+    // Deployment check via plain REST — authoritative, independent of get-method availability.
+    // Treat a non-2xx (429/5xx) as a retryable failure so we don't mistake a rate-limit for
+    // an undeployed wallet and wrongly show the activation surcharge.
+    const info = await withRetry(async () => {
+      const r = await fetch(`https://toncenter.com/api/v2/getAddressInformation?address=${encodeURIComponent(jw.toString())}`);
+      if (!r.ok) throw new Error(`toncenter ${r.status}`);
+      return r.json();
+    });
+    const active = info?.result?.state === "active";
     firstTimeSurcharge = !active;
     if (active) {
       // Balance fetch is best-effort; firstTimeSurcharge is already correctly set above
       try {
-        const res = await ton.runMethod(jw, "get_wallet_data", []);
+        const res = await withRetry(() => ton.runMethod(jw, "get_wallet_data", []));
         userBalanceBaseUnits = res.stack.readBigNumber();
         const display = (Number(userBalanceBaseUnits) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
         balEl.textContent = `Balance: ${display} wVIZ`;
@@ -215,7 +235,7 @@ function hideItem(id) { $(id).classList.add("hidden"); }
 
 async function loadSupply() {
   try {
-    const res = await ton.runMethod(Address.parse(CONFIG.wviz.minter), "get_jetton_data", []);
+    const res = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.minter), "get_jetton_data", []));
     const totalSupply = res.stack.readBigNumber(); // base units
     setItem("st-supply", "wVIZ circulating", (Number(totalSupply) / 1000).toLocaleString() + " wVIZ");
     return Number(totalSupply) / 1000;
