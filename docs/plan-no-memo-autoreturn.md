@@ -1,6 +1,8 @@
 # Plan — auto-return no-memo / invalid-destination peg-ins
 
-**Status:** proposed (not started)
+**Status:** IMPLEMENTED 2026-07-16 (branch `feat/no-memo-refund-tooling`). All six design
+sections landed + spikes green (`npm run verify` exit 0, unit 88/88). The two Out-of-scope items
+below remain open (manual 2-of-3 refund of the already-stranded 2000 VIZ; unpausing).
 **Problem owner:** federation operators
 **Trigger:** live incident 2026-07-15 — `id → gram.gate` transfer of **2000 VIZ with an empty memo**
 (tx `3FB76DC9A71731B98C408D934434A471298CAFD1`, block 81664757) was silently dropped by the

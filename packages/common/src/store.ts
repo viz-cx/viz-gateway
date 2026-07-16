@@ -265,7 +265,7 @@ export class SqliteGatewayStore implements GatewayStore {
         `INSERT OR IGNORE INTO action_outbox(
            id, direction, remote_chain, recipient, sender, amount_milli_viz, fee_milli_viz,
            digest, status, attempts, last_error, txid, created_at, updated_at, next_attempt_at, parent_id
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, 0, ?)`,
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, ?, ?, 0, ?)`,
       )
       .run(
         input.id,
@@ -277,6 +277,7 @@ export class SqliteGatewayStore implements GatewayStore {
         (input.feeMilliViz ?? 0n).toString(),
         input.digest,
         input.status ?? "SEEN",
+        input.lastError ?? null,
         now,
         now,
         input.parentId ?? null,
@@ -527,7 +528,7 @@ export class InMemoryGatewayStore implements GatewayStore {
       digest: input.digest,
       status: input.status ?? "SEEN",
       attempts: 0,
-      lastError: null,
+      lastError: input.lastError ?? null,
       txid: null,
       createdAt: now,
       updatedAt: now,

@@ -21,10 +21,23 @@ export interface VizDeposit {
   to: string;
   /** Amount in integer milli-VIZ (1 VIZ = 1000). */
   amountMilliViz: bigint;
-  /** Remote chain to mint wrapped VIZ on, parsed from the memo's "<chain>:" prefix. */
+  /** Remote chain to mint wrapped VIZ on, determined by the receiving backing account. */
   remoteChain: RemoteChainId;
-  /** Destination address on `remoteChain`, parsed from the transfer memo. */
+  /**
+   * Destination address on `remoteChain`, from the transfer memo. Canonicalized to the
+   * empty-string sentinel "" when the memo is missing or malformed, so every operator
+   * derives an identical canonical digest for a destination-less deposit regardless of
+   * the exact invalid bytes. Only a valid address is ever a non-empty string here.
+   */
   remoteDestination: string;
+  /**
+   * True iff `remoteDestination` is a valid mint target for `remoteChain`. A false value
+   * means the deposit has NO mint destination (empty/malformed memo): it must NEVER be
+   * minted (enforced at the signer, `validatePegIn`) and is instead routed to an
+   * auto-refund back to the sender. The reader reconstructs the deposit either way rather
+   * than dropping it, so a no-memo deposit is durably tracked and returned, not stranded.
+   */
+  destinationValid: boolean;
 }
 
 /**

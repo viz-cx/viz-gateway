@@ -55,6 +55,13 @@ export interface EnqueueInput {
   digest: string;
   /** Initial status; default "SEEN". */
   status?: ActionStatus;
+  /**
+   * Initial lastError marker, set atomically with the insert. Used to durably tag an
+   * invalid-destination peg-in as HELD("INVALID_DESTINATION") so the dispatcher's auto-refund
+   * branch can find it even if the process crashes right after the enqueue (a two-step
+   * enqueue-then-setStatus would leave a crash window where the marker is missing).
+   */
+  lastError?: string;
   /** Parent action id for child rows (REFUND / FEE_SWEEP). */
   parentId?: string;
 }

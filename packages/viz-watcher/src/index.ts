@@ -84,6 +84,31 @@ async function main(): Promise<void> {
         const deposits = await chain.irreversibleDepositsSince(cursor, scannedTo);
         for (const dep of deposits) {
           const action = canonicalPegIn(dep);
+          // No-memo / invalid-destination deposit: it has NO valid mint target (the signer
+          // would refuse to mint it anyway), so it must never enter the mint/caps path. Enqueue
+          // it durably as HELD("INVALID_DESTINATION") — the marker the dispatcher's auto-refund
+          // branch keys on to return the gross to the sender. Skip caps (a refund returns funds;
+          // caps guard minting). Recipient is the "" sentinel; the refund target is `sender`.
+          if (!dep.destinationValid) {
+            const first = await store.enqueue({
+              id: action.id,
+              direction: "PEG_IN",
+              remoteChain: action.remoteChain,
+              recipient: action.recipient, // "" sentinel — never used (never minted)
+              sender: dep.from, // VIZ sender — the auto-refund target
+              amountMilliViz: action.amountMilliViz, // GROSS (refunded in full, no fee)
+              digest: action.digest,
+              status: "HELD",
+              lastError: "INVALID_DESTINATION",
+            });
+            if (first)
+              notifyStaff("deposits", `peg-in ${action.id} HELD: invalid/empty destination -> auto-refund to ${dep.from}`, {
+                id: action.id,
+                sender: dep.from,
+                amountMilliViz: String(action.amountMilliViz),
+              });
+            continue;
+          }
           const first = await store.enqueue({
             id: action.id,
             direction: "PEG_IN",

@@ -6,7 +6,7 @@ import viz, {
   type OpWrapper,
 } from "viz-js-lib";
 import {
-  validateRemoteAddress,
+  isValidRemoteAddress,
   GatewayAccounts,
   type CanonicalAction,
   type VizChain,
@@ -199,16 +199,17 @@ export class VizJsChain implements VizChain {
         const to = String(payload["to"] ?? "");
         if (!this.accounts.isBackingAccount(to)) continue;
         const chain = this.accounts.chainFor(to);
-        const destination = String(payload["memo"] ?? "").trim();
-        try {
-          // Memo is the raw remote address; the chain is determined by the receiving account.
-          // Reject empty memos, colons, and malformed addresses for this chain.
-          validateRemoteAddress(chain, destination);
-        } catch (err) {
-          // Malformed destination: not a valid peg-in target. Skip and warn
-          // (flag for manual refund); never silently default the destination chain.
-          console.warn(`[viz-chain] skipping deposit ${w.trx_id}:${w.op_in_trx}: ${String(err)}`);
-          continue;
+        const rawDestination = String(payload["memo"] ?? "").trim();
+        // Memo is the raw remote address; the chain is determined by the receiving account.
+        // A missing/malformed memo is NOT dropped anymore (that stranded funds — 2026-07-15
+        // incident): reconstruct the deposit flagged destinationValid=false and canonicalize the
+        // destination to the "" sentinel, so the watcher can enqueue it for auto-refund while the
+        // signer keeps it un-mintable. A valid address flows through exactly as before.
+        const destinationValid = isValidRemoteAddress(chain, rawDestination);
+        if (!destinationValid) {
+          console.warn(
+            `[viz-chain] deposit ${w.trx_id}:${w.op_in_trx} has invalid/empty destination memo "${rawDestination}" -> flag for auto-refund`,
+          );
         }
         deposits.push({
           trxId: w.trx_id,
@@ -218,7 +219,8 @@ export class VizJsChain implements VizChain {
           to,
           amountMilliViz: vizToMilli(String(payload["amount"] ?? "0.000 VIZ")),
           remoteChain: chain,
-          remoteDestination: destination,
+          remoteDestination: destinationValid ? rawDestination : "",
+          destinationValid,
         });
       }
     }
@@ -271,9 +273,14 @@ export class VizJsChain implements VizChain {
       );
     }
     const chain = this.accounts.chainFor(to);
-    const destination = String(payload["memo"] ?? "").trim();
-    // Throws on empty, colon-containing, or format-invalid address (no silent default).
-    validateRemoteAddress(chain, destination);
+    const rawDestination = String(payload["memo"] ?? "").trim();
+    // The destination SHAPE no longer throws here (it used to, which blocked even a manual
+    // refund of a no-memo deposit — see plan): reconstruct the deposit with destinationValid
+    // and the "" sentinel. The mint-validation layer (signer/validatePegIn) re-instates the
+    // never-mint guarantee by asserting destinationValid, so the security control is relocated,
+    // not removed. Structural violations above (no op / not a transfer / not a backing account)
+    // still throw — only the destination shape stops being fatal.
+    const destinationValid = isValidRemoteAddress(chain, rawDestination);
     return {
       trxId,
       opIndex,
@@ -282,7 +289,8 @@ export class VizJsChain implements VizChain {
       to,
       amountMilliViz: vizToMilli(String(payload["amount"] ?? "0.000 VIZ")),
       remoteChain: chain,
-      remoteDestination: destination,
+      remoteDestination: destinationValid ? rawDestination : "",
+      destinationValid,
     };
   }
 
