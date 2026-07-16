@@ -309,6 +309,19 @@ under-rated.
   holds. (VIZ and TON are genuinely keyless on the coordinator.) `feePayer` is pinned by the
   signer only when `SOLANA_SUBMITTER_PUBKEY` is configured; a wrong fee payer otherwise
   fails the on-chain nonce advance (still liveness-only).
+- **Encrypted peg-in memo support / gate memo key is a shared, non-fund secret.** VIZ
+  memos may be encrypted to the gate account's memo key (`#`-prefixed); the watcher +
+  signer decrypt them via `resolveMemoDestination` (`packages/viz-watcher/src/memo.ts`)
+  using `VIZ_MEMO_WIF_*` before address validation. The memo key controls **no funds**
+  (custody is the gram.gate 2-of-3 active authority) — its blast radius is *privacy*:
+  a leak lets the holder decrypt/read (and forge) destination memos, never move VIZ.
+  It is, however, a secret that must be **identical across all operators**: decryption
+  is deterministic and the canonical digest binds the *resolved* recipient, so an
+  operator missing/holding-a-wrong key resolves `""` and refuses — a liveness stall that
+  ends in auto-refund, never a wrong-destination mint (proven in `viz-memo-decrypt-spike`).
+  A malformed blob or wrong key fails closed to `""`. Same shared-config discipline as the
+  fee config; sealed in the keystore alongside `VIZ_SIGNING_WIF` (co-located with a
+  fund key, but strictly lower-value, so this widens no custody surface).
 - **Coordinator counts approvals it hasn't locally verified** (liveness-only by design;
   the chain rejects bad merges).
 - **Release proposal TaPoS uses head, not LIB** (low probability given VIZ finality).

@@ -76,3 +76,4 @@ env:
   secret:
     - GRAM_API_KEY                    # signer does live GRAM propose/approve → needs toncenter key
     - FED_KEYSTORE_PASSPHRASE         # unseals keystore.mainnet.json at boot
+    - VIZ_MEMO_WIF_GRAM               # gram.gate memo key — signer re-decrypts encrypted memos at F2 (non-fund; AUDIT.md §8)

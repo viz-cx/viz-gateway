@@ -12,7 +12,10 @@
 // Usage:
 //   # Seal: takes secrets from the env, writes the sealed file. Prompts for a passphrase (twice).
 //   VIZ_SIGNING_WIF=... GRAM_SIGNER_MNEMONIC="..." SOLANA_SIGNER_SECRET="[1,2,...]" \
+//     VIZ_MEMO_WIF_GRAM=... \
 //     node tools/keystore.cjs seal ./keystore.json
+//   (VIZ_MEMO_WIF_<CHAIN> is the gate account's memo private key, for decrypting encrypted
+//    peg-in memos — optional, but must be identical across all operators if set.)
 //
 //   # Verify: opens the file and reports which fields are present (never prints values).
 //   node tools/keystore.cjs verify ./keystore.json
@@ -67,6 +70,11 @@ function collectSecretsFromEnv() {
   if (process.env.VIZ_SIGNING_WIF) secrets.vizSigningWif = process.env.VIZ_SIGNING_WIF;
   if (process.env.GRAM_SIGNER_MNEMONIC) secrets.gramSignerMnemonic = process.env.GRAM_SIGNER_MNEMONIC;
   if (process.env.SOLANA_SIGNER_SECRET) secrets.solanaSignerSecret = process.env.SOLANA_SIGNER_SECRET;
+  // Memo private keys for decrypting encrypted peg-in memos, one per gate chain.
+  const memoWifs = {};
+  if (process.env.VIZ_MEMO_WIF_GRAM) memoWifs.GRAM = process.env.VIZ_MEMO_WIF_GRAM;
+  if (process.env.VIZ_MEMO_WIF_SOLANA) memoWifs.SOLANA = process.env.VIZ_MEMO_WIF_SOLANA;
+  if (Object.keys(memoWifs).length > 0) secrets.vizMemoWifs = memoWifs;
   return secrets;
 }
 

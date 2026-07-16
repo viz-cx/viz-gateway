@@ -28,7 +28,7 @@ const STALE_SEEN_MS = 5 * 60 * 1000;
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const accounts = buildGatewayAccounts(cfg);
-  const chain: VizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
+  const chain: VizChain = new VizJsChain(cfg.viz.nodeUrl, accounts, cfg.viz.memoWifs);
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
 
