@@ -1,7 +1,7 @@
 import { CONFIG } from "./config.js";
 import { buildPegoutBody, wvizToBaseUnits, isValidVizAccount, computePegInFee } from "./pegout.mjs";
 import { TonConnectUI } from "https://esm.sh/@tonconnect/ui@2";
-import { TonClient, beginCell, Address, toNano } from "https://esm.sh/@ton/ton@15";
+import { TonClient, JettonMaster, beginCell, Address, toNano } from "https://esm.sh/@ton/ton@15";
 
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
@@ -56,10 +56,8 @@ const ton = new TonClient({ endpoint: CONFIG.rpc.toncenter });
 let userAddress = null; // friendly string when connected
 
 async function walletAddressOf(owner) {
-  const res = await ton.runMethod(Address.parse(CONFIG.wviz.minter), "get_wallet_address", [
-    { type: "slice", cell: beginCell().storeAddress(Address.parse(owner)).endCell() },
-  ]);
-  return res.stack.readAddress();
+  const master = ton.open(JettonMaster.create(Address.parse(CONFIG.wviz.minter)));
+  return master.getWalletAddress(Address.parse(owner));
 }
 
 /* ---------- Peg-out ---------- */
