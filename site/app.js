@@ -148,15 +148,24 @@ async function onWalletChange() {
   copyEl.classList.remove("hidden");
   try {
     const jw = await walletAddressOf(userAddress);
-    // get_wallet_data succeeds only on deployed wallets — use it for both balance and surcharge check
-    const res = await ton.runMethod(jw, "get_wallet_data", []);
-    userBalanceBaseUnits = res.stack.readBigNumber();
-    firstTimeSurcharge = false;
-    const display = (Number(userBalanceBaseUnits) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
-    balEl.textContent = `Balance: ${display} wVIZ`;
-    balEl.classList.remove("hidden");
+    // Deployment check via plain REST — authoritative, independent of get-method availability
+    const r = await fetch(`https://toncenter.com/api/v2/getAddressInformation?address=${encodeURIComponent(jw.toString())}`);
+    const active = (await r.json())?.result?.state === "active";
+    firstTimeSurcharge = !active;
+    if (active) {
+      // Balance fetch is best-effort; firstTimeSurcharge is already correctly set above
+      try {
+        const res = await ton.runMethod(jw, "get_wallet_data", []);
+        userBalanceBaseUnits = res.stack.readBigNumber();
+        const display = (Number(userBalanceBaseUnits) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
+        balEl.textContent = `Balance: ${display} wVIZ`;
+        balEl.classList.remove("hidden");
+      } catch (_) { balEl.classList.add("hidden"); userBalanceBaseUnits = null; }
+    } else {
+      balEl.classList.add("hidden");
+      userBalanceBaseUnits = null;
+    }
   } catch (_) {
-    // wallet not yet deployed (first peg-in) or RPC error — assume surcharge applies
     firstTimeSurcharge = true;
     balEl.classList.add("hidden");
     userBalanceBaseUnits = null;
