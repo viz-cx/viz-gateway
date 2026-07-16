@@ -61,7 +61,6 @@ async function walletAddressOf(owner) {
   ]);
   return res.stack.readAddress();
 }
-async function isDeployed(addr) { try { return await ton.isContractDeployed(addr); } catch (_) { return false; } }
 
 /* ---------- Peg-out ---------- */
 const acctInput = $("viz-acct"), amtInput = $("wviz-amt"), sendBtn = $("pegout-send");
