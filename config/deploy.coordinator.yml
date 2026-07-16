@@ -9,8 +9,13 @@
 # All five roles bind-mount the SAME host dir (/opt/viz-gateway-coordinator/data) → one
 # gateway.sqlite file, which SqliteGatewayStore documents as shared across processes.
 #
-# CUSTODY: this app holds NO keys. Never add VIZ_SIGNING_WIF / GRAM_SIGNER_MNEMONIC /
-# FED_KEYSTORE_* here — those live only in the separate viz-gateway-signer app.
+# CUSTODY: this app holds NO FUND-CONTROLLING keys. Never add VIZ_SIGNING_WIF /
+# GRAM_SIGNER_MNEMONIC / FED_KEYSTORE_* here — those live only in the separate
+# viz-gateway-signer app. The ONE deliberate exception is VIZ_MEMO_WIF_GRAM: the gram.gate
+# memo key, which the viz-watcher role (running here) needs to decrypt '#'-encrypted peg-in
+# memos into the canonical destination. It controls no funds (memo role is in no authority)
+# and cannot redirect a mint (signers independently re-decrypt and reject a mismatched
+# digest), so the no-theft property is unchanged — only memo privacy. See AUDIT.md §8.
 
 service: viz-gateway-coordinator
 image: chiliec/viz-gateway            # → ghcr.io/chiliec/viz-gateway via registry.server
@@ -114,4 +119,5 @@ env:
     RECON_EXPECTED_REMOTES: GRAM
   secret:
     - GRAM_API_KEY                    # toncenter API key (rate limits) — SOPS app secret
+    - VIZ_MEMO_WIF_GRAM               # gram.gate memo key — viz-watcher decrypts encrypted memos (non-fund; AUDIT.md §8)
     # STAFF_WEBHOOK_URL: add to .kamal/secrets + the SOPS file to wire fail-closed alerts.
