@@ -124,9 +124,10 @@ async function main(): Promise<void> {
     if (req.method === "GET" && req.url === "/health") {
       const { registered, expected } = registry.count();
       const { live, missing } = registry.roster();
-      void store.isPaused().then((paused) =>
-        json(200, { ok: true, paused, registered, expected, operators: live, missing }),
-      );
+      void store.isPaused().then((paused) => {
+        res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+        res.end(JSON.stringify({ ok: true, paused, registered, expected, operators: live, missing }));
+      });
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/register/challenge")) {
