@@ -402,11 +402,16 @@ export function loadConfig(): GatewayConfig {
       // can exceed the 60s default, so this is tunable for live runs.
       approveMaxWaitMs: int("GRAM_APPROVE_MAX_WAIT_MS", 60000),
       approvePollIntervalMs: int("GRAM_APPROVE_POLL_INTERVAL_MS", 3000),
-      // TON (nano) the proposer attaches to a new_order. Funds the Order contract:
-      // deploy gas + the mint action's own value (~0.1) + margin; surplus flows to the
-      // multisig on execution, not back to the proposer. 1 TON default is conservative;
-      // lower it to reduce proposer drain when funding is tight (each order costs ~this).
-      orderValueNano: int("GRAM_ORDER_VALUE_NANO", 1_000_000_000),
+      // TON (nano) the proposer attaches to a new_order. Measured on mainnet: the
+      // attached value passes through the Order contract almost intact (~0.0005 TON
+      // lifecycle burn — each operator's approve message funds the order's own compute
+      // from their wallet), so the only non-recoverable cost is the mint action itself:
+      // 0.06 TON (0.05 deploys the recipient's jetton wallet) + ~0.002 multisig gas =
+      // ~0.062 TON true floor. Any surplus flows to the MULTISIG on execution (not back
+      // to the proposer) and piles up there — recyclable via tools/multisig-sweep.cjs.
+      // 0.1 TON keeps ~60% headroom over the 0.062 floor (proven: seqno-1 order executed
+      // at exactly this value) while cutting per-order accretion ~96% vs the old 1 TON.
+      orderValueNano: int("GRAM_ORDER_VALUE_NANO", 100_000_000),
     },
     solana: {
       rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
