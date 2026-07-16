@@ -37,6 +37,12 @@ export interface GatewayConfig {
     nodeUrl: string;
     gatewayAccounts: Record<RemoteChainId, string>;
     signingWif: string;
+    /**
+     * VIZ memo private keys (WIFs) keyed by GATE ACCOUNT NAME, used to decrypt
+     * `#`-encrypted peg-in memos. Empty when no memo key is configured (encrypted
+     * memos then fail validation and auto-refund, as before). See resolveMemoDestination.
+     */
+    memoWifs: Record<string, string>;
     extraConfirmations: number;
   };
   gram: {
@@ -230,6 +236,11 @@ export function hydrateKeystore(): void {
   setIfUnset("VIZ_SIGNING_WIF", secrets.vizSigningWif);
   setIfUnset("GRAM_SIGNER_MNEMONIC", secrets.gramSignerMnemonic);
   setIfUnset("SOLANA_SIGNER_SECRET", secrets.solanaSignerSecret);
+  // Memo WIFs are keyed by chain id in the keystore; project each into VIZ_MEMO_WIF_<CHAIN>
+  // so loadConfig reads them exactly as it would from a plaintext env.
+  for (const [chain, wif] of Object.entries(secrets.vizMemoWifs ?? {})) {
+    setIfUnset(`VIZ_MEMO_WIF_${chain}`, wif);
+  }
 }
 
 /**
@@ -338,6 +349,17 @@ export function loadConfig(): GatewayConfig {
   // preserving the historical default.
   const pegInOrchestrationBudgetMs = federation.n * signerApproveTimeoutMs.pegIn + 120_000;
 
+  // Memo WIFs are configured per chain (VIZ_MEMO_WIF_<CHAIN>) but consumed per gate
+  // account (the reader keys off the transfer's `to`), so re-key them onto the account
+  // name here. Empty/absent keys are skipped — no key => encrypted memos auto-refund.
+  const gramGateAccount = opt("VIZ_GATEWAY_ACCOUNT_GRAM", "");
+  const solanaGateAccount = opt("VIZ_GATEWAY_ACCOUNT_SOLANA", "");
+  const memoWifs: Record<string, string> = {};
+  const gramMemoWif = opt("VIZ_MEMO_WIF_GRAM", "");
+  const solanaMemoWif = opt("VIZ_MEMO_WIF_SOLANA", "");
+  if (gramGateAccount && gramMemoWif) memoWifs[gramGateAccount] = gramMemoWif;
+  if (solanaGateAccount && solanaMemoWif) memoWifs[solanaGateAccount] = solanaMemoWif;
+
   return {
     service: opt("SERVICE", "signer"),
     operatorId: opt("OPERATOR_ID", "op-1"),
@@ -346,10 +368,11 @@ export function loadConfig(): GatewayConfig {
       // Accepts http(s):// or ws(s)://; viz-js-lib picks the transport from the scheme.
       nodeUrl: opt("VIZ_NODE_URL", opt("VIZ_NODE_WS", "https://node.viz.cx")),
       gatewayAccounts: {
-        GRAM: opt("VIZ_GATEWAY_ACCOUNT_GRAM", ""),
-        SOLANA: opt("VIZ_GATEWAY_ACCOUNT_SOLANA", ""),
+        GRAM: gramGateAccount,
+        SOLANA: solanaGateAccount,
       } as Record<RemoteChainId, string>,
       signingWif: opt("VIZ_SIGNING_WIF", ""),
+      memoWifs,
       extraConfirmations: int("VIZ_EXTRA_CONFIRMATIONS", 2),
     },
     gram: {

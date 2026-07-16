@@ -88,10 +88,23 @@ declare module "viz-js-lib" {
     wifToPublic(wif: string): string;
   }
 
+  interface VizMemo {
+    /**
+     * Graphene memo crypto. A plaintext memo (no leading '#') is returned unchanged.
+     * A '#'-prefixed base58 memo is AES-decrypted with `privateWif` (the recipient's
+     * memo key); the result is the original plaintext WITH its leading '#' preserved.
+     * Throws on a malformed blob or a wrong key.
+     */
+    decode(privateWif: string, memo: string): string;
+    /** Encrypts a '#'-prefixed memo to `publicKey`; plaintext is returned unchanged. */
+    encode(privateWif: string, publicKey: string, memo: string, testNonce?: string): string;
+  }
+
   interface Viz {
     api: VizApi;
     config: VizConfig;
     auth: VizAuth;
+    memo: VizMemo;
   }
 
   const viz: Viz;

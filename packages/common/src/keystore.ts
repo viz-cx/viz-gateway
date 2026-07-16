@@ -30,6 +30,14 @@ export interface KeystoreSecrets {
   gramSignerMnemonic?: string;
   /** Solana signer secret in solana-keygen JSON byte-array form, e.g. "[12,34,...]". */
   solanaSignerSecret?: string;
+  /**
+   * VIZ memo private keys (WIFs), keyed by remote chain id (e.g. "GRAM"), used to
+   * decrypt `#`-encrypted peg-in memos addressed to that chain's gate account.
+   * Non-fund-controlling: a leak costs destination privacy, not custody (AUDIT.md §8).
+   * Must be identical across all operators or encrypted peg-ins liveness-stall — see
+   * resolveMemoDestination.
+   */
+  vizMemoWifs?: Record<string, string>;
 }
 
 /** scrypt cost parameters, persisted in the file so `open` uses the same ones `seal` chose. */
@@ -88,6 +96,14 @@ export function sealKeystore(
   if (secrets.vizSigningWif) present.vizSigningWif = secrets.vizSigningWif;
   if (secrets.gramSignerMnemonic) present.gramSignerMnemonic = secrets.gramSignerMnemonic;
   if (secrets.solanaSignerSecret) present.solanaSignerSecret = secrets.solanaSignerSecret;
+  if (secrets.vizMemoWifs && Object.keys(secrets.vizMemoWifs).length > 0) {
+    // Copy only non-empty string entries so an empty/garbage map can't seal blank keys.
+    const wifs: Record<string, string> = {};
+    for (const [chain, wif] of Object.entries(secrets.vizMemoWifs)) {
+      if (typeof wif === "string" && wif) wifs[chain] = wif;
+    }
+    if (Object.keys(wifs).length > 0) present.vizMemoWifs = wifs;
+  }
   if (Object.keys(present).length === 0) {
     throw new Error("keystore: nothing to seal — no secret fields provided");
   }
@@ -163,6 +179,13 @@ export function openKeystore(ks: unknown, passphrase: string): KeystoreSecrets {
   if (typeof parsed["vizSigningWif"] === "string") out.vizSigningWif = parsed["vizSigningWif"];
   if (typeof parsed["gramSignerMnemonic"] === "string") out.gramSignerMnemonic = parsed["gramSignerMnemonic"];
   if (typeof parsed["solanaSignerSecret"] === "string") out.solanaSignerSecret = parsed["solanaSignerSecret"];
+  if (parsed["vizMemoWifs"] && typeof parsed["vizMemoWifs"] === "object") {
+    const wifs: Record<string, string> = {};
+    for (const [chain, wif] of Object.entries(parsed["vizMemoWifs"] as Record<string, unknown>)) {
+      if (typeof wif === "string" && wif) wifs[chain] = wif;
+    }
+    if (Object.keys(wifs).length > 0) out.vizMemoWifs = wifs;
+  }
   return out;
 }
 

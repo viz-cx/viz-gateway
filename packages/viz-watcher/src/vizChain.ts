@@ -14,6 +14,7 @@ import {
   type VizReleaseProposal,
 } from "@gateway/common";
 import { buildReleaseTx, releaseTxId, selectAuthoritySignatures, type VizAuthority } from "./vizSign";
+import { resolveMemoDestination } from "./memo";
 
 /**
  * Live VizChain read path, backed by viz-js-lib against an HTTP(S) or WS node
@@ -170,10 +171,29 @@ export function milliToViz(milli: bigint): string {
 }
 
 export class VizJsChain implements VizChain {
-  constructor(nodeUrl: string, private readonly accounts: GatewayAccounts) {
+  /**
+   * @param memoWifs  per-gate-account memo private keys (WIF), keyed by account name,
+   *   for decrypting `#`-encrypted peg-in memos. Omit (or leave empty) to keep the
+   *   historical plaintext-only behaviour — an encrypted memo then fails validation
+   *   and auto-refunds. MUST match across all operators (see resolveMemoDestination).
+   */
+  constructor(
+    nodeUrl: string,
+    private readonly accounts: GatewayAccounts,
+    private readonly memoWifs: Record<string, string> = {},
+  ) {
     // viz-js-lib selects http/ws transport from the "websocket" config value;
     // it accepts http(s):// and ws(s):// URLs alike.
     viz.config.set("websocket", nodeUrl);
+  }
+
+  /**
+   * Resolve the transfer memo to a destination address, decrypting an encrypted
+   * memo when we hold this account's memo key. Shared by the reader and the
+   * signer's F2 re-read so the two paths cannot drift.
+   */
+  private resolveDestination(account: string, rawMemo: string): string {
+    return resolveMemoDestination(rawMemo, this.memoWifs[account]);
   }
 
   async lastIrreversibleBlock(): Promise<number> {
@@ -199,16 +219,20 @@ export class VizJsChain implements VizChain {
         const to = String(payload["to"] ?? "");
         if (!this.accounts.isBackingAccount(to)) continue;
         const chain = this.accounts.chainFor(to);
-        const rawDestination = String(payload["memo"] ?? "").trim();
-        // Memo is the raw remote address; the chain is determined by the receiving account.
-        // A missing/malformed memo is NOT dropped anymore (that stranded funds — 2026-07-15
-        // incident): reconstruct the deposit flagged destinationValid=false and canonicalize the
-        // destination to the "" sentinel, so the watcher can enqueue it for auto-refund while the
-        // signer keeps it un-mintable. A valid address flows through exactly as before.
+        const rawMemo = String(payload["memo"] ?? "").trim();
+        // The memo carries the remote address; the chain is determined by the receiving
+        // account. An encrypted ('#'-prefixed) memo is decrypted here when we hold this
+        // account's memo key — otherwise (and for plaintext) the string passes through.
+        // A missing/malformed/undecryptable memo is NOT dropped (that stranded funds —
+        // 2026-07-15 incident): reconstruct the deposit flagged destinationValid=false and
+        // canonicalize the destination to the "" sentinel, so the watcher can enqueue it for
+        // auto-refund while the signer keeps it un-mintable. A valid address flows through as before.
+        const rawDestination = this.resolveDestination(to, rawMemo);
         const destinationValid = isValidRemoteAddress(chain, rawDestination);
         if (!destinationValid) {
+          // Log the RAW memo (ciphertext or already-invalid plaintext), never a decrypted address.
           console.warn(
-            `[viz-chain] deposit ${w.trx_id}:${w.op_in_trx} has invalid/empty destination memo "${rawDestination}" -> flag for auto-refund`,
+            `[viz-chain] deposit ${w.trx_id}:${w.op_in_trx} has invalid/empty/undecryptable destination memo "${rawMemo}" -> flag for auto-refund`,
           );
         }
         deposits.push({
@@ -273,13 +297,17 @@ export class VizJsChain implements VizChain {
       );
     }
     const chain = this.accounts.chainFor(to);
-    const rawDestination = String(payload["memo"] ?? "").trim();
-    // The destination SHAPE no longer throws here (it used to, which blocked even a manual
-    // refund of a no-memo deposit — see plan): reconstruct the deposit with destinationValid
-    // and the "" sentinel. The mint-validation layer (signer/validatePegIn) re-instates the
-    // never-mint guarantee by asserting destinationValid, so the security control is relocated,
-    // not removed. Structural violations above (no op / not a transfer / not a backing account)
-    // still throw — only the destination shape stops being fatal.
+    const rawMemo = String(payload["memo"] ?? "").trim();
+    // Decrypt an encrypted memo with this account's memo key (deterministic — all signers
+    // holding the key reproduce the identical destination, and therefore the identical
+    // digest; a signer without the key resolves "" and refuses, a liveness stall not a
+    // wrong mint). The destination SHAPE no longer throws here (it used to, which blocked
+    // even a manual refund of a no-memo deposit — see plan): reconstruct the deposit with
+    // destinationValid and the "" sentinel. The mint-validation layer (signer/validatePegIn)
+    // re-instates the never-mint guarantee by asserting destinationValid, so the security
+    // control is relocated, not removed. Structural violations above (no op / not a transfer /
+    // not a backing account) still throw — only the destination shape stops being fatal.
+    const rawDestination = this.resolveDestination(to, rawMemo);
     const destinationValid = isValidRemoteAddress(chain, rawDestination);
     return {
       trxId,
