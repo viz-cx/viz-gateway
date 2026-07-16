@@ -149,15 +149,18 @@ Fill it in:
 - `COORDINATOR_URL` = the coordinator box's reachable URL (e.g. `http://coord-host:8100`).
 - `VIZ_SIGNING_WIF` must be set (sealed in FED_KEYSTORE): the registration challenge is
   signed with your VIZ operator key and verified against your `vizPubkey` in federation.json.
+- `VIZ_MEMO_WIF_GRAM` — the **shared** `gram.gate` memo key, for decrypting `#`-encrypted
+  peg-in memos. Required for encrypted-memo peg-ins to mint (see §3.3). Not fund-controlling.
 - The coordinator no longer needs a `SIGNER_ENDPOINTS` list.
 
 ### 3.3 Seal your keys (no plaintext secrets on disk)
-Put your two secrets in the env **temporarily**, seal, then unset:
+Put your secrets in the env **temporarily**, seal, then unset:
 ```bash
 export VIZ_SIGNING_WIF="<your VIZ active WIF>"          # one of the gram.gate 2-of-3 keys
 export GRAM_SIGNER_MNEMONIC="<your 24-word TON mnemonic>" # your multisig signer wallet
+export VIZ_MEMO_WIF_GRAM="<the gram.gate memo WIF>"      # SHARED across all operators (see below)
 node tools/keystore.cjs seal ./keystore.mainnet.json
-unset VIZ_SIGNING_WIF GRAM_SIGNER_MNEMONIC
+unset VIZ_SIGNING_WIF GRAM_SIGNER_MNEMONIC VIZ_MEMO_WIF_GRAM
 ```
 Then in `.env.mainnet`:
 ```
@@ -168,6 +171,15 @@ FED_KEYSTORE=./keystore.mainnet.json
 > the three on `gram.gate`, and your TON wallet address must be your `op-N` entry in the
 > multisig signer array. A mismatched key silently produces approvals the multisig/gate
 > will reject.
+>
+> **`VIZ_MEMO_WIF_GRAM` is the one SHARED secret in the federation** — every operator seals
+> the *same* value (the single memo key behind `gram.gate`'s on-chain `memo_key`), obtained
+> out-of-band from the coordinator operator. It controls **no funds** (the memo role is in no
+> authority; a leak is a privacy exposure, not custody — see AUDIT.md §8). It must be present
+> on **all live signers or none**: an encrypted-memo peg-in is only mintable when the watcher
+> *and* ≥threshold signers all decrypt to the same destination. A signer missing (or holding a
+> wrong) memo key derives a mismatched digest and refuses — the peg-in then auto-refunds to the
+> sender (safe, never a wrong mint), but never mints. Plaintext-memo peg-ins are unaffected.
 
 ### 3.4 Run
 ```bash
@@ -198,6 +210,12 @@ cp .env.mainnet.example .env.mainnet   # or reuse the op-1 file that already has
 - `STAFF_WEBHOOK_URL` — set a real alert channel (a prod custody bridge MUST).
 - The coordinator holds **no** signing key; leave `VIZ_SIGNING_WIF`/`GRAM_SIGNER_MNEMONIC`
   unset on this box.
+- **Exception — `VIZ_MEMO_WIF_GRAM`:** the coordinator box runs `viz-watcher`, which decrypts
+  encrypted peg-in memos into the canonical destination it enqueues, so this box **does** need
+  the shared memo key. It is not fund-controlling and cannot redirect a mint (signers re-decrypt
+  and reject a mismatched digest), so the "coordinator is keyless" theft-safety still holds — see
+  AUDIT.md §8. Set it in the coordinator env (or, in the Kamal deploy, the `VIZ_MEMO_WIF_GRAM`
+  SOPS secret already wired into both apps). Without it, encrypted-memo peg-ins auto-refund.
 
 ### 4.2 Run the five processes (each its own SERVICE)
 
