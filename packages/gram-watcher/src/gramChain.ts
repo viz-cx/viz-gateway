@@ -132,6 +132,21 @@ export function mintOrderCell(
 }
 
 /**
+ * The cold-start scan cursor for a wallet whose newest tx is at `tipLt`. The scan
+ * collects burns with `lt > cursor` (see paginateBurnsByLt), so the cursor must sit
+ * JUST BELOW the tip — NOT at it. Anchoring AT `tipLt` would exclude the tip tx
+ * itself, and when the wallet's first-ever transaction is an unprocessed peg-out
+ * deposit (that deposit IS the tip at the moment we cold-start), it would be skipped
+ * forever — the cursor only ever moves forward. `tipLt - 1` keeps the tip in range
+ * and can never collide with a real lt (no tx has that value), so at most the single
+ * tip tx is (idempotently, by tx-hash action id) re-examined. An empty wallet
+ * (`tipLt === 0`) stays at 0 and re-cold-starts on the next tick.
+ */
+export function coldStartAnchorLt(tipLt: number): number {
+  return tipLt > 0 ? tipLt - 1 : 0;
+}
+
+/**
  * Pure lt-pagination core for the peg-out scan (VG-06), factored out so it can be
  * exercised offline against a fake tx source (tools/gram-scan-pagination-spike.cjs).
  * Walks pages newest→older, skipping the repeated anchor tx, until it drains back
