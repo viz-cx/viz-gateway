@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bridge — wVIZ</title>
+<meta name="description" content="Bridge VIZ and wVIZ safely: connect your TON wallet, return wVIZ to VIZ in one click, and get the exact peg-in memo — no fat-finger mistakes.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#060910">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='15'%20fill='%23060910'/%3E%3Ccircle%20cx='25'%20cy='32'%20r='13'%20fill='%232DD4BF'/%3E%3Ccircle%20cx='40'%20cy='32'%20r='13'%20fill='%230098EA'%20fill-opacity='.92'/%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('wviz-theme');if(t!=='light'&&t!=='dark')t='dark';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<link rel="stylesheet" href="./site.css">
+</head>
+<body>
+<header class="site-header" id="top">
+  <div class="nav container">
+    <a class="brand" href="./index.html" aria-label="wVIZ — home">
+      <span class="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6" fill="#2DD4BF"></circle><circle cx="15" cy="12" r="6" fill="#0098EA" fill-opacity=".9"></circle></svg></span>
+      <span>w<b>VIZ</b></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="./index.html#how">How it works</a>
+      <a href="./index.html#fees">Fees</a>
+      <a href="./index.html#faq">FAQ</a>
+      <a href="https://github.com/viz-cx/viz-gateway" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="icon-btn" id="themeToggle" type="button" aria-label="Switch color theme">
+        <svg class="i-sun" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.4M12 19.1v2.4M4.4 4.4l1.7 1.7M17.9 17.9l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.4 19.6l1.7-1.7M17.9 6.1l1.7-1.7"></path></svg>
+        <svg class="i-moon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1111.2 3a6.8 6.8 0 009.8 9.8z"></path></svg>
+      </button>
+      <div id="tonConnectButton"></div>
+    </div>
+  </div>
+</header>
+
+<main class="app-main">
+  <div class="container">
+    <div class="statusbar" id="statusbar">
+      <span class="item" id="st-reserve">VIZ locked <b>…</b></span>
+      <span class="item" id="st-supply">wVIZ circulating <b>…</b></span>
+      <span class="item" id="st-health"></span>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab" id="tab-out" role="tab" aria-selected="true" aria-controls="panel-out">Return wVIZ → VIZ</button>
+      <button class="tab" id="tab-in" role="tab" aria-selected="false" aria-controls="panel-in">Get wVIZ (peg-in)</button>
+    </div>
+
+    <section class="panel-card" id="panel-out" role="tabpanel" aria-labelledby="tab-out">
+      <div class="field">
+        <label for="viz-acct">Your VIZ account (receives the VIZ)</label>
+        <input id="viz-acct" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. alice">
+        <span class="err" id="viz-acct-err"></span>
+      </div>
+      <div class="field">
+        <label for="wviz-amt">Amount of wVIZ to return</label>
+        <input id="wviz-amt" type="text" inputmode="decimal" autocomplete="off" placeholder="0.000">
+        <span class="err" id="wviz-amt-err"></span>
+      </div>
+      <button class="btn btn-primary" id="pegout-send" type="button" disabled>Connect wallet to continue</button>
+      <p class="hint" style="margin-top:14px;">Peg-out is free and 1:1. You'll confirm the transfer in your TON wallet; ~0.1 TON covers network gas (excess is refunded).</p>
+    </section>
+
+    <section class="panel-card hidden" id="panel-in" role="tabpanel" aria-labelledby="tab-in">
+      <p class="hint">Peg-in starts on the VIZ chain. Send VIZ from your VIZ wallet to the gateway account below, with your TON address as the memo.</p>
+      <div class="field" style="margin-top:16px;">
+        <label>Gateway account (send VIZ here)</label>
+        <div class="addr"><code id="pegin-acct">gram.gate</code><button class="copy-btn" type="button" data-copy="gram.gate" aria-label="Copy gateway account"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
+      </div>
+      <div class="field">
+        <label>Memo (your TON address — paste exactly, nothing else)</label>
+        <div class="addr"><code id="pegin-memo">Connect your TON wallet to fill this in</code><button class="copy-btn hidden" id="pegin-memo-copy" type="button" aria-label="Copy memo"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
+      </div>
+      <div class="field">
+        <label for="pegin-amt">VIZ amount (to preview the fee)</label>
+        <input id="pegin-amt" type="text" inputmode="decimal" autocomplete="off" placeholder="0.000">
+      </div>
+      <div class="fee-line"><span>Fee</span><b id="pegin-fee">—</b></div>
+      <div class="fee-line"><span>You receive (wVIZ)</span><b id="pegin-net">—</b></div>
+      <p class="hint" id="pegin-firsttime" style="margin-top:12px;"></p>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg><span id="toastMsg">Copied!</span></div>
+
+<script type="module" src="./app.js"></script>
+</body></html>
