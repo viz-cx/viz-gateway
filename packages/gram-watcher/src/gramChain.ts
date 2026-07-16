@@ -1,4 +1,4 @@
-import { Address, JettonMaster, TonClient, internal, SendMode, toNano } from "@ton/ton";
+import { Address, JettonMaster, JettonWallet, TonClient, internal, SendMode, toNano } from "@ton/ton";
 import { beginCell } from "@ton/core";
 import type { Cell, Slice, Transaction } from "@ton/core";
 import type { TransferRequest } from "@gateway/contracts-ton";
@@ -248,6 +248,22 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
   async circulatingSupplyMilliViz(): Promise<bigint> {
     const master = this.client.open(JettonMaster.create(this.minter));
     const data = await master.getJettonData();
+    // Subtract wVIZ held INERT in the gateway's OWN jetton wallet. A peg-out TRANSFERS
+    // wVIZ into the gateway wallet (it is not burned), so that balance is non-circulating
+    // reserve — counting it as circulating makes recon see phantom under-backing (mirrors
+    // the site display fix 497f835: circulating = totalSupply − gatewayHeld). If the wallet
+    // read fails, fall back to raw totalSupply, which OVER-counts circulating → recon is
+    // stricter/fail-closed, never masking a genuine shortfall.
+    if (this.gatewayWallet) {
+      try {
+        const wallet = this.client.open(JettonWallet.create(this.gatewayWallet));
+        const held = await wallet.getBalance();
+        const circulating = data.totalSupply - held;
+        return circulating > 0n ? circulating : 0n;
+      } catch (err) {
+        console.warn(`[gram] gateway-held balance read failed; using raw totalSupply (stricter): ${String(err)}`);
+      }
+    }
     return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
   }
 
