@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 /**
- * ONE-OFF operator tool — refund a stranded no-memo peg-in from a gateway backing
- * account (2-of-N VIZ multisig) back to its original sender.
+ * ONE-OFF operator tool — a manual T-of-N VIZ multisig transfer OUT of a gateway
+ * backing account (e.g. to refund a stranded deposit back to its original sender).
  *
- * Context: a VIZ transfer to gram.gate with an EMPTY memo is dropped by the watcher
- * (no mint destination) and is NOT on the auto-refund path, so it strands in the
- * backing account as over-backing. This tool builds + co-signs + broadcasts the
- * manual VIZ multisig transfer to return it. It reuses the gateway's VERIFIED release
- * primitives (deterministic tx bytes, key-recovery signature selection) from
- * packages/viz-watcher/dist/vizSign.js — no bespoke crypto.
+ * General-purpose: the transfer is fully parameterized by env (FROM / TO / AMOUNT_VIZ
+ * / MEMO), so it covers any case where funds must leave a backing account outside the
+ * automated peg-in/peg-out path. The FIRST use (and the built-in defaults below) is the
+ * 2026-07-15 incident: a VIZ transfer to gram.gate with an EMPTY memo was dropped by the
+ * watcher (no mint destination), off the auto-refund path, and stranded in the backing
+ * account as over-backing — this tool builds + co-signs + broadcasts the transfer to
+ * return it. Reuses the gateway's VERIFIED release primitives (deterministic tx bytes,
+ * key-recovery signature selection) from packages/viz-watcher/dist/vizSign.js — no
+ * bespoke crypto.
  *
  * It does NOT touch the gateway store, coordinator, or any peg-in state.
  *
@@ -16,20 +19,20 @@
  *   1. One operator runs `build`  → writes refund-proposal.json (deterministic tx
  *      skeleton: TaPoS + transfer + a long expiration) and shares that file verbatim.
  *   2. EACH of two operators runs `sign <proposal>` on their own box (needs their
- *      gram.gate active-authority WIF in VIZ_SIGNING_WIF) → prints one signature hex.
- *      Signing is offline (no RPC); both sign the SAME bytes from the shared file.
+ *      backing-account active-authority WIF in VIZ_SIGNING_WIF) → prints one signature
+ *      hex. Signing is offline (no RPC); both sign the SAME bytes from the shared file.
  *   3. One operator runs `broadcast <proposal> <sig1> <sig2>` → picks the minimal
  *      in-authority signature subset and broadcasts. DRY-RUN unless APPLY=1.
  *
  * ── Usage ────────────────────────────────────────────────────────────────────────
- *   node tools/refund-no-memo.cjs build
- *   VIZ_SIGNING_WIF=5... node tools/refund-no-memo.cjs sign refund-proposal.json
- *   APPLY=1 node tools/refund-no-memo.cjs broadcast refund-proposal.json <sigA> <sigB>
+ *   node tools/manual-refund.cjs build
+ *   VIZ_SIGNING_WIF=5... node tools/manual-refund.cjs sign refund-proposal.json
+ *   APPLY=1 node tools/manual-refund.cjs broadcast refund-proposal.json <sigA> <sigB>
  *
- * ── Env ──────────────────────────────────────────────────────────────────────────
+ * ── Env (defaults target the 2026-07-15 no-memo incident; override for other uses) ─
  *   VIZ_NODE_URL     node HTTP URL           (default https://node.viz.cx)
  *   FROM             backing account         (default gram.gate)
- *   TO               refund recipient        (default id)
+ *   TO               transfer recipient      (default id)
  *   AMOUNT_VIZ       amount, VIZ             (default 2000.000)
  *   MEMO             transfer memo           (default "refund: no-memo peg-in <TX>")
  *   EXPIRE_MIN       tx expiration, minutes  (default 45; keep < VIZ's ~1h max)
@@ -109,13 +112,13 @@ async function cmdBuild() {
   fs.writeFileSync(PROPOSAL_OUT, JSON.stringify(proposal, null, 2) + "\n");
   console.log(`\n[build] wrote ${PROPOSAL_OUT} — share this file verbatim with the co-signer.`);
   printProposalSummary(proposal);
-  console.log(`\nNext: each operator runs  VIZ_SIGNING_WIF=<wif> node tools/refund-no-memo.cjs sign ${PROPOSAL_OUT}`);
+  console.log(`\nNext: each operator runs  VIZ_SIGNING_WIF=<wif> node tools/manual-refund.cjs sign ${PROPOSAL_OUT}`);
   console.log(`(all signatures must be produced before expiration: ${proposal.expiration} UTC)`);
 }
 
 function cmdSign(proposalArg) {
   const wif = process.env.VIZ_SIGNING_WIF;
-  if (!wif) die("VIZ_SIGNING_WIF not set — source this operator's gram.gate active WIF from the keystore");
+  if (!wif) die("VIZ_SIGNING_WIF not set — source this operator's backing-account active WIF from the keystore");
   const p = loadProposal(proposalArg);
   const sig = signRelease(p, wif);
   const key = recoverReleaseSigner(p, sig); // offline recovery, so the operator can confirm which key signed
@@ -186,7 +189,7 @@ async function main() {
     case "sign": return cmdSign(rest[0]);
     case "broadcast": return cmdBroadcast(rest[0], rest.slice(1).filter(Boolean));
     default:
-      console.log("usage: refund-no-memo.cjs <build | sign <proposal> | broadcast <proposal> <sig...>>");
+      console.log("usage: manual-refund.cjs <build | sign <proposal> | broadcast <proposal> <sig...>>");
       console.log("see the header of this file for the full flow. broadcast is DRY-RUN unless APPLY=1.");
       process.exit(cmd ? 1 : 0);
   }
