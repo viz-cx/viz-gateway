@@ -13,6 +13,7 @@ node_modules
 .env.*
 keystore*.json
 *.wif
+memo-key*
 mnemonics
 
 # Local runtime state (sqlite store, rotated logs) — provided by the mounted volume.
