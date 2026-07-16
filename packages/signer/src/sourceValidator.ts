@@ -283,6 +283,17 @@ async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps)
   if (!deposit) {
     throw new SourceMismatchError(`PEG_IN source ${action.id} not found or not yet irreversible on VIZ`);
   }
+  // NEVER-MINT GUARANTEE (relocated here from the reader): getDeposit no longer throws on a
+  // missing/malformed destination memo — it returns the deposit flagged destinationValid=false
+  // so the auto-refund path can return the funds. But a destination-less deposit has NO valid
+  // mint target and MUST never mint, so we hard-reject the PEG_IN at this trust layer, before
+  // assertSameAction. This also defeats a compromised coordinator forging a PEG_IN with a
+  // fabricated memo: the operator's own node read yields destinationValid=false and refuses.
+  if (!deposit.destinationValid) {
+    throw new SourceMismatchError(
+      `PEG_IN ${action.id} has an invalid/empty destination on VIZ — never mintable (auto-refund only)`,
+    );
+  }
   // CRITICAL: remoteChain is derived from the deposit's receiving account by VizJsChain.getDeposit
   // via GatewayAccounts.chainFor(to), NOT from coordinator-supplied data. The assertSameAction call
   // below compares derived.remoteChain !== wire.remoteChain (line 314), so any coordinator claiming

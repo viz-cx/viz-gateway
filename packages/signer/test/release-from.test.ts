@@ -42,6 +42,7 @@ test("FEE_SWEEP with action.remoteChain=GRAM but parent deposit remoteChain=SOLA
     amountMilliViz: 100000n,
     remoteChain: "SOLANA",
     remoteDestination: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    destinationValid: true,
   };
 
   // FEE_SWEEP action but coordinator claims GRAM (wrong chain)

@@ -44,6 +44,20 @@ export function validateRemoteAddress(chain: RemoteChainId, address: string): vo
 }
 
 /**
+ * Non-throwing sibling of validateRemoteAddress: returns whether `address` is a valid mint
+ * target for `chain`, applying the identical rules (non-empty, no ':', chain regex). The
+ * reader uses this to RECONSTRUCT a destination-less deposit (flagged `destinationValid=false`)
+ * for auto-refund instead of throwing it away, while the mint path keeps throwing via
+ * validateRemoteAddress. Same predicate, two call styles — they cannot drift.
+ */
+export function isValidRemoteAddress(chain: RemoteChainId, address: string): boolean {
+  if (!address) return false;
+  if (address.includes(":")) return false;
+  const re = chain === "SOLANA" ? SOLANA_ADDR_RE : GRAM_ADDR_RE;
+  return re.test(address);
+}
+
+/**
  * VIZ deposit -> remote mint of wVIZ (chain committed in the digest).
  *
  * The digest commits the GROSS deposit amount — it is a SOURCE binding, not an economic

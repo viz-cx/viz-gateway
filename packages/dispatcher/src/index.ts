@@ -118,6 +118,26 @@ async function tick(
   // every retry, so it is aged by createdAt in the delivery loop below.
   for (const rec of await store.stale(now, opts.staleDeliveryAlertMs, ["REFUNDING"])) alertWedged(rec);
 
+  // Auto-return no-memo / invalid-destination peg-ins. The watcher parks a deposit with no valid
+  // mint target in HELD("INVALID_DESTINATION"); it can never mint, so route it straight to refund:
+  // spawn the :refund child (gross back to the sender) and flip the parent to REFUNDING. From there
+  // the existing REFUND delivery + REFUNDING->REFUNDED close-out below handles it unchanged.
+  // Idempotent: enqueue dedupes the child on id, and the REFUNDING parent leaves this HELD query on
+  // the next tick. Enqueue the child BEFORE flipping the parent so a crash between the two re-runs
+  // this branch (parent still HELD) rather than stranding a REFUNDING parent with no refund child.
+  for (const rec of await store.due(now, ["HELD"])) {
+    if (rec.direction !== "PEG_IN" || rec.lastError !== "INVALID_DESTINATION" || !rec.sender) continue;
+    const children = planChildren(rec, "REFUNDING", { feesGateAccount: opts.feesGateAccount, sweepAmountMilliViz: 0n });
+    for (const child of children) await store.enqueue(child);
+    await store.setStatus(rec.id, "REFUNDING");
+    notifyStaff("refund", `invalid-destination peg-in ${rec.id} routed to auto-refund`, {
+      id: rec.id,
+      sender: rec.sender,
+      amountMilliViz: String(rec.amountMilliViz),
+    });
+    console.log(`[dispatcher] ${rec.id} PEG_IN HELD(INVALID_DESTINATION) -> REFUNDING +REFUND`);
+  }
+
   // Deliver every QUEUED row (PEG_IN mints; PEG_OUT/FEE_SWEEP/REFUND are VIZ releases).
   const due = await store.due(now, ["QUEUED"]);
   for (const rec of due) {

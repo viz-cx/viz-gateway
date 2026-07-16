@@ -50,6 +50,7 @@ async function expectReject(promise, label) {
     amountMilliViz: 1_068_237n,
     remoteChain: "SOLANA",
     remoteDestination: SOL_RECIPIENT,
+    destinationValid: true,
   };
 
   // Mock chain readers / store. Each test swaps in the relevant behavior.
@@ -112,6 +113,25 @@ async function expectReject(promise, label) {
     const honest = canonicalPegIn(trueDeposit);
     const forged = { ...honest, id: `${honest.id}x` }; // digest still binds the real id
     await expectReject(validateAction(forged, depsPegIn(trueDeposit)), "3c mutated PEG_IN id (double-mint replay)");
+  }
+
+  // 3d) NEVER-MINT guarantee: a no-memo / invalid-destination deposit is un-mintable even though
+  //     getDeposit now RETURNS it (destinationValid=false, remoteDestination="") instead of
+  //     throwing. validatePegIn must hard-reject on the destinationValid flag — the security
+  //     control relocated from the reader to the trust layer. This is the auto-return invariant.
+  {
+    const noMemo = { ...trueDeposit, remoteDestination: "", destinationValid: false };
+    const action = canonicalPegIn(noMemo); // recipient="" — the canonical destination-less action
+    await expectReject(validateAction(action, depsPegIn(noMemo)), "3d no-memo PEG_IN never mintable");
+  }
+
+  // 3e) Coordinator forges a PEG_IN with a FABRICATED memo: the wire action claims a real-looking
+  //     recipient, but the operator's OWN node read yields destinationValid=false (the on-chain memo
+  //     was empty/malformed). The re-read wins — refuse to mint a destination the source never had.
+  {
+    const fabricated = canonicalPegIn({ ...trueDeposit, remoteDestination: SOL_RECIPIENT }); // looks valid on the wire
+    const sourceNoMemo = { ...trueDeposit, remoteDestination: "", destinationValid: false }; // truth from the node
+    await expectReject(validateAction(fabricated, depsPegIn(sourceNoMemo)), "3e forged-memo PEG_IN rejected");
   }
 
   // =========================== PEG_OUT (Solana) =================================

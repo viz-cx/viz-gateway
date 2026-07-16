@@ -26,6 +26,7 @@ test("coordinator remoteChain != account-derived chain → different digests", (
     amountMilliViz: 10000n,
     remoteChain: "SOLANA",
     remoteDestination: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    destinationValid: true,
   };
 
   // Coordinator claims GRAM for the same event (mismatch attack)
@@ -67,6 +68,7 @@ test("deposit to gram.gate is account-derived as GRAM chain", () => {
     amountMilliViz: 50000n,
     remoteChain: "GRAM",
     remoteDestination: "EQBiQBCMGHCRtLGMSSxkNe2DtsMvF-sKlWtcGd9q94mPlA7j",
+    destinationValid: true,
   };
 
   const action = canonicalPegIn(gramDeposit);
@@ -87,6 +89,7 @@ test("same deposit produces same digest (idempotency)", () => {
     amountMilliViz: 1000n,
     remoteChain: "SOLANA",
     remoteDestination: "11111111111111111111111111111112",
+    destinationValid: true,
   };
 
   const action1 = canonicalPegIn(deposit);
