@@ -1,6 +1,6 @@
 import { canonicalPegOut, CircuitBreaker, createStore, loadConfig, recoverStaleSeen } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
-import { GramHttpChain } from "./gramChain";
+import { coldStartAnchorLt, GramHttpChain } from "./gramChain";
 
 /** Durable scan-cursor name; value is the last-processed logical time (lt). */
 const CURSOR = "cursor:gram-watcher";
@@ -71,11 +71,16 @@ async function main(): Promise<void> {
         notifyStaff("withdraws", `peg-out ${r.id} recovered from SEEN but HELD (${r.lastError ?? "cap"})`, { id: r.id });
 
       if (cursor === 0) {
-        // Cold start: begin at the wallet tip's lt so we don't replay all history
-        // (backfill before first-ever run is a separate, deliberate operation).
-        cursor = await chain.newestLt();
+        // Cold start: anchor JUST BELOW the wallet tip so we don't replay all history
+        // (backfill before first-ever run is a separate, deliberate operation) WITHOUT
+        // skipping the tip itself. The scan collects lt > cursor, so anchoring AT the
+        // tip's lt would drop the tip tx — and if that tip is the wallet's first-ever tx
+        // and an unprocessed peg-out deposit, it would be lost forever. coldStartAnchorLt
+        // returns tip-1 (never a real lt), keeping the tip in range; empty wallet -> 0.
+        const tip = await chain.newestLt();
+        cursor = coldStartAnchorLt(tip);
         await store.setCursor(CURSOR, cursor);
-        console.log(`[gram-watcher] starting at lt ${cursor}`);
+        console.log(`[gram-watcher] cold start at lt ${cursor} (wallet tip ${tip})`);
       } else {
         const { burns, newestFinalLt, drained } = await chain.finalizedBurnsPaginated(cursor);
         for (const burn of burns) {
