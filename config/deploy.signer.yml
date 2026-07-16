@@ -69,6 +69,10 @@ env:
     GRAM_JETTON_MINTER_ADDRESS: EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
     GRAM_MULTISIG_ADDRESS: EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
     GRAM_GATEWAY_JETTON_WALLET: EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
+    # TON attached to each new_order. 0.1 TON: ~60% headroom over the measured ~0.062
+    # non-recoverable floor (0.06 mint delivery + gas); surplus piles into the multisig.
+    # Pinned explicitly so the value is auditable in ops config, not a silent code default.
+    GRAM_ORDER_VALUE_NANO: "100000000"
     # --- Caps: UNLIMITED (MUST match the coordinator app) ---
     CAP_PER_TX_MILLI_VIZ: "1000000000000000000000000000000"
     CAP_24H_MILLI_VIZ: "1000000000000000000000000000000"
