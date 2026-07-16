@@ -46,7 +46,7 @@ export function computePegInFee({ grossMilliViz, floorMilliViz, bps, activationS
 export function isValidVizAccount(name) {
   if (typeof name !== "string") return false;
   const n = name.trim();
-  if (n.length < 3 || n.length > 25) return false;
+  if (n.length < 2 || n.length > 25) return false;
   if (n.includes("--") || n.endsWith("-")) return false;
   return /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/.test(n);
 }

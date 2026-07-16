@@ -69,7 +69,7 @@ const acctInput = $("viz-acct"), amtInput = $("wviz-amt"), sendBtn = $("pegout-s
 function validatePegout() {
   let ok = true;
   const acct = acctInput.value.trim();
-  if (!userAddress) { sendBtn.textContent = "Connect wallet to continue"; sendBtn.disabled = true; return; }
+  if (!userAddress) { sendBtn.textContent = "Connect wallet to continue"; sendBtn.disabled = false; return; }
   sendBtn.textContent = "Return wVIZ";
   $("viz-acct-err").textContent = acct && !isValidVizAccount(acct) ? "Not a valid VIZ account name." : "";
   if (!acct || !isValidVizAccount(acct)) ok = false;
@@ -83,7 +83,7 @@ acctInput.addEventListener("input", validatePegout);
 amtInput.addEventListener("input", validatePegout);
 
 sendBtn.addEventListener("click", async () => {
-  if (!userAddress) return;
+  if (!userAddress) { tonConnectUI.openModal(); return; }
   const acct = acctInput.value.trim();
   let amountBaseUnits;
   try { amountBaseUnits = wvizToBaseUnits(amtInput.value, CONFIG.wviz.decimals); }
@@ -161,7 +161,7 @@ $("pegin-amt").addEventListener("input", updatePegInFee);
 
 /* ---------- React to connect/disconnect ---------- */
 tonConnectUI.onStatusChange((w) => {
-  userAddress = w ? Address.parse(w.account.address).toString() : null;
+  userAddress = w ? Address.parse(w.account.address).toString({ bounceable: false }) : null;
   validatePegout();
   onWalletChange();
 });

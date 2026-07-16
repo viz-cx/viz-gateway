@@ -18,8 +18,8 @@ const COMMENT = "alice"; // the user's VIZ destination account
 
   // sanity: amount + validator helpers
   assert.strictEqual(wvizToBaseUnits("1068.237"), AMOUNT);
-  assert.ok(isValidVizAccount("alice") && isValidVizAccount("gram.gate"));
-  assert.ok(!isValidVizAccount("Alice") && !isValidVizAccount("ab") && !isValidVizAccount("x-"));
+  assert.ok(isValidVizAccount("alice") && isValidVizAccount("gram.gate") && isValidVizAccount("id"));
+  assert.ok(!isValidVizAccount("Alice") && !isValidVizAccount("a") && !isValidVizAccount("x-"));
   const fee = computePegInFee({ grossMilliViz: 1000000n, floorMilliViz: 10000n, bps: 20, activationSurchargeMilliViz: 10000n, walletDeployed: false });
   assert.strictEqual(fee.total, 20000n); // max(10, 0.2% of 1000)=10 + 10 activation = 20 VIZ
 
