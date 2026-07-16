@@ -114,14 +114,32 @@ sendBtn.addEventListener("click", async () => {
   } finally { validatePegout(); }
 });
 
-/* ---------- Peg-in helper ---------- */
-let firstTimeSurcharge = true; // true until we confirm the user's wVIZ wallet is deployed
+/* ---------- Peg-in helper + balance ---------- */
+let firstTimeSurcharge = true;
+let userBalanceBaseUnits = null;
+
+function baseUnitsToDecimal(n, decimals) {
+  const d = 10n ** BigInt(decimals);
+  const whole = n / d;
+  const frac = n % d;
+  if (frac === 0n) return String(whole);
+  return `${whole}.${frac.toString().padStart(decimals, "0").replace(/0+$/, "")}`;
+}
+
+$("wviz-bal").addEventListener("click", () => {
+  if (userBalanceBaseUnits === null) return;
+  amtInput.value = baseUnitsToDecimal(userBalanceBaseUnits, CONFIG.wviz.decimals);
+  validatePegout();
+  amtInput.focus();
+});
 
 async function onWalletChange() {
-  const memoEl = $("pegin-memo"), copyEl = $("pegin-memo-copy");
+  const memoEl = $("pegin-memo"), copyEl = $("pegin-memo-copy"), balEl = $("wviz-bal");
   if (!userAddress) {
     memoEl.textContent = "Connect your TON wallet to fill this in";
     copyEl.classList.add("hidden");
+    balEl.classList.add("hidden");
+    userBalanceBaseUnits = null;
     firstTimeSurcharge = true;
     updatePegInFee();
     return;
@@ -129,9 +147,23 @@ async function onWalletChange() {
   memoEl.textContent = userAddress;
   copyEl.setAttribute("data-copy", userAddress);
   copyEl.classList.remove("hidden");
-  // first-time surcharge applies only if the user's wVIZ jetton wallet is not yet deployed
-  try { const jw = await walletAddressOf(userAddress); firstTimeSurcharge = !(await isDeployed(jw)); }
-  catch (_) { firstTimeSurcharge = true; }
+  try {
+    const jw = await walletAddressOf(userAddress);
+    const deployed = await isDeployed(jw);
+    firstTimeSurcharge = !deployed;
+    if (deployed) {
+      try {
+        const res = await ton.runMethod(jw, "get_wallet_data", []);
+        userBalanceBaseUnits = res.stack.readBigNumber();
+        const display = (Number(userBalanceBaseUnits) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
+        balEl.textContent = `Balance: ${display} wVIZ`;
+        balEl.classList.remove("hidden");
+      } catch (_) { balEl.classList.add("hidden"); userBalanceBaseUnits = null; }
+    } else {
+      balEl.classList.add("hidden");
+      userBalanceBaseUnits = null;
+    }
+  } catch (_) { firstTimeSurcharge = true; balEl.classList.add("hidden"); userBalanceBaseUnits = null; }
   updatePegInFee();
 }
 

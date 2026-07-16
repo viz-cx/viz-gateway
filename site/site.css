@@ -865,3 +865,6 @@
 .statusbar .item b { color: var(--text); font-weight: 600; }
 .statusbar .warn { color: #ffb454; }
 .hidden { display: none !important; }
+.field-label-row { display: flex; justify-content: space-between; align-items: center; }
+.bal-btn { background: none; border: none; color: var(--muted); font-size: 13px; cursor: pointer; padding: 0; font: inherit; }
+.bal-btn:hover { color: var(--ton-2); text-decoration: underline; }
