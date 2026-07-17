@@ -1,4 +1,4 @@
-import { buildGatewayAccounts, createStore, loadConfig, pegInFeePolicyFor } from "@gateway/common";
+import { buildGatewayAccounts, createStore, loadConfig, sweepFeePolicyFor } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
@@ -59,13 +59,11 @@ async function main(): Promise<void> {
       cfg.gram.rpcTimeoutMs,
     );
     // Derive the base fee with the SAME policy the dispatcher uses to size the sweep and the
-    // signer uses to validate it (`pegInFeePolicyFor` — the static manifest floor). The
-    // over-sweep guard asks "did we sweep more than we withheld?", so its reference MUST be the
-    // amount actually withheld+swept. An earlier attempt clamped this to the band floor `feeLo`
-    // (the minimum plausible fee) reasoning "under-credit is safe" — true for the under-backing
-    // drift check, but it makes every real fee ABOVE feeLo read as over-swept, false-pausing the
-    // whole gateway (e.g. a 10000 static base swept vs a 9000 feeLo derived → −1000/peg-in).
-    const gramReconPolicy = pegInFeePolicyFor(cfg.fees, "GRAM");
+    // signer uses to validate it (sweepFeePolicyFor — feeLo-floored for GRAM). The over-sweep
+    // guard asks "did we sweep more than we withheld?", so its reference MUST match the actual
+    // sweep. For GRAM, feeLo ≤ dynamic mint floor always → sweep ≤ withheld → never over-pulls;
+    // any surplus stays on gram.gate as over-backing (safe direction).
+    const gramReconPolicy = sweepFeePolicyFor(cfg.fees, "GRAM");
     recons.push(new Recon(
       [{ name: "GRAM", supply: () => gram.circulatingSupplyMilliViz() }],
       () => viz.gatewayBalanceMilliViz(accounts.accountFor("GRAM")),
@@ -83,7 +81,7 @@ async function main(): Promise<void> {
       store,
       reconCfg,
       "SOLANA",
-      pegInFeePolicyFor(cfg.fees, "SOLANA"), // recon derives unswept fees from gross, not the pinned fee
+      sweepFeePolicyFor(cfg.fees, "SOLANA"), // recon derives unswept fees from gross, not the pinned fee
     ));
   }
   // VG-02: no remotes = fatal misconfiguration (recon would always see circulating = 0).

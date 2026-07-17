@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { median, clampVizPerTon, deriveFloorMilliViz, deriveGramFeePolicy, clampBand } from "../src/priceFloor";
+import { median, clampVizPerTon, deriveFloorMilliViz, deriveGramFeePolicy, clampBand, sweepFeePolicyFor } from "../src/priceFloor";
+import { baseFee } from "../src/fees";
 import type { GatewayFeeConfig } from "../src/config";
 
 const FEES: GatewayFeeConfig = {
@@ -51,4 +52,34 @@ test("clampBand returns the base-fee band from the vizPerTon clamp", () => {
   const { feeLo, feeHi } = clampBand(FEES);
   assert.equal(feeLo, deriveFloorMilliViz(0.06, 100, 1.5));   // 9000
   assert.equal(feeHi, deriveFloorMilliViz(0.06, 20000, 1.5)); // 1,800,000
+});
+
+test("sweepFeePolicyFor: GRAM floor is clampBand.feeLo, not the static manifest floor", () => {
+  const p = sweepFeePolicyFor(FEES, "GRAM");
+  assert.equal(p.floorMilliViz, clampBand(FEES).feeLo); // 9000, not 10000
+  assert.notEqual(p.floorMilliViz, FEES.floorMilliViz); // differs from static floor
+  assert.equal(p.bps, FEES.bps);
+});
+
+test("sweepFeePolicyFor: SOLANA keeps the static manifest floor unchanged", () => {
+  const p = sweepFeePolicyFor(FEES, "SOLANA");
+  assert.equal(p.floorMilliViz, FEES.floorMilliViz); // static floor preserved
+});
+
+test("sweepFeePolicyFor: floor-dominated GRAM peg-in uses feeLo, not static", () => {
+  // GROSS small enough that bps% < feeLo → floor dominates
+  const GROSS = 1_000_000n; // 1_000_000 * 20 / 10000 = 2000 < feeLo(9000) and < static(10000)
+  const sweepBase = baseFee(GROSS, sweepFeePolicyFor(FEES, "GRAM"));
+  const staticBase = baseFee(GROSS, { floorMilliViz: FEES.floorMilliViz, bps: FEES.bps, activationSurchargeMilliViz: 0n, mintGasFloorMilliViz: 1000n });
+  assert.equal(sweepBase, clampBand(FEES).feeLo); // 9000 — never over-pulls
+  assert.equal(staticBase, FEES.floorMilliViz);   // 10000 — old behaviour
+  assert.ok(sweepBase < staticBase, "sweep base must be <= static to prevent over-pull");
+});
+
+test("sweepFeePolicyFor: bps-dominated GRAM peg-in gives same result as static (no under-pull)", () => {
+  // GROSS large enough that bps% > both feeLo and static floor
+  const GROSS = 10_000_000_000n; // 10_000_000_000 * 20 / 10000 = 20_000_000 >> 10000
+  const sweepBase = baseFee(GROSS, sweepFeePolicyFor(FEES, "GRAM"));
+  const staticBase = baseFee(GROSS, { floorMilliViz: FEES.floorMilliViz, bps: FEES.bps, activationSurchargeMilliViz: 0n, mintGasFloorMilliViz: 1000n });
+  assert.equal(sweepBase, staticBase, "bps-dominated: floor is irrelevant, both give same base");
 });
