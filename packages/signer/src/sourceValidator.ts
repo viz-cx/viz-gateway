@@ -149,10 +149,10 @@ async function validateActionInner(action: CanonicalAction, deps: SourceValidato
     await validateTonPegOut(action, deps);
     return;
   }
-  // Neither a Solana signature, a TON burn-tx hash, nor a FEE_SWEEP/REFUND child id.
+  // Neither a Solana signature, a TON burn-tx hash, nor a FEE_SWEEP/REFUND/GRAM_RETURN child id.
   // FAIL CLOSED: refuse rather than sign without an independent check.
   throw new SourceMismatchError(
-    `PEG_OUT ${action.id} matches no known source-id shape (Solana signature, TON tx hash, or FEE_SWEEP/REFUND child) — refusing to sign without an independent source check`,
+    `PEG_OUT ${action.id} matches no known source-id shape (Solana signature, TON tx hash, or FEE_SWEEP/REFUND/RETURN child) — refusing to sign without an independent source check`,
   );
 }
 
@@ -308,6 +308,15 @@ async function validateGramReturn(action: CanonicalAction, deps: SourceValidator
     throw new SourceMismatchError(`GRAM_RETURN recipient ${action.recipient} != burn sender ${burn.from} (${action.id})`);
   }
   const net = burn.amountMilliViz - deps.fees.refundFeeMilliViz;
+  // Defense-in-depth: a legitimate return only exists when the gross exceeds the refund fee — the
+  // dispatcher's dust rule retains anything <= fee and spawns no child. Refuse a non-positive net
+  // outright so a compromised coordinator can never harvest signatures on a zero/negative-value
+  // jetton-transfer order (the exact-amount check below would otherwise accept a matching 0n).
+  if (net <= 0n) {
+    throw new SourceMismatchError(
+      `GRAM_RETURN ${action.id} gross ${burn.amountMilliViz} <= refund fee ${deps.fees.refundFeeMilliViz} — dust must be retained, never returned`,
+    );
+  }
   if (action.amountMilliViz !== net) {
     throw new SourceMismatchError(
       `GRAM_RETURN amount ${action.amountMilliViz} != gross ${burn.amountMilliViz} − refund fee ${deps.fees.refundFeeMilliViz} (${action.id})`,
