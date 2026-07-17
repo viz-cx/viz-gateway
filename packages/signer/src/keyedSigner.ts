@@ -190,6 +190,22 @@ export class KeyedSigner implements Signer {
     return { actionId: action.id, operatorId: this.operatorId, signature: encodeReceipt(receipt) };
   }
 
+  async approveGramReturn(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval> {
+    if (action.direction !== "GRAM_RETURN") throw new Error("approveGramReturn expects a GRAM_RETURN action");
+    await this.assertSource(action); // validateGramReturn: dest re-check + recipient + exact amount + digest
+    if (proposal.toAddress !== action.recipient) {
+      throw new Error(`proposal.toAddress (${proposal.toAddress}) != action.recipient (${action.recipient})`);
+    }
+    // Exact amount — no band: the return moves EXACTLY the net the source-validator re-derived
+    // (gross − refundFee), and refundFeeMilliViz is one fixed manifest constant all operators share.
+    if (BigInt(proposal.amountMilliViz) !== action.amountMilliViz) {
+      throw new Error(`proposal amount (${proposal.amountMilliViz}) != action amount (${action.amountMilliViz}) for ${action.id}`);
+    }
+    if (!this.gramApprover) throw new Error("GRAM approver not configured on this signer; refusing to approve");
+    const receipt = await this.gramApprover.approveReturn(proposal);
+    return { actionId: action.id, operatorId: this.operatorId, signature: encodeReceipt(receipt) };
+  }
+
   async approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval> {
     if (action.direction !== "PEG_IN") throw new Error("approveSolanaMint expects a PEG_IN action");
     await this.assertSource(action);
