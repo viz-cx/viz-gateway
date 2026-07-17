@@ -7,11 +7,28 @@ import type {
   GramMintProposal,
   VizReleaseProposal,
 } from "@gateway/common";
-import { baseFee, GatewayAccounts, pegInFeePolicyFor } from "@gateway/common";
+import { baseFee, clampBand, GatewayAccounts, pegInFeePolicyFor } from "@gateway/common";
 import { milliToViz } from "@gateway/viz-watcher/dist/vizChain";
 import { signRelease } from "@gateway/viz-watcher/dist/vizSign";
 import { encodeReceipt, type GramApprovalClient } from "@gateway/gram-watcher/dist/gramApprove";
 import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
+
+/**
+ * Bounded-trust GRAM net check. The coordinator's median-derived net is accepted iff
+ * the implied fee sits within the manifest clamp band (+activation when the dest is
+ * not provisioned) and net stays within [mintGasFloor, gross]. A mis-set floor only
+ * shifts value within the band between user and gateway — net <= gross keeps backing
+ * whole (mirrors the activation-surcharge reasoning in fees.ts).
+ */
+export function assertGramNetInBand(gross: bigint, net: bigint, destProvisioned: boolean, fees: GatewayFeeConfig): void {
+  if (net > gross) throw new Error(`GRAM net ${net} exceeds gross ${gross}`);
+  if (net < fees.mintGasFloorMilliViz.GRAM) throw new Error(`GRAM net ${net} below mint-gas floor ${fees.mintGasFloorMilliViz.GRAM}`);
+  const { feeLo, feeHi } = clampBand(fees);
+  const activation = destProvisioned ? 0n : fees.activationSurchargeMilliViz.GRAM;
+  const fee = gross - net;
+  if (fee < feeLo) throw new Error(`GRAM fee ${fee} below band floor ${feeLo} (coordinator under-charging)`);
+  if (fee > feeHi + activation) throw new Error(`GRAM fee ${fee} above band ceiling ${feeHi + activation} (coordinator over-charging)`);
+}
 
 /**
  * The ONLY component that holds keys. Each operator runs exactly one.
@@ -159,9 +176,10 @@ export class KeyedSigner implements Signer {
     if (proposal.toAddress !== action.recipient) {
       throw new Error(`proposal.toAddress (${proposal.toAddress}) != action.recipient (${action.recipient})`);
     }
-    // proposal.amountMilliViz is NET; re-derive base fee from gross, accept the
-    // pinned destProvisioned flag for the activation surcharge.
-    this.assertNet(action, "GRAM", proposal.destProvisioned, proposal.amountMilliViz);
+    // proposal.amountMilliViz is NET; bounded-trust: accept any net whose implied fee
+    // falls within the manifest clamp band (so all coordinators in [minVizPerTon,
+    // maxVizPerTon] can operate without an exact-value match across operators).
+    assertGramNetInBand(action.amountMilliViz, BigInt(proposal.amountMilliViz), proposal.destProvisioned, this.fees);
     if (!this.gramApprover) throw new Error("GRAM approver not configured on this signer; refusing to approve");
     // On-chain effect from THIS operator's own wallet: open the order if it is still
     // absent when we are asked (no single designated proposer — the role fails over across

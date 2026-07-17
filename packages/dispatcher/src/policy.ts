@@ -71,10 +71,16 @@ export function planTransition(rec: OutboxRecord, result: DeliveryResult, now: n
  * signer's validateFeeSweep exact check and removes all coordinator discretion over the
  * sweep. The withheld fee (base + activation) stays pinned on the row for recon accounting.
  */
+/** Refund = gross minus the fixed refund fee, floored at 0 (dust is retained as surplus). */
+export function refundAmount(gross: bigint, refundFee: bigint): bigint {
+  const r = gross - refundFee;
+  return r > 0n ? r : 0n;
+}
+
 export function planChildren(
   rec: OutboxRecord,
   status: ActionStatus,
-  ctx: { feesGateAccount: string; sweepAmountMilliViz: bigint },
+  ctx: { feesGateAccount: string; sweepAmountMilliViz: bigint; refundFeeMilliViz: bigint },
 ): EnqueueInput[] {
   if (status === "CONFIRMED" && rec.direction === "PEG_IN" && ctx.sweepAmountMilliViz > 0n) {
     return [
@@ -91,13 +97,15 @@ export function planChildren(
     ];
   }
   if (status === "REFUNDING" && rec.direction === "PEG_IN" && rec.sender) {
+    const amt = refundAmount(rec.amountMilliViz, ctx.refundFeeMilliViz);
+    if (amt === 0n) return []; // dust: nothing worth refunding; retained as gateway surplus
     return [
       {
         id: `${rec.id}:refund`,
         direction: "REFUND",
         remoteChain: rec.remoteChain,
         recipient: rec.sender, // back to the VIZ sender
-        amountMilliViz: rec.amountMilliViz, // gross (no fee on a refund)
+        amountMilliViz: amt, // gross − refund fee
         digest: `${rec.digest}:refund`,
         status: "QUEUED",
         parentId: rec.id,

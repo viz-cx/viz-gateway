@@ -41,15 +41,14 @@ tools/threshold-calc.mjs   the federation-size numbers
 
 ## Fees & minimum
 
-VIZ side is free; peg-out is free. The only fee is on **peg-in**, to cover the
-TON mint gas (+ small margin), collected in wVIZ at mint time so the 1:1 backing
-holds. At 1 VIZ=$0.005, 1 TON=$2:
+VIZ side is free; peg-out is free. The only fee is on **peg-in**, to cover TON mint gas and a small margin.
 
-- **Fee = max(100 VIZ, 0.30%)** — floor ~$0.50 ≈ 0.25 TON (~2.5× worst-case mint gas); 0.30% only bites above ~33,333 VIZ.
-- **Minimum peg-in = 2,000 VIZ (~$10)** — below this, gas dominates and it's flagged for refund.
+- **Base fee = max(dynamic gas-covering floor, 0.20%)** — floor is derived from `mintGasTon × vizPerTon × margin` (operators quote their VIZ/TON rate; coordinator uses the median); 0.20% only overtakes the floor above ~5,000 VIZ.
+- **First-time recipients** pay an extra wallet-deploy surcharge (~0.05 TON equivalent) so the gateway isn't out-of-pocket for on-chain rent.
+- **No minimum** — but deposits below the minimum that can't cover the fee are refunded (minus a small refund fee to cover the return transfer gas). Dust ≤ refund fee is retained as gateway surplus.
+- **Invalid/no-memo deposits** are auto-refunded to the originating VIZ account.
 
-Config: `FEE_FLOOR_MILLI_VIZ`, `FEE_BPS`, `MIN_PEGIN_MILLI_VIZ` (see `.env.example`);
-math in plan §12, verified by `tools/fees-spike.cjs`.
+Config: `FEE_FLOOR_MILLI_VIZ`, `FEE_BPS`, `FEE_ACTIVATION_GRAM_MILLI_VIZ`, `GRAM_MINT_GAS_TON`, `GRAM_VIZ_PER_TON`, `REFUND_FEE_MILLI_VIZ` (see `.env.example`).
 
 ## Status
 

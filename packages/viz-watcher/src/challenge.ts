@@ -9,8 +9,11 @@ import { PrivateKey, Signature } from "viz-js-lib/lib/auth/ecc";
  */
 const DOMAIN = "viz-gateway-register";
 
-export function challengeMessage(operatorId: string, url: string, nonce: string): string {
-  return `${DOMAIN}\n${operatorId}\n${url}\n${nonce}`;
+export function challengeMessage(operatorId: string, url: string, nonce: string, vizPerTon?: number): string {
+  const base = `${DOMAIN}\n${operatorId}\n${url}\n${nonce}`;
+  // Append the price quote ONLY when present, so a legacy signer that sends no quote
+  // signs (and the coordinator verifies) the exact original message — back-compatible.
+  return vizPerTon === undefined ? base : `${base}\n${vizPerTon}`;
 }
 
 /** Derive the VIZ public key ("VIZ…", matching key_auths) that a WIF signs for. */
@@ -20,14 +23,14 @@ export function pubkeyFromWif(wif: string): string {
 }
 
 /** Sign the challenge with the operator's VIZ WIF; returns a hex signature. */
-export function signChallenge(operatorId: string, url: string, nonce: string, wif: string): string {
+export function signChallenge(operatorId: string, url: string, nonce: string, wif: string, vizPerTon?: number): string {
   if (!wif) throw new Error("VIZ signing key (WIF) not set; cannot sign registration challenge");
-  const buf = Buffer.from(challengeMessage(operatorId, url, nonce), "utf8");
+  const buf = Buffer.from(challengeMessage(operatorId, url, nonce, vizPerTon), "utf8");
   return Signature.signBuffer(buf, PrivateKey.fromWif(wif)).toHex();
 }
 
 /** Recover the VIZ pubkey ("VIZ…") that signed the challenge. Throws on garbage input. */
-export function recoverChallengeSigner(operatorId: string, url: string, nonce: string, sigHex: string): string {
-  const buf = Buffer.from(challengeMessage(operatorId, url, nonce), "utf8");
+export function recoverChallengeSigner(operatorId: string, url: string, nonce: string, sigHex: string, vizPerTon?: number): string {
+  const buf = Buffer.from(challengeMessage(operatorId, url, nonce, vizPerTon), "utf8");
   return Signature.fromHex(sigHex).recoverPublicKeyFromBuffer(buf).toString();
 }

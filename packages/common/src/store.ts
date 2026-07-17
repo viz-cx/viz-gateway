@@ -112,6 +112,20 @@ export interface GatewayStore {
   unpause(): Promise<void>;
   pauseReason(): Promise<string | null>;
   close(): Promise<void>;
+
+  // --- generic gateway_state KV (last-good fee quotes, etc.) ---
+  /** Read a gateway_state KV entry; returns null if unset. */
+  getState(key: string): Promise<string | null>;
+  /** Write a gateway_state KV entry. */
+  setState(key: string, value: string): Promise<void>;
+
+  // --- per-source peg-in rate limit ---
+  /**
+   * Atomic sliding-window rate check. Prunes entries older than `now − windowMs`,
+   * counts live entries for this sender, records + returns true iff count < maxPerWindow.
+   * Returns false (without recording) when the limit is already reached.
+   */
+  tryReserveSenderRate(sender: string, maxPerWindow: number, windowMs: number, now: number): Promise<boolean>;
 }
 
 type Row = Record<string, unknown>;
@@ -192,6 +206,11 @@ export class SqliteGatewayStore implements GatewayStore {
          amount_milli_viz TEXT NOT NULL
        );
        CREATE INDEX IF NOT EXISTS idx_cap_ts ON cap_window(ts);
+       CREATE TABLE IF NOT EXISTS pegin_rate(
+         sender TEXT NOT NULL,
+         ts     INTEGER NOT NULL
+       );
+       CREATE INDEX IF NOT EXISTS idx_pegin_rate ON pegin_rate(sender, ts);
        CREATE TABLE IF NOT EXISTS deposit_addresses(
          viz_account TEXT PRIMARY KEY,
          sol_address TEXT NOT NULL,
@@ -451,6 +470,21 @@ export class SqliteGatewayStore implements GatewayStore {
     }
   }
 
+  async tryReserveSenderRate(sender: string, maxPerWindow: number, windowMs: number, now: number): Promise<boolean> {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM pegin_rate WHERE ts < ?").run(now - windowMs);
+      const row = this.db.prepare("SELECT COUNT(*) AS c FROM pegin_rate WHERE sender = ? AND ts > ?").get(sender, now - windowMs) as { c: number };
+      if (Number(row.c) >= maxPerWindow) { this.db.exec("COMMIT"); return false; }
+      this.db.prepare("INSERT INTO pegin_rate(sender, ts) VALUES(?, ?)").run(sender, now);
+      this.db.exec("COMMIT");
+      return true;
+    } catch (e) {
+      try { this.db.exec("ROLLBACK"); } catch { /* noop */ }
+      throw e;
+    }
+  }
+
   private setKey(key: string, value: string): void {
     this.db
       .prepare(
@@ -489,6 +523,12 @@ export class SqliteGatewayStore implements GatewayStore {
   }
   async pauseReason(): Promise<string | null> {
     return this.getKey("pause_reason");
+  }
+  async getState(key: string): Promise<string | null> {
+    return this.getKey(key);
+  }
+  async setState(key: string, value: string): Promise<void> {
+    this.setKey(key, value);
   }
   async close(): Promise<void> {
     this.db.close();
@@ -621,6 +661,14 @@ export class InMemoryGatewayStore implements GatewayStore {
     this.caps.push({ ts: now, amount: amountMilliViz });
     return true;
   }
+  private readonly rates: Array<{ sender: string; ts: number }> = [];
+  async tryReserveSenderRate(sender: string, maxPerWindow: number, windowMs: number, now: number): Promise<boolean> {
+    const cutoff = now - windowMs;
+    const count = this.rates.filter((r) => r.sender === sender && r.ts > cutoff).length;
+    if (count >= maxPerWindow) return false;
+    this.rates.push({ sender, ts: now });
+    return true;
+  }
   async registerDepositAddress(rec: { vizAccount: string; solAddress: string; wvizAta: string }): Promise<void> {
     if (this.deposits.has(rec.vizAccount)) return;
     this.deposits.set(rec.vizAccount, { ...rec, createdAt: Date.now(), scanTime: 0, priority: 0 });
@@ -660,6 +708,13 @@ export class InMemoryGatewayStore implements GatewayStore {
   }
   async pauseReason(): Promise<string | null> {
     return this.reason || null;
+  }
+  private readonly state = new Map<string, string>();
+  async getState(key: string): Promise<string | null> {
+    return this.state.get(key) ?? null;
+  }
+  async setState(key: string, value: string): Promise<void> {
+    this.state.set(key, value);
   }
   async close(): Promise<void> {
     /* no-op */

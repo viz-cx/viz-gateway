@@ -1,13 +1,13 @@
-import { buildGatewayAccounts, createStore, loadConfig, pegInFeePolicyFor } from "@gateway/common";
+import { buildGatewayAccounts, clampBand, createStore, loadConfig, pegInFeePolicyFor } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain, pubkeyOf } from "@gateway/solana-watcher/dist/solanaChain";
-import { Recon, uncoveredActiveChains } from "./checker";
+import { Recon, uncoveredActiveChains, belowTonFloor } from "./checker";
 
-export { Recon, uncoveredActiveChains } from "./checker";
+export { Recon, uncoveredActiveChains, belowTonFloor } from "./checker";
 
 /**
  * recon: continuously checks the peg invariant
@@ -58,13 +58,16 @@ async function main(): Promise<void> {
       cfg.gram.maxScanPages,
       cfg.gram.rpcTimeoutMs,
     );
+    // Under a dynamic floor the exact historical median is unknowable; use the lower
+    // clamp-band floor so fee over-credit is impossible (under-credit is the safe direction).
+    const gramReconPolicy = { ...pegInFeePolicyFor(cfg.fees, "GRAM"), floorMilliViz: clampBand(cfg.fees).feeLo };
     recons.push(new Recon(
       [{ name: "GRAM", supply: () => gram.circulatingSupplyMilliViz() }],
       () => viz.gatewayBalanceMilliViz(accounts.accountFor("GRAM")),
       store,
       reconCfg,
       "GRAM",
-      pegInFeePolicyFor(cfg.fees, "GRAM"), // recon derives unswept fees from gross, not the pinned fee
+      gramReconPolicy,
     ));
   }
   if (cfg.solana.wvizMint) {
@@ -120,6 +123,29 @@ async function main(): Promise<void> {
   };
   await enforceActiveChainCoverage(true);
 
+  // GRAM gas reserve monitor: the multisig wallet pays TON gas per mint; if it runs
+  // low, mints silently fail. Pause peg-ins + alert when under the configured floor (spec §4).
+  const gramReserveCheck = async (): Promise<void> => {
+    if (!cfg.gram.jettonMinterAddress || !cfg.gram.multisigAddress) return;
+    try {
+      const gram = new GramHttpChain(
+        cfg.gram.endpoint, cfg.gram.apiKey, cfg.gram.jettonMinterAddress,
+        cfg.gram.gatewayJettonWallet, cfg.gram.multisigAddress,
+        cfg.gram.finalityConfirmations, cfg.gram.scanMaxTransactions,
+        cfg.gram.maxScanPages, cfg.gram.rpcTimeoutMs,
+      );
+      const bal = await gram.tonBalanceNano(cfg.gram.multisigAddress);
+      if (belowTonFloor(bal, cfg.gram.submitterMinNano)) {
+        await store.pause(`GRAM TON reserve low: ${bal} nano < ${cfg.gram.submitterMinNano}`);
+        notifyStaff("reserve", `GRAM multisig ${cfg.gram.multisigAddress} low: ${bal} nano-TON < ${cfg.gram.submitterMinNano}`, {
+          balanceNano: String(bal), floorNano: cfg.gram.submitterMinNano,
+        });
+      }
+    } catch (err) {
+      console.warn("[recon] GRAM reserve check failed:", err);
+    }
+  };
+
   // D3 reserve monitor: the Solana submitter pays fee + ATA rent for every mint;
   // if it runs dry, mints silently fail. Page (don't pause) when it's low.
   const submitter =
@@ -143,6 +169,7 @@ async function main(): Promise<void> {
   if (once) {
     const results = await Promise.all(recons.map((r) => r.check()));
     await reserveCheck();
+    await gramReserveCheck();
     await store.close();
     // exit 0 = all chains healthy; exit 2 = any chain under-backed or indeterminate.
     process.exit(results.every((r) => r === true) ? 0 : 2);
@@ -164,6 +191,7 @@ async function main(): Promise<void> {
         await r.onCheckResult(await r.check());
       }
       await reserveCheck();
+      await gramReserveCheck();
     } catch (err) {
       console.error("[recon] loop error:", err);
     }

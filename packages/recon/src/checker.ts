@@ -1,6 +1,11 @@
 import type { GatewayStore, RemoteChainId, PegInFeePolicy } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 
+/** True iff the TON balance is under the configured floor. */
+export function belowTonFloor(balanceNano: bigint, floorNano: number): boolean {
+  return balanceNano < BigInt(floorNano);
+}
+
 export interface ReconCfg {
   driftToleranceMilliViz: bigint;
   maxConsecutiveFailures: number;
