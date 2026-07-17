@@ -28,8 +28,10 @@ import { planChildren, planTransition, type DeliveryResult } from "./policy";
  * they share the PEG_OUT shape.
  */
 function recordToAction(rec: OutboxRecord): CanonicalAction {
+  const direction =
+    rec.direction === "PEG_IN" ? "PEG_IN" : rec.direction === "GRAM_RETURN" ? "GRAM_RETURN" : "PEG_OUT";
   return {
-    direction: rec.direction === "PEG_IN" ? "PEG_IN" : "PEG_OUT",
+    direction,
     id: rec.id,
     remoteChain: rec.remoteChain,
     recipient: rec.recipient,
@@ -147,6 +149,35 @@ async function tick(
     }
   }
 
+  // Auto-return TON peg-outs with an unusable VIZ destination. The gram-watcher parked the burn
+  // as HELD("RETURN_INVALID_DEST") with the sender pinned; the held wVIZ can never be released to
+  // a valid account, so spawn a GRAM_RETURN child (wVIZ back to sender, minus refund fee) and flip
+  // the parent to REFUNDING. Mirrors the peg-in INVALID_DESTINATION path; enqueue child BEFORE the
+  // flip so a crash re-runs this branch instead of stranding a REFUNDING parent.
+  for (const rec of await store.due(now, ["HELD"])) {
+    if (rec.direction !== "PEG_OUT" || rec.lastError !== "RETURN_INVALID_DEST" || !rec.sender) continue;
+    const children = planChildren(rec, "REFUNDING", {
+      feesGateAccount: opts.feesGateAccount,
+      sweepAmountMilliViz: 0n,
+      refundFeeMilliViz: opts.refundFeeMilliViz,
+    });
+    for (const child of children) await store.enqueue(child);
+    if (children.length === 0) {
+      await store.setStatus(rec.id, "REFUNDED", { lastError: "dust retained (<= refund fee)" });
+      notifyStaff("return", `invalid-destination peg-out ${rec.id} is dust (<= refund fee); wVIZ retained`, {
+        id: rec.id,
+        amountMilliViz: String(rec.amountMilliViz),
+      });
+    } else {
+      await store.setStatus(rec.id, "REFUNDING");
+      notifyStaff("return", `invalid-destination peg-out ${rec.id} routed to auto-return`, {
+        id: rec.id,
+        sender: rec.sender,
+        amountMilliViz: String(rec.amountMilliViz),
+      });
+    }
+  }
+
   // Deliver every QUEUED row (PEG_IN mints; PEG_OUT/FEE_SWEEP/REFUND are VIZ releases).
   const due = await store.due(now, ["QUEUED"]);
   for (const rec of due) {
@@ -184,8 +215,14 @@ async function tick(
     // A confirmed REFUND closes out its parent PEG_IN (REFUNDING -> REFUNDED).
     // Use the stable parentId column; fall back to the legacy id-suffix for rows
     // that predate the parentId column.
-    if (t.status === "CONFIRMED" && rec.direction === "REFUND") {
-      const parentId = rec.parentId ?? (rec.id.endsWith(":refund") ? rec.id.slice(0, -":refund".length) : null);
+    if (t.status === "CONFIRMED" && (rec.direction === "REFUND" || rec.direction === "GRAM_RETURN")) {
+      const parentId =
+        rec.parentId ??
+        (rec.id.endsWith(":refund")
+          ? rec.id.slice(0, -":refund".length)
+          : rec.id.endsWith(":return")
+            ? rec.id.slice(0, -":return".length)
+            : null);
       if (parentId) await store.setStatus(parentId, "REFUNDED");
     }
     if (t.status === "REFUNDING") {

@@ -36,6 +36,12 @@ export async function routeApproval(
   action: CanonicalAction,
   proposal: AnyProposal,
 ): Promise<Approval> {
+  if (action.direction === "GRAM_RETURN") {
+    if (!isGramMintProposal(proposal)) {
+      throw new Error(`GRAM_RETURN proposal shape not recognized for ${action.id}`);
+    }
+    return signer.approveGramReturn(action, proposal as GramMintProposal);
+  }
   if (action.direction === "PEG_OUT") {
     return signer.signVizRelease(action, proposal as VizReleaseProposal);
   }

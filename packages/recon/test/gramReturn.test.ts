@@ -32,7 +32,6 @@ test("auto-return: post-return state — locked >= circulating, recon passes (no
 
   const locked = 100000n;
   const circulatingAfterReturn = 95000n;
-  const unsweptFees = 0n;
 
   const gram = new Recon(
     [{ name: "GRAM", supply: async () => circulatingAfterReturn }],
@@ -76,7 +75,6 @@ test("auto-return: retained fee stays in gatewayHeld, reducing circulating — r
 
   const locked = 50000n;
   const circulatingAfterReturn = 48000n; // totalSupply(50k) - gatewayHeld(2k)
-  const unsweptFees = 0n;
 
   const gram = new Recon(
     [{ name: "GRAM", supply: async () => circulatingAfterReturn }],

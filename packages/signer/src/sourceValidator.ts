@@ -44,8 +44,8 @@ export interface BurnReader {
 }
 
 export interface SourceValidatorDeps {
-  /** Operator's own VIZ node reader (peg-in source). */
-  vizChain: Pick<VizChain, "getDeposit">;
+  /** Operator's own VIZ node reader: peg-in source (getDeposit) + destination existence (accountExists). */
+  vizChain: Pick<VizChain, "getDeposit" | "accountExists">;
   /** Operator's own Solana reader (peg-out source). */
   solanaChain: BurnReader;
   /** Operator's own TON reader (peg-out source). */
@@ -77,6 +77,7 @@ export interface SourceValidatorDeps {
 /** Child-action id suffixes for gateway-internal VIZ releases spawned off a PEG_IN. */
 const FEE_SWEEP_SUFFIX = ":fee";
 const REFUND_SUFFIX = ":refund";
+const RETURN_SUFFIX = ":return";
 
 /** Solana signatures base58-decode to 64 bytes (~86-90 base58 chars). */
 const SOLANA_SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{86,90}$/;
@@ -129,6 +130,10 @@ async function validateActionInner(action: CanonicalAction, deps: SourceValidato
   }
   if (action.id.endsWith(REFUND_SUFFIX)) {
     await validateRefund(action, deps);
+    return;
+  }
+  if (action.id.endsWith(RETURN_SUFFIX)) {
+    await validateGramReturn(action, deps);
     return;
   }
   // PEG_OUT: dispatch by source-id SHAPE, not by action.remoteChain. The action is
@@ -266,6 +271,50 @@ async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps
   }
   if (action.digest !== `${parent.digest}${REFUND_SUFFIX}`) {
     throw new SourceMismatchError(`REFUND digest not bound to parent PEG_IN ${parent.id} (${action.id})`);
+  }
+}
+
+/**
+ * GRAM_RETURN — the gateway returns a stranded TON peg-out's wVIZ to its original sender (gross
+ * minus the fixed refund fee) via a multisig jetton transfer. Fully independent:
+ *   - the parent is re-read from the operator's OWN TON node (getBurn by the tx-hash prefix);
+ *   - the destination is re-checked on the operator's OWN VIZ node: if the memo account EXISTS
+ *     the peg-out is a legitimate release and MUST NOT be converted to a return — refuse. One
+ *     existence check covers empty/malformed/non-existent uniformly (accountExists("") is false);
+ *   - recipient MUST equal the burn sender; amount MUST equal gross − refundFee (exact, no band —
+ *     refundFeeMilliViz is a single fixed manifest constant every operator shares);
+ *   - the digest MUST be bound to the re-derived parent PEG_OUT ("<parentDigest>:return").
+ */
+async function validateGramReturn(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+  const parentId = action.id.slice(0, -RETURN_SUFFIX.length);
+  if (!looksLikeTonTxHash(parentId)) {
+    throw new SourceMismatchError(`malformed ${RETURN_SUFFIX} child id "${action.id}" (expected "<tonTxHash>${RETURN_SUFFIX}")`);
+  }
+  const burn = await deps.tonChain.getBurn(parentId);
+  if (!burn) {
+    throw new SourceMismatchError(`GRAM_RETURN parent burn ${parentId} not found or not yet final on TON (${action.id})`);
+  }
+  const parent = canonicalPegOut(burn);
+  // Independent trigger re-check (strict refuse-when-usable — see plan "Design decision resolved").
+  if (await deps.vizChain.accountExists(burn.homeDestination)) {
+    throw new SourceMismatchError(
+      `GRAM_RETURN ${action.id} destination "${burn.homeDestination}" exists on VIZ — return unwarranted (release the peg-out, do not return)`,
+    );
+  }
+  if (action.remoteChain !== burn.chain) {
+    throw new SourceMismatchError(`GRAM_RETURN remoteChain ${String(action.remoteChain)} != burn chain ${burn.chain} (${action.id})`);
+  }
+  if (action.recipient !== burn.from) {
+    throw new SourceMismatchError(`GRAM_RETURN recipient ${action.recipient} != burn sender ${burn.from} (${action.id})`);
+  }
+  const net = burn.amountMilliViz - deps.fees.refundFeeMilliViz;
+  if (action.amountMilliViz !== net) {
+    throw new SourceMismatchError(
+      `GRAM_RETURN amount ${action.amountMilliViz} != gross ${burn.amountMilliViz} − refund fee ${deps.fees.refundFeeMilliViz} (${action.id})`,
+    );
+  }
+  if (action.digest !== `${parent.digest}${RETURN_SUFFIX}`) {
+    throw new SourceMismatchError(`GRAM_RETURN digest not bound to parent PEG_OUT ${parent.id} (${action.id})`);
   }
 }
 

@@ -67,6 +67,7 @@ test("FEE_SWEEP with action.remoteChain=GRAM but parent deposit remoteChain=SOLA
         if (trxId === "abc123" && opIndex === 0) return parentDeposit;
         return null;
       },
+      async accountExists() { return false; },
     },
     solanaChain: {
       async getBurn() { return null; },

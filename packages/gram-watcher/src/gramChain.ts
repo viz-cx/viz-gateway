@@ -37,6 +37,9 @@ const OP_TRANSFER_NOTIFICATION = 0x7362d09c;
 // Standard governed-minter op codes (ton-blockchain/token-contract).
 const OP_MINT = 21;
 const OP_INTERNAL_TRANSFER = 0x178d4519;
+// Standard TEP-74 jetton transfer (sender's wallet -> receiver). Used to move HELD wVIZ
+// back OUT of the gateway's jetton wallet on an auto-return (op != the mint's internal_transfer).
+const OP_JETTON_TRANSFER = 0x0f8a7ea5;
 
 /**
  * Parse an inbound jetton message at the gateway's OWN jetton wallet into
@@ -128,6 +131,50 @@ export function mintOrderCell(
   amountBaseUnits: bigint,
 ): { cell: Cell; hashHex: string } {
   const cell = Multisig.packOrder([buildMintTransfer(minter, toAddr, amountBaseUnits)]);
+  return { cell, hashHex: cell.hash().toString("hex") };
+}
+
+/**
+ * The multisig transfer request that RETURNS held wVIZ to the original peg-out sender: a
+ * TEP-74 `transfer` (0x0f8a7ea5) sent to the gateway's OWN jetton wallet (owned by the
+ * multisig), which forwards the jetton to `toAddr`, deploying the recipient's wallet via the
+ * 0.05 forward. PURE function of (gatewayJettonWallet, toAddr, base-unit amount) so every
+ * operator rebuilds the byte-identical order and verifies the hash before approving. Mirrors
+ * buildMintTransfer, but transfers EXISTING supply instead of minting — supply-neutral.
+ */
+export function buildReturnTransfer(
+  gatewayJettonWallet: Address,
+  toAddr: Address,
+  amountBaseUnits: bigint,
+): TransferRequest {
+  const transferBody = beginCell()
+    .storeUint(OP_JETTON_TRANSFER, 32)
+    .storeUint(0n, 64) // query_id
+    .storeCoins(amountBaseUnits) // wVIZ base units (= milli-VIZ)
+    .storeAddress(toAddr) // destination = original sender
+    .storeAddress(toAddr) // response_destination = sender (excess TON refunded to them)
+    .storeMaybeRef(null) // custom_payload
+    .storeCoins(toNano("0.05")) // forward_ton_amount: deploys the recipient's jetton wallet if absent
+    .storeBit(false) // forward_payload: inline, empty
+    .endCell();
+  return {
+    type: "transfer",
+    sendMode: SendMode.PAY_GAS_SEPARATELY,
+    // Value the multisig sends WITH the transfer to the gateway jetton wallet: covers the
+    // wallet's send gas + the 0.05 forward + headroom. PAY_GAS_SEPARATELY draws any shortfall
+    // from the gateway wallet's balance so a fee spike never strands the return. Tune vs the
+    // sandbox spike (Task 10) — the delivery-critical 0.05 forward is unchanged.
+    message: internal({ to: gatewayJettonWallet, value: toNano("0.1"), body: transferBody }),
+  };
+}
+
+/** Packed multisig-v2 order cell for a wVIZ return + its 32-byte hash (operators recompute+compare). */
+export function returnOrderCell(
+  gatewayJettonWallet: Address,
+  toAddr: Address,
+  amountBaseUnits: bigint,
+): { cell: Cell; hashHex: string } {
+  const cell = Multisig.packOrder([buildReturnTransfer(gatewayJettonWallet, toAddr, amountBaseUnits)]);
   return { cell, hashHex: cell.hash().toString("hex") };
 }
 
@@ -428,6 +475,12 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
    */
   orderHashFor(toAddress: string, amountBaseUnits: bigint): string {
     return mintOrderCell(this.minter, Address.parse(toAddress), amountBaseUnits).hashHex;
+  }
+
+  /** Seqno-independent order hash for a wVIZ RETURN transfer (operators verify before approving). */
+  returnOrderHashFor(toAddress: string, amountBaseUnits: bigint): string {
+    if (!this.gatewayWallet) throw new Error("GRAM_GATEWAY_JETTON_WALLET is required for returnOrderHashFor");
+    return returnOrderCell(this.gatewayWallet, Address.parse(toAddress), amountBaseUnits).hashHex;
   }
 
   /**

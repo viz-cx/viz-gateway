@@ -2,7 +2,7 @@
 // These types are the trust-critical contract: every operator must agree on
 // exactly the same canonical representation of an action before signing it.
 
-export type Direction = "PEG_IN" | "PEG_OUT";
+export type Direction = "PEG_IN" | "PEG_OUT" | "GRAM_RETURN";
 
 /** Remote chains the gateway can mint wrapped VIZ on. */
 export type RemoteChainId = "GRAM" | "SOLANA";

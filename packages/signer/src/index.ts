@@ -10,6 +10,7 @@ import {
   type GramMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
+import { Address } from "@ton/ton";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
@@ -159,6 +160,7 @@ async function main(): Promise<void> {
           cfg.gram.jettonMinterAddress,
           cfg.gram.multisigAddress,
           cfg.gram.signerMnemonic,
+          Address.parse(cfg.gram.gatewayJettonWallet),
           {
             maxWaitMs: cfg.gram.approveMaxWaitMs,
             pollIntervalMs: cfg.gram.approvePollIntervalMs,

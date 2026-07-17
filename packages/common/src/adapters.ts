@@ -103,4 +103,6 @@ export interface Signer {
   approveGramMint(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval>;
   /** Validate the proposal against the action, then approve the remote Solana mint. */
   approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval>;
+  /** Validate the proposal against the action, then approve the GRAM_RETURN jetton transfer. */
+  approveGramReturn(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval>;
 }

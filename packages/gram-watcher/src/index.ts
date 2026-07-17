@@ -1,6 +1,8 @@
-import { canonicalPegOut, CircuitBreaker, createStore, loadConfig, recoverStaleSeen } from "@gateway/common";
+import { buildGatewayAccounts, canonicalPegOut, CircuitBreaker, createStore, loadConfig, recoverStaleSeen } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
+import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { coldStartAnchorLt, GramHttpChain } from "./gramChain";
+import { classifyPegOutDestination } from "./returnClassify";
 
 /** Durable scan-cursor name; value is the last-processed logical time (lt). */
 const CURSOR = "cursor:gram-watcher";
@@ -33,6 +35,7 @@ async function main(): Promise<void> {
   );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
+  const vizChain = new VizJsChain(cfg.viz.nodeUrl, buildGatewayAccounts(cfg));
 
   // Last-processed logical time, resumed from the durable store so downtime never
   // silently skips burns (VG-06). Cold start (0) begins at the wallet tip's lt.
@@ -90,11 +93,23 @@ async function main(): Promise<void> {
             direction: "PEG_OUT",
             remoteChain: action.remoteChain,
             recipient: action.recipient,
+            sender: burn.from, // original TON sender — enables auto-return on an unusable destination
             amountMilliViz: action.amountMilliViz,
             digest: action.digest,
             status: "SEEN",
           });
           if (!first) continue;
+
+          // Auto-return: an unusable VIZ destination (empty/malformed/non-existent) can never
+          // receive a release, so park it for the dispatcher's GRAM_RETURN path instead of QUEUED.
+          // Routing hint only — each signer re-checks independently before the wVIZ moves.
+          const reason = await classifyPegOutDestination(action.recipient, (n) => vizChain.accountExists(n));
+          if (reason) {
+            await store.setStatus(action.id, "HELD", { lastError: reason });
+            console.log(`[gram-watcher] peg-out ${action.id} HELD(${reason}) -> auto-return wVIZ to ${burn.from}`);
+            continue;
+          }
+
           // Atomic check+record (see checkAndRecord): reserves the 24h window slot in the same
           // transaction as the check so concurrent watchers cannot both slip past the cap.
           const decision = await breaker.checkAndRecord(action.amountMilliViz);
