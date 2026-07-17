@@ -27,6 +27,12 @@ const FEES = {
   bps: 20,
   activationSurchargeMilliViz: { SOLANA: 500n, GRAM: 500n },
   mintGasFloorMilliViz: { SOLANA: 100n, GRAM: 100n },
+  mintGasTon: 0.06,
+  walletDeployGasTon: 0.05,
+  margin: 1.5,
+  minVizPerTon: 100,
+  maxVizPerTon: 20000,
+  refundFeeMilliViz: 5000n,
 };
 
 // ---- Test 1: FEE_SWEEP wrong remoteChain ----------------------------------
