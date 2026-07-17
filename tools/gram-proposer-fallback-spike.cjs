@@ -17,7 +17,7 @@
 // Uses the REAL Orchestrator + REAL GramMintBroadcaster against a fake TON chain.
 // Run: node tools/gram-proposer-fallback-spike.cjs
 const assert = require("node:assert");
-const { canonicalPegIn } = require("@gateway/common");
+const { canonicalPegIn, pegInFeePolicyFor } = require("@gateway/common");
 const { Orchestrator } = require("../packages/coordinator/dist/orchestrator.js");
 const { GramMintBroadcaster } = require("../packages/coordinator/dist/adapters.js");
 
@@ -77,7 +77,7 @@ const action = canonicalPegIn({
       okSigner("op-2", contacted),
       okSigner("op-3", contacted),
     ];
-    const r = await new Orchestrator(2, OPERATORS, signers, new GramMintBroadcaster(fakeChain(), FEES, fakeStore())).process(action);
+    const r = await new Orchestrator(2, OPERATORS, signers, new GramMintBroadcaster(fakeChain(), () => Promise.resolve(pegInFeePolicyFor(FEES, "GRAM")), fakeStore())).process(action);
     assert.strictEqual(r.broadcast, true, "mint completes via op-2 + op-3 despite op-1 failing first");
     assert.strictEqual(r.approvals, 2);
     assert.deepStrictEqual(contacted, ["op-1(FAIL)", "op-2", "op-3"], "op-1 failed its turn, coordinator failed over");
@@ -93,7 +93,7 @@ const action = canonicalPegIn({
       brokenSigner("op-2", contacted, "wallet 0 TON / uninitialized"),
       okSigner("op-3", contacted),
     ];
-    const r = await new Orchestrator(2, OPERATORS, signers, new GramMintBroadcaster(fakeChain(), FEES, fakeStore())).process(action);
+    const r = await new Orchestrator(2, OPERATORS, signers, new GramMintBroadcaster(fakeChain(), () => Promise.resolve(pegInFeePolicyFor(FEES, "GRAM")), fakeStore())).process(action);
     assert.strictEqual(r.broadcast, false, "one functional signer < threshold 2 -> no mint (would refund)");
     assert.strictEqual(r.approvals, 1);
     console.log("[floor]         only 1 operator can transact (< threshold) -> broadcast=false (refund) OK");
@@ -103,7 +103,7 @@ const action = canonicalPegIn({
   {
     const contacted = [];
     const signers = OPERATORS.map((id) => okSigner(id, contacted));
-    const r = await new Orchestrator(2, OPERATORS, signers, new GramMintBroadcaster(fakeChain(), FEES, fakeStore())).process(action);
+    const r = await new Orchestrator(2, OPERATORS, signers, new GramMintBroadcaster(fakeChain(), () => Promise.resolve(pegInFeePolicyFor(FEES, "GRAM")), fakeStore())).process(action);
     assert.strictEqual(r.broadcast, true);
     assert.strictEqual(r.approvals, 2, "stops at threshold");
     assert.deepStrictEqual(contacted, ["op-1", "op-2"], "contacted in order, stopped once threshold met");

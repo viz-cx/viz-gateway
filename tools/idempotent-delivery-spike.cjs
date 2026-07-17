@@ -611,7 +611,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     const action = { id: "ton1:0" };
     await enqueueTonPegIn(store, action.id);
     const chain = mockTonChain();
-    const b = new GramMintBroadcaster(chain, FEES, store);
+    const b = new GramMintBroadcaster(chain, () => Promise.resolve(pegInFeePolicyFor(FEES, "GRAM")), store);
     const pre = await b.actionExecuted(action);
     assert.strictEqual(pre.executed, false, "fresh TON row (no txid) -> not executed");
     assert.strictEqual(chain.orderExecutedCalls(), 0, "happy path does NO on-chain lookup");
@@ -627,7 +627,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     const id = "ton2:0";
     await enqueueTonPegIn(store, id);
     const chain = mockTonChain({ nextAddr: "ORDER_ADDR_2" });
-    const b = new GramMintBroadcaster(chain, FEES, store);
+    const b = new GramMintBroadcaster(chain, () => Promise.resolve(pegInFeePolicyFor(FEES, "GRAM")), store);
     const { proposal } = await b.buildProposal(tonAction(id));
     assert.strictEqual(proposal.orderAddr, "ORDER_ADDR_2", "proposal pins the next order address");
     assert.strictEqual(proposal.proposerOperatorId, undefined, "no proposer is designated in the proposal");
@@ -646,7 +646,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     const id = "ton3:0";
     await enqueueTonPegIn(store, id);
     const chain = mockTonChain({ executed: new Set(["ORDER_ADDR_3"]) });
-    const b = new GramMintBroadcaster(chain, FEES, store);
+    const b = new GramMintBroadcaster(chain, () => Promise.resolve(pegInFeePolicyFor(FEES, "GRAM")), store);
     await store.setStatus(id, "BROADCAST", { txid: "ORDER_ADDR_3" });
     const rec = await b.actionExecuted({ id });
     assert.strictEqual(rec.executed, true, "persisted order addr + executed on-chain -> executed");
@@ -665,7 +665,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     const id = "ton4:0";
     await enqueueTonPegIn(store, id);
     const chain = mockTonChain({ executed: new Set() }); // order created but never reached threshold
-    const b = new GramMintBroadcaster(chain, FEES, store);
+    const b = new GramMintBroadcaster(chain, () => Promise.resolve(pegInFeePolicyFor(FEES, "GRAM")), store);
     await store.setStatus(id, "BROADCAST", { txid: "ORDER_ADDR_1" });
     const rec = await b.actionExecuted({ id });
     assert.strictEqual(rec.executed, false, "persisted addr but not executed -> keep collecting approvals");
