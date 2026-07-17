@@ -81,7 +81,64 @@ sqlite3 ./data/gateway.sqlite \
 
 ---
 
-## 4. Re-quoting GRAM_VIZ_PER_TON
+## 4. Auto-return of wVIZ (unusable peg-out destination)
+
+When a user burns wVIZ on TON with a peg-out memo naming an unusable VIZ account—one that is empty, malformed, or non-existent—the gateway automatically returns the held wVIZ to the original TON sender (minus the refund fee).
+
+### Trigger & behavior
+
+- **Empty account:** memo name exists but the VIZ account has zero balance and no active voting.
+- **Malformed account:** memo name does not parse as a valid VIZ account (wrong format, invalid characters).
+- **Non-existent account:** memo name parses as valid but the account does not exist on VIZ.
+
+In any of these cases, the watcher detects that the burn **cannot** mint a corresponding VIZ release, so it flags the action as `REFUNDING` with a `:return` child order. The child is a jetton-transfer (op `0x0f8a7ea5`) returning the held wVIZ to the sender's original TON wallet, minus `refundFeeMilliViz` (currently 5 VIZ) to cover the return transfer gas.
+
+### Fee & dust rule
+
+- **Refund fee:** currently 5 VIZ (configurable via `REFUND_FEE_MILLI_VIZ`).
+- **Dust rule:** if the gross burned amount is ≤ refund fee, the deposit is retained as gateway surplus and no return is initiated. This avoids unnecessary on-chain operations for negligible amounts.
+
+Example: a user burns 3 wVIZ with an unusable destination → 3 ≤ 5, so the 3 wVIZ is kept by the gateway as a fee. A user burns 10 wVIZ → return initiates with (10 − 5) = 5 wVIZ sent back; 5 wVIZ is the fee.
+
+### Supply neutrality & TON-only scope
+
+- **No native VIZ released.** A `:return` child does not unlock any gateway-held VIZ; it only re-circulates the wVIZ that was already burned.
+- **No wVIZ minted or burned.** The burned wVIZ is already off-chain; the `:return` order simply transfers held wVIZ back to the sender.
+- **TON/GRAM only.** This feature applies only to GRAM (TON) peg-outs. Solana peg-outs to unusable destinations are not currently supported.
+
+### Liveness requirement
+
+A `:return` order requires the same conditions as a peg-in mint:
+
+- **≥ 2 operators online + funded** on TON (each operator wallet must have enough TON to pay the `approve` gas).
+- If the gateway multisig is below `GRAM_SUBMITTER_MIN_NANO`, the return order will queue but may not broadcast until TON is replenished (see § 1 & 2).
+
+### Order window & manual recovery
+
+If the `:return` order window lapses (default 60 seconds from proposal) before ≥ 2 approvals are collected, the action row remains in `REFUNDING` status and **a staff alert is triggered** via `STAFF_WEBHOOK_URL`. The order does **not** auto-retry; instead, an operator must manually return the wVIZ using the standard tooling.
+
+**Manual return procedure** (if auto-return times out):
+
+```bash
+# Use the existing manual-refund tooling:
+# node tools/manual-refund.cjs <action_id> <recipient_ton_address> <amount_milli_viz>
+node tools/manual-refund.cjs \
+  "action:7c9e..." \
+  "UQCu_5...7_UX9" \
+  5000  # 5 wVIZ = 5000 milliVIZ
+```
+
+Coordinate with ≥ 2 other signers to collect enough TON approvals, then broadcast the multisig jetton-transfer order.
+
+### Race resolution: strict refuse-when-usable
+
+The signer includes a full re-check of the VIZ destination at approval time via `validateGramReturn`. If the signer's own VizChain sees the destination account **exists** at that moment (account was created between watcher scan and approval), the signer **throws and refuses to sign**. This is correct behavior, not a bug—it is a safe wedge that prevents a race where the account became usable after the burn was detected as unusable.
+
+If this wedge fires, the action remains `REFUNDING`. A staff alert is triggered, and an operator must manually verify whether the destination is now usable (and should be retried as a mint) or still unusable (and should be manually refunded).
+
+---
+
+## 5. Re-quoting GRAM_VIZ_PER_TON
 
 Each operator sets their own `GRAM_VIZ_PER_TON` (VIZ per 1 TON). The coordinator takes the **median** of all live signer quotes to derive the dynamic fee floor.
 
