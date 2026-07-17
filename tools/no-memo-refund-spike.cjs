@@ -21,7 +21,7 @@ const assert = require("node:assert");
 const { canonicalPegIn, isValidRemoteAddress, createStore } = require("@gateway/common");
 const { planChildren } = require("../packages/dispatcher/dist/policy");
 
-const REFUND_CTX = { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n };
+const REFUND_CTX = { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n, refundFeeMilliViz: 0n };
 
 // Mirror the ONE line the viz-watcher reader uses to canonicalize a destination memo:
 // a valid address passes through; anything else collapses to the "" sentinel.

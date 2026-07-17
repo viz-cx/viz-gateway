@@ -61,7 +61,7 @@ console.log("[dispatcher] PEG_OUT/FEE_SWEEP/REFUND past window -> keep retrying 
 //    The sweep amount is the independently-derived `base` (sweepAmountMilliViz), NOT the
 //    coordinator-pinned withheld fee (base + activation) — any surcharge stays as surplus.
 const sender = { ...base, sender: "alice" };
-let kids = planChildren(sender, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 20_000n });
+let kids = planChildren(sender, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 20_000n , refundFeeMilliViz: 0n});
 assert.strictEqual(kids.length, 1);
 assert.strictEqual(kids[0].direction, "FEE_SWEEP");
 assert.strictEqual(kids[0].recipient, "fees.gate");
@@ -70,11 +70,11 @@ assert.strictEqual(kids[0].id, "trx1:0:fee");
 console.log("[dispatcher] CONFIRMED PEG_IN -> FEE_SWEEP(fees.gate, base) OK");
 
 // 4b) a zero sweep amount (unknown/absent) spawns no FEE_SWEEP — never a zero-value release.
-assert.strictEqual(planChildren(sender, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n }).length, 0);
+assert.strictEqual(planChildren(sender, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n , refundFeeMilliViz: 0n}).length, 0);
 console.log("[dispatcher] CONFIRMED PEG_IN with zero sweep -> no FEE_SWEEP OK");
 
 // 5) REFUNDING PEG_IN -> REFUND gross to the original sender.
-kids = planChildren(sender, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n });
+kids = planChildren(sender, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n , refundFeeMilliViz: 0n});
 assert.strictEqual(kids.length, 1);
 assert.strictEqual(kids[0].direction, "REFUND");
 assert.strictEqual(kids[0].recipient, "alice");
@@ -82,7 +82,7 @@ assert.strictEqual(kids[0].amountMilliViz, base.amountMilliViz); // gross
 console.log("[dispatcher] REFUNDING PEG_IN -> REFUND(sender, gross) OK");
 
 // 6) no children for a plain PEG_OUT.
-assert.strictEqual(planChildren({ ...base, direction: "PEG_OUT" }, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 20_000n }).length, 0);
+assert.strictEqual(planChildren({ ...base, direction: "PEG_OUT" }, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 20_000n , refundFeeMilliViz: 0n}).length, 0);
 console.log("[dispatcher] PEG_OUT spawns no children OK");
 
 console.log("\nRESULT: dispatcher P3 retry/backoff/refund + FEE_SWEEP/REFUND spawn verified.");

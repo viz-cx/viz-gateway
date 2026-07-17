@@ -49,6 +49,8 @@ const FEES = {
   bps: 20,
   activationSurchargeMilliViz: { SOLANA: 10000n, GRAM: 10000n },
   mintGasFloorMilliViz: { SOLANA: 1000n, GRAM: 1000n },
+  mintGasTon: 0.06, walletDeployGasTon: 0.05, margin: 1.5,
+  minVizPerTon: 100, maxVizPerTon: 20000, refundFeeMilliViz: 5000n,
 };
 
 function makePegOutAction() {
@@ -191,7 +193,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
 
     // Spawn REFUND child (planChildren now sets parentId)
     const updatedRec = await store.get(pegInId);
-    const children = planChildren(updatedRec, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n });
+    const children = planChildren(updatedRec, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n , refundFeeMilliViz: 0n});
     assert.strictEqual(children.length, 1);
     assert.strictEqual(children[0].direction, "REFUND");
     assert.strictEqual(children[0].parentId, pegInId, "REFUND child carries parentId");
@@ -284,7 +286,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "BROADCAST", attempts: 0, lastError: null, txid: null,
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(fakeRec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: sweepAmountFor(fakeRec) });
+    const kids = planChildren(fakeRec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: sweepAmountFor(fakeRec) , refundFeeMilliViz: 0n});
     assert.strictEqual(kids.length, 1);
     assert.strictEqual(kids[0].direction, "FEE_SWEEP");
     console.log("[8] short-circuit recovery -> FEE_SWEEP child spawnable OK");
@@ -314,7 +316,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "CONFIRMED", attempts: 1, lastError: null, txid: "MINT_TX",
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: sweepAmountFor(rec) });
+    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: sweepAmountFor(rec) , refundFeeMilliViz: 0n});
     assert.strictEqual(kids.length, 1);
     assert.strictEqual(kids[0].direction, "FEE_SWEEP");
     assert.strictEqual(kids[0].parentId, "t11:0", "FEE_SWEEP child carries parentId");
@@ -331,7 +333,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "REFUNDING", attempts: 3, lastError: null, txid: null,
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(rec, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n });
+    const kids = planChildren(rec, "REFUNDING", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n , refundFeeMilliViz: 0n});
     assert.strictEqual(kids.length, 0, "no REFUND child when sender is null");
     console.log("[11] PEG_IN REFUNDING with sender=null -> no REFUND child OK");
   }
@@ -347,7 +349,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
       status: "CONFIRMED", attempts: 1, lastError: null, txid: "TX",
       createdAt: Date.now(), updatedAt: Date.now(), nextAttemptAt: 0, parentId: null,
     };
-    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n });
+    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n , refundFeeMilliViz: 0n});
     assert.strictEqual(kids.length, 0, "no FEE_SWEEP when sweep amount is 0");
     console.log("[12] PEG_IN CONFIRMED with zero sweep amount -> no FEE_SWEEP child OK");
   }
@@ -703,7 +705,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     // the coordinator response fee (0 here) and independent of the pinned row fee (FEE).
     const rec = await store.get(action.id);
     const sweepAmountMilliViz = sweepAmountFor(rec);
-    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz });
+    const kids = planChildren(rec, "CONFIRMED", { feesGateAccount: "fees.gate", sweepAmountMilliViz, refundFeeMilliViz: 0n });
     assert.strictEqual(kids.length, 1, "FEE_SWEEP spawned from the independently-derived base");
     assert.strictEqual(kids[0].direction, "FEE_SWEEP");
     assert.strictEqual(kids[0].amountMilliViz, sweepAmountMilliViz, "FEE_SWEEP carries the derived base, not the pinned fee");
