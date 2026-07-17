@@ -75,6 +75,12 @@ assert.deepStrictEqual(mf.fees, {
   bps: 10,
   activationSurchargeMilliViz: { SOLANA: 20000n, GRAM: 15000n },
   mintGasFloorMilliViz: { SOLANA: 500n, GRAM: 500n },
+  mintGasTon: 0.06,
+  walletDeployGasTon: 0.05,
+  margin: 1.5,
+  minVizPerTon: 100,
+  maxVizPerTon: 20000,
+  refundFeeMilliViz: 5000n,
 });
 assert.throws(() => parseManifest({ n: 3, threshold: 2, operators: [] }), /operators.length/);
 console.log("[manifest] parseManifest validation + fees round-trip OK");
