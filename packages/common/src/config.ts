@@ -17,6 +17,12 @@ export interface GatewayFeeConfig {
   bps: number;
   activationSurchargeMilliViz: Record<RemoteChainId, bigint>;
   mintGasFloorMilliViz: Record<RemoteChainId, bigint>;
+  mintGasTon: number;
+  walletDeployGasTon: number;
+  margin: number;
+  minVizPerTon: number;
+  maxVizPerTon: number;
+  refundFeeMilliViz: bigint;
 }
 
 /** Build the per-chain PegInFeePolicy the fee math consumes. */
@@ -59,6 +65,8 @@ export interface GatewayConfig {
     approveMaxWaitMs: number; // max wait for a proposed order / approval to land on-chain
     approvePollIntervalMs: number; // poll cadence while waiting for the above
     orderValueNano: number; // TON (nano) the proposer attaches to new_order
+    submitterMinNano: number; // low-balance alert/pause floor for the operator TON wallet (nano-TON)
+    vizPerTon: number;        // THIS signer's manual VIZ/TON price opinion (0 = do not quote)
   };
   solana: {
     rpcUrl: string;
@@ -123,6 +131,7 @@ export interface GatewayConfig {
   };
   caps: CapPolicy;
   fees: GatewayFeeConfig;
+  pegInRateLimit: { maxPerWindow: number; windowMs: number };
   storeUrl: string;
   recon: {
     intervalMs: number;
@@ -151,6 +160,14 @@ function int(name: string, dflt: number): number {
 
 function big(name: string, dflt: string): bigint {
   return BigInt(opt(name, dflt));
+}
+
+function floatEnv(name: string, dflt: number): number {
+  const v = process.env[name];
+  if (v === undefined || v === "") return dflt;
+  const n = Number(v);
+  if (Number.isNaN(n)) throw new Error(`Env var ${name} is not a number: ${v}`);
+  return n;
 }
 
 /** Parse a solana-keygen JSON byte-array secret into bytes (null if unset). */
@@ -277,11 +294,18 @@ export function parseManifest(raw: unknown): FederationManifest {
     const f = o["fees"] as Record<string, unknown>;
     const act = f["activationSurchargeMilliViz"] as Record<string, unknown>;
     const gas = f["mintGasFloorMilliViz"] as Record<string, unknown>;
+    const num = (k: string, d: number) => (f[k] === undefined ? d : Number(f[k]));
     fees = {
       floorMilliViz: BigInt(f["floorMilliViz"] as number),
       bps: Number(f["bps"]),
       activationSurchargeMilliViz: { SOLANA: BigInt(act["SOLANA"] as number), GRAM: BigInt(act["GRAM"] as number) },
       mintGasFloorMilliViz: { SOLANA: BigInt(gas["SOLANA"] as number), GRAM: BigInt(gas["GRAM"] as number) },
+      mintGasTon: num("mintGasTon", 0.06),
+      walletDeployGasTon: num("walletDeployGasTon", 0.05),
+      margin: num("margin", 1.5),
+      minVizPerTon: num("minVizPerTon", 100),
+      maxVizPerTon: num("maxVizPerTon", 20000),
+      refundFeeMilliViz: f["refundFeeMilliViz"] === undefined ? 5000n : BigInt(f["refundFeeMilliViz"] as number),
     };
   }
   return { n, threshold, operators, fees };
@@ -412,6 +436,8 @@ export function loadConfig(): GatewayConfig {
       // 0.1 TON keeps ~60% headroom over the 0.062 floor (proven: seqno-1 order executed
       // at exactly this value) while cutting per-order accretion ~96% vs the old 1 TON.
       orderValueNano: int("GRAM_ORDER_VALUE_NANO", 100_000_000),
+      submitterMinNano: int("GRAM_SUBMITTER_MIN_NANO", 2_000_000_000), // ~2 TON
+      vizPerTon: floatEnv("GRAM_VIZ_PER_TON", 0),
     },
     solana: {
       rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
@@ -488,8 +514,8 @@ export function loadConfig(): GatewayConfig {
       rolling24hMilliViz: big("CAP_24H_MILLI_VIZ", "2000000000"), // 2,000,000 VIZ (~$10,000)
       manualReviewAboveMilliViz: big("MANUAL_REVIEW_ABOVE_MILLI_VIZ", "100000000"), // 100,000 VIZ (~$500)
     },
-    // Peg-in fee held in VIZ: base = max(10 VIZ, 0.20%); + per-chain activation
-    // surcharge when the destination isn't provisioned (Solana ATA / TON jetton-wallet
+    // Peg-in fee held in VIZ: base = max(dynamic gas-covering floor, 0.20%); + per-chain
+    // activation surcharge when the destination isn't provisioned (Solana ATA / TON jetton-wallet
     // rent). net = gross − fee must cover the per-chain mint-gas floor, else refund.
     // Manifest values take precedence over env vars — use the manifest for production
     // so all operators always agree; env vars remain useful for local testing.
@@ -504,6 +530,16 @@ export function loadConfig(): GatewayConfig {
         SOLANA: federation.fees?.mintGasFloorMilliViz.SOLANA ?? big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"),
         GRAM: federation.fees?.mintGasFloorMilliViz.GRAM ?? big("MINT_GAS_FLOOR_GRAM_MILLI_VIZ", "1000"),
       },
+      mintGasTon: federation.fees?.mintGasTon ?? floatEnv("GRAM_MINT_GAS_TON", 0.06),
+      walletDeployGasTon: federation.fees?.walletDeployGasTon ?? floatEnv("GRAM_WALLET_DEPLOY_GAS_TON", 0.05),
+      margin: federation.fees?.margin ?? floatEnv("FEE_MARGIN", 1.5),
+      minVizPerTon: federation.fees?.minVizPerTon ?? floatEnv("FEE_MIN_VIZ_PER_TON", 100),
+      maxVizPerTon: federation.fees?.maxVizPerTon ?? floatEnv("FEE_MAX_VIZ_PER_TON", 20000),
+      refundFeeMilliViz: federation.fees?.refundFeeMilliViz ?? big("REFUND_FEE_MILLI_VIZ", "5000"),
+    },
+    pegInRateLimit: {
+      maxPerWindow: int("PEG_IN_RATE_MAX_PER_WINDOW", 10),
+      windowMs: int("PEG_IN_RATE_WINDOW_MS", 3600000),
     },
     storeUrl: opt("STORE_URL", "sqlite:./data/gateway.sqlite"),
     recon: {
