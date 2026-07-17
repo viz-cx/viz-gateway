@@ -193,6 +193,42 @@ async function onWalletChange() {
 
 function fmtViz(milli) { return (Number(milli) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 }); }
 
+// Live fee policy. Seeded from the static config as a fallback; overwritten by
+// GET /fees on load so the app always shows what the gateway actually charges.
+const fees = {
+  floorMilliViz: CONFIG.fees.floorMilliViz,
+  bps: CONFIG.fees.bps,
+  activationSurchargeMilliViz: CONFIG.fees.activationSurchargeMilliViz,
+  mintGasFloorMilliViz: CONFIG.fees.mintGasFloorMilliViz,
+  refundFeeMilliViz: 5000n,
+};
+
+function renderFeesPanel() {
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set("fee-floor", fmtViz(fees.floorMilliViz) + " VIZ");
+  set("fee-bps", (fees.bps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }) + "%");
+  set("fee-activation", fmtViz(fees.activationSurchargeMilliViz) + " VIZ");
+  set("fee-min", fmtViz(fees.mintGasFloorMilliViz) + " VIZ");
+  set("fee-refund", fmtViz(fees.refundFeeMilliViz) + " VIZ");
+}
+
+async function loadFees() {
+  try {
+    const r = await fetch(`${CONFIG.rpc.coordinator}/fees`, { mode: "cors" });
+    const d = await r.json();
+    // /fees is per-chain; this app only pegs in to GRAM (TON), so flatten to GRAM.
+    fees.floorMilliViz = BigInt(d.floorMilliViz);
+    fees.bps = d.bps;
+    fees.activationSurchargeMilliViz = BigInt(d.activationSurchargeMilliViz.GRAM);
+    fees.mintGasFloorMilliViz = BigInt(d.mintGasFloorMilliViz.GRAM);
+    fees.refundFeeMilliViz = BigInt(d.refundFeeMilliViz);
+    renderFeesPanel();
+    updatePegInFee();
+  } catch (_) {
+    renderFeesPanel(); // fall back to the seeded static values
+  }
+}
+
 function updatePegInFee() {
   const raw = $("pegin-amt").value.trim();
   const feeEl = $("pegin-fee"), netEl = $("pegin-net"), ftEl = $("pegin-firsttime");
@@ -203,14 +239,14 @@ function updatePegInFee() {
   const grossMilli = BigInt(Math.round(parseFloat(raw) * 1000));
   const { total } = computePegInFee({
     grossMilliViz: grossMilli,
-    floorMilliViz: CONFIG.fees.floorMilliViz,
-    bps: CONFIG.fees.bps,
-    activationSurchargeMilliViz: CONFIG.fees.activationSurchargeMilliViz,
+    floorMilliViz: fees.floorMilliViz,
+    bps: fees.bps,
+    activationSurchargeMilliViz: fees.activationSurchargeMilliViz,
     walletDeployed: !firstTimeSurcharge,
   });
   const net = grossMilli - total;
   feeEl.textContent = fmtViz(total) + " VIZ";
-  netEl.textContent = net > CONFIG.fees.mintGasFloorMilliViz ? fmtViz(net) + " wVIZ" : "too small — would be refunded";
+  netEl.textContent = net > fees.mintGasFloorMilliViz ? fmtViz(net) + " wVIZ" : "too small — would be refunded";
 }
 
 $("pegin-amt").addEventListener("input", updatePegInFee);
@@ -268,7 +304,7 @@ async function loadVizLocked() {
 
 async function loadHealth() {
   try {
-    const r = await fetch(CONFIG.rpc.health, { mode: "cors" });
+    const r = await fetch(`${CONFIG.rpc.coordinator}/health`, { mode: "cors" });
     const h = await r.json();
     if (h.paused) {
       const span = document.createElement("span");
@@ -284,4 +320,4 @@ async function loadHealth() {
 
 selectTab("out");
 validatePegout();
-loadSupply(); loadVizLocked(); loadHealth();
+loadSupply(); loadVizLocked(); loadHealth(); loadFees();

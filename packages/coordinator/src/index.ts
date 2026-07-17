@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfig, readLimitedBody, pegInFeePolicyFor, median, deriveGramFeePolicy, type CanonicalAction, type PegInFeePolicy } from "@gateway/common";
+import { corsHeadersFor, serializeFees, loadAllowedOrigins, serveStatic } from "./http";
 import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
@@ -146,6 +148,13 @@ async function main(): Promise<void> {
   const [host, portStr] = cfg.coordinator.listen.split(":");
   const port = Number.parseInt(portStr ?? "8100", 10);
 
+  const allowedOrigins = loadAllowedOrigins(
+    process.env.ALLOWED_ORIGINS_FILE ?? resolve(process.cwd(), "config/allowed-origins.json"),
+  );
+  const siteDir = process.env.SITE_DIR ?? resolve(process.cwd(), "site");
+  console.log(`[coordinator] CORS allowlist: ${allowedOrigins.length ? allowedOrigins.join(", ") : "(empty — cross-origin blocked)"}`);
+  console.log(`[coordinator] serving static site from ${siteDir}`);
+
   const server = createServer((req, res) => {
     const json = (code: number, obj: unknown) => {
       res.writeHead(code, { "content-type": "application/json" });
@@ -154,10 +163,23 @@ async function main(): Promise<void> {
     if (req.method === "GET" && req.url === "/health") {
       const { registered, expected } = registry.count();
       const { live, missing } = registry.roster();
+      const cors = corsHeadersFor(req.headers.origin, allowedOrigins);
       void store.isPaused().then((paused) => {
-        res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+        res.writeHead(200, { "content-type": "application/json", ...cors });
         res.end(JSON.stringify({ ok: true, paused, registered, expected, operators: live, missing }));
       });
+      return;
+    }
+    if (req.method === "OPTIONS" && (req.url === "/health" || req.url === "/fees")) {
+      const cors = corsHeadersFor(req.headers.origin, allowedOrigins);
+      res.writeHead(204, { ...cors, "access-control-allow-methods": "GET" });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && req.url === "/fees") {
+      const cors = corsHeadersFor(req.headers.origin, allowedOrigins);
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "max-age=60", ...cors });
+      res.end(JSON.stringify(serializeFees(cfg.fees)));
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/register/challenge")) {
@@ -215,6 +237,10 @@ async function main(): Promise<void> {
           json(500, { error: String(err) });
         }
       })();
+      return;
+    }
+    if (req.method === "GET" || req.method === "HEAD") {
+      void serveStatic(req, res, siteDir);
       return;
     }
     json(404, { error: "not found" });

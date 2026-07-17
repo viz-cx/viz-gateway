@@ -20,6 +20,6 @@ export const CONFIG = {
   rpc: {
     toncenter: "https://toncenter.com/api/v2/jsonRPC", // NO api key in the static site
     viz: "https://node.viz.cx",
-    health: "https://gateway.viz.cx/health",
+    coordinator: "https://gateway.viz.cx", // base; /health and /fees derived from it
   },
 };
