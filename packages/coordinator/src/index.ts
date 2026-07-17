@@ -5,7 +5,7 @@ import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { Orchestrator } from "./orchestrator";
-import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, VizReleaseBroadcaster } from "./adapters";
+import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, GramReturnBroadcaster, VizReleaseBroadcaster } from "./adapters";
 import { SignerRegistry } from "./registry";
 
 /**
@@ -75,23 +75,23 @@ async function main(): Promise<void> {
   // proposer — the first live operator contacted opens the order and the role fails over
   // to the next operator if that one is offline/unfunded, so the mint no longer deadlocks
   // when any single operator is down.
-  const tonBroadcaster = cfg.gram.jettonMinterAddress
-    ? new GramMintBroadcaster(
-        new GramHttpChain(
-          cfg.gram.endpoint,
-          cfg.gram.apiKey,
-          cfg.gram.jettonMinterAddress,
-          cfg.gram.gatewayJettonWallet,
-          cfg.gram.multisigAddress,
-          cfg.gram.finalityConfirmations,
-          cfg.gram.scanMaxTransactions,
-          cfg.gram.maxScanPages,
-          cfg.gram.rpcTimeoutMs,
-        ),
-        gramFeePolicy,
-        store,
+  const gramChain = cfg.gram.jettonMinterAddress
+    ? new GramHttpChain(
+        cfg.gram.endpoint,
+        cfg.gram.apiKey,
+        cfg.gram.jettonMinterAddress,
+        cfg.gram.gatewayJettonWallet,
+        cfg.gram.multisigAddress,
+        cfg.gram.finalityConfirmations,
+        cfg.gram.scanMaxTransactions,
+        cfg.gram.maxScanPages,
+        cfg.gram.rpcTimeoutMs,
       )
     : null;
+  const tonBroadcaster = gramChain
+    ? new GramMintBroadcaster(gramChain, gramFeePolicy, store)
+    : null;
+  const gramReturnBroadcaster = gramChain ? new GramReturnBroadcaster(gramChain, store) : null;
   const solanaBroadcaster =
     cfg.solana.wvizMint && cfg.solana.multisig && cfg.solana.submitterSecret
       ? new SolanaMintBroadcaster(
@@ -125,7 +125,15 @@ async function main(): Promise<void> {
   };
 
   const orchestrate = (action: CanonicalAction) => {
-    const broadcaster = action.direction === "PEG_OUT" ? vizBroadcaster : pegInBroadcaster(action);
+    const broadcaster =
+      action.direction === "GRAM_RETURN"
+        ? (() => {
+            if (!gramReturnBroadcaster) throw new Error(`GRAM_RETURN ${action.id} but GRAM not configured`);
+            return gramReturnBroadcaster;
+          })()
+        : action.direction === "PEG_OUT"
+          ? vizBroadcaster
+          : pegInBroadcaster(action);
     return new Orchestrator(
       cfg.federation.threshold,
       cfg.federation.operators.map((o) => o.id),
