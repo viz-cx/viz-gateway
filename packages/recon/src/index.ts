@@ -1,4 +1,4 @@
-import { buildGatewayAccounts, clampBand, createStore, loadConfig, pegInFeePolicyFor } from "@gateway/common";
+import { buildGatewayAccounts, createStore, loadConfig, pegInFeePolicyFor } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
@@ -58,9 +58,14 @@ async function main(): Promise<void> {
       cfg.gram.maxScanPages,
       cfg.gram.rpcTimeoutMs,
     );
-    // Under a dynamic floor the exact historical median is unknowable; use the lower
-    // clamp-band floor so fee over-credit is impossible (under-credit is the safe direction).
-    const gramReconPolicy = { ...pegInFeePolicyFor(cfg.fees, "GRAM"), floorMilliViz: clampBand(cfg.fees).feeLo };
+    // Derive the base fee with the SAME policy the dispatcher uses to size the sweep and the
+    // signer uses to validate it (`pegInFeePolicyFor` — the static manifest floor). The
+    // over-sweep guard asks "did we sweep more than we withheld?", so its reference MUST be the
+    // amount actually withheld+swept. An earlier attempt clamped this to the band floor `feeLo`
+    // (the minimum plausible fee) reasoning "under-credit is safe" — true for the under-backing
+    // drift check, but it makes every real fee ABOVE feeLo read as over-swept, false-pausing the
+    // whole gateway (e.g. a 10000 static base swept vs a 9000 feeLo derived → −1000/peg-in).
+    const gramReconPolicy = pegInFeePolicyFor(cfg.fees, "GRAM");
     recons.push(new Recon(
       [{ name: "GRAM", supply: () => gram.circulatingSupplyMilliViz() }],
       () => viz.gatewayBalanceMilliViz(accounts.accountFor("GRAM")),
