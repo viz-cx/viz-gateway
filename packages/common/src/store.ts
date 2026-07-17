@@ -112,6 +112,12 @@ export interface GatewayStore {
   unpause(): Promise<void>;
   pauseReason(): Promise<string | null>;
   close(): Promise<void>;
+
+  // --- generic gateway_state KV (last-good fee quotes, etc.) ---
+  /** Read a gateway_state KV entry; returns null if unset. */
+  getState(key: string): Promise<string | null>;
+  /** Write a gateway_state KV entry. */
+  setState(key: string, value: string): Promise<void>;
 }
 
 type Row = Record<string, unknown>;
@@ -490,6 +496,12 @@ export class SqliteGatewayStore implements GatewayStore {
   async pauseReason(): Promise<string | null> {
     return this.getKey("pause_reason");
   }
+  async getState(key: string): Promise<string | null> {
+    return this.getKey(key);
+  }
+  async setState(key: string, value: string): Promise<void> {
+    this.setKey(key, value);
+  }
   async close(): Promise<void> {
     this.db.close();
   }
@@ -660,6 +672,13 @@ export class InMemoryGatewayStore implements GatewayStore {
   }
   async pauseReason(): Promise<string | null> {
     return this.reason || null;
+  }
+  private readonly state = new Map<string, string>();
+  async getState(key: string): Promise<string | null> {
+    return this.state.get(key) ?? null;
+  }
+  async setState(key: string, value: string): Promise<void> {
+    this.state.set(key, value);
   }
   async close(): Promise<void> {
     /* no-op */

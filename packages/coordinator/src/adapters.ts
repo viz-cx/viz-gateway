@@ -6,6 +6,7 @@ import {
   type CanonicalAction,
   type GatewayFeeConfig,
   type GatewayStore,
+  type PegInFeePolicy,
   type SolanaMintProposal,
   type GramMintProposal,
   type VizReleaseProposal,
@@ -113,14 +114,14 @@ const GRAM_EXECUTE_POLL_INTERVAL_MS = 3_000;
 export class GramMintBroadcaster implements Broadcaster {
   constructor(
     private readonly chain: GramHttpChain,
-    private readonly fees: GatewayFeeConfig,
+    private readonly feePolicy: () => Promise<PegInFeePolicy>,
     private readonly store: IdempotencyStore,
   ) {}
 
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
     // Read destination provisioning ONCE and pin it; compute NET from gross+policy.
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
-    const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "GRAM"));
+    const q = quotePegIn(action.amountMilliViz, destProvisioned, await this.feePolicy());
     if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
     const net = q.b.net;
     // The REAL packed mint-order cell hash (seqno-independent): every operator rebuilds
