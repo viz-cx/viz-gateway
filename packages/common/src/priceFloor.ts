@@ -3,8 +3,9 @@
 // VIZ per 1 TON) varies, and it is sourced from signer quotes (see coordinator
 // registry). floorMilliViz = ceil(gasTon * vizPerTon * margin * 1000). Rounding is
 // ALWAYS up so a rounding unit can never make the fee under-cover the gas it must pay.
-import type { GatewayFeeConfig } from "./config";
+import { pegInFeePolicyFor, type GatewayFeeConfig } from "./config";
 import type { PegInFeePolicy } from "./fees";
+import type { RemoteChainId } from "./types";
 
 /** Median of a non-empty list. Even length -> mean of the two middle values. */
 export function median(xs: number[]): number {
@@ -51,4 +52,16 @@ export function clampBand(fees: GatewayFeeConfig): { feeLo: bigint; feeHi: bigin
     feeLo: deriveFloorMilliViz(fees.mintGasTon, fees.minVizPerTon, fees.margin),
     feeHi: deriveFloorMilliViz(fees.mintGasTon, fees.maxVizPerTon, fees.margin),
   };
+}
+
+/**
+ * The fee policy used to SIZE + VALIDATE + RECONCILE the fee sweep. For GRAM the sweep
+ * floor is the band lower bound feeLo, guaranteeing swept <= the amount the mint
+ * withheld under the dynamic floor (which is >= feeLo). Other chains keep the static
+ * manifest floor (no dynamic floor there). base = max(floor, bps%) as always.
+ */
+export function sweepFeePolicyFor(fees: GatewayFeeConfig, chain: RemoteChainId): PegInFeePolicy {
+  const p = pegInFeePolicyFor(fees, chain);
+  if (chain === "GRAM") return { ...p, floorMilliViz: clampBand(fees).feeLo };
+  return p;
 }

@@ -3,7 +3,7 @@ import {
   baseFee,
   createStore,
   loadConfig,
-  pegInFeePolicyFor,
+  sweepFeePolicyFor,
   type CanonicalAction,
   type GatewayFeeConfig,
   type GatewayStore,
@@ -192,13 +192,14 @@ async function tick(
     if (t.status !== "QUEUED") state.alertedWedged.delete(rec.id); // recovered/advanced — re-arm
     // Spawn FEE_SWEEP (on confirm) or REFUND (on window-exhaust) for a PEG_IN. VG-04: the
     // sweep amount is the independently-derived `base` fee, computed here from the row's
-    // (immutable) gross — NOT the coordinator-pinned fee. `base` is chain-independent (floor
-    // + bps only, so the per-chain policy arg is immaterial), always derivable, and matches
-    // the signer's exact validateFeeSweep check. The activation surcharge, if withheld, is
-    // retained on the gateway as backing surplus (recon sees it via the pinned row fee).
+    // (immutable) gross — NOT the coordinator-pinned fee. Always derivable and matches the
+    // signer's exact validateFeeSweep check. For GRAM, the sweep floor is the band lower
+    // bound feeLo (not the static manifest floor) so the sweep can never out-pull the
+    // dynamically-withheld mint fee. The activation surcharge, if withheld, is retained on
+    // the gateway as backing surplus (recon sees it via the pinned row fee).
     const sweepAmountMilliViz =
       t.status === "CONFIRMED" && rec.direction === "PEG_IN"
-        ? baseFee(rec.amountMilliViz, pegInFeePolicyFor(opts.fees, rec.remoteChain ?? "SOLANA"))
+        ? baseFee(rec.amountMilliViz, sweepFeePolicyFor(opts.fees, rec.remoteChain ?? "SOLANA"))
         : 0n;
     const children = planChildren(rec, t.status, {
       feesGateAccount: opts.feesGateAccount,
