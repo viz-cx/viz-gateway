@@ -109,6 +109,24 @@ async function main(): Promise<void> {
               });
             continue;
           }
+          // Per-source rate limit: block senders who deposit too frequently (spam protection).
+          // HELD(RATE_LIMITED) rows are operator-released: NOT auto-refunded, NOT auto-minted.
+          if (!(await store.tryReserveSenderRate(dep.from, cfg.pegInRateLimit.maxPerWindow, cfg.pegInRateLimit.windowMs, Date.now()))) {
+            const first = await store.enqueue({
+              id: action.id,
+              direction: "PEG_IN",
+              remoteChain: action.remoteChain,
+              recipient: action.recipient,
+              sender: dep.from,
+              amountMilliViz: action.amountMilliViz,
+              digest: action.digest,
+              status: "HELD",
+              lastError: "RATE_LIMITED",
+            });
+            if (first)
+              notifyStaff("deposits", `peg-in ${action.id} HELD: source ${dep.from} over rate limit`, { id: action.id, sender: dep.from });
+            continue;
+          }
           const first = await store.enqueue({
             id: action.id,
             direction: "PEG_IN",
