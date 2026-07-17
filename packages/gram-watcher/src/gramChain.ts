@@ -463,6 +463,11 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     return (await this.orderData(orderAddr)).executed;
   }
 
+  /** Native TON balance of an address, in nano-TON. Used by the recon reserve monitor. */
+  async tonBalanceNano(address: string): Promise<bigint> {
+    return this.client.getBalance(Address.parse(address));
+  }
+
   /**
    * RETIRED (Phase B): the coordinator is keyless on TON and never sends a message.
    * The mint is authorized by on-chain multisig approvals from each operator's own
