@@ -268,7 +268,7 @@ async function loadVizLocked() {
 
 async function loadHealth() {
   try {
-    const r = await fetch(CONFIG.rpc.health, { mode: "cors" });
+    const r = await fetch(`${CONFIG.rpc.coordinator}/health`, { mode: "cors" });
     const h = await r.json();
     if (h.paused) {
       const span = document.createElement("span");
