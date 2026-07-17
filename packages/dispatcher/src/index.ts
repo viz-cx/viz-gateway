@@ -74,6 +74,7 @@ async function tick(
     submitTimeoutMs: number;
     feesGateAccount: string;
     fees: GatewayFeeConfig;
+    refundFeeMilliViz: bigint;
   },
   state: { alertedWedged: Set<string> },
 ): Promise<void> {
@@ -127,15 +128,23 @@ async function tick(
   // this branch (parent still HELD) rather than stranding a REFUNDING parent with no refund child.
   for (const rec of await store.due(now, ["HELD"])) {
     if (rec.direction !== "PEG_IN" || rec.lastError !== "INVALID_DESTINATION" || !rec.sender) continue;
-    const children = planChildren(rec, "REFUNDING", { feesGateAccount: opts.feesGateAccount, sweepAmountMilliViz: 0n });
+    const children = planChildren(rec, "REFUNDING", { feesGateAccount: opts.feesGateAccount, sweepAmountMilliViz: 0n, refundFeeMilliViz: opts.refundFeeMilliViz });
     for (const child of children) await store.enqueue(child);
-    await store.setStatus(rec.id, "REFUNDING");
-    notifyStaff("refund", `invalid-destination peg-in ${rec.id} routed to auto-refund`, {
-      id: rec.id,
-      sender: rec.sender,
-      amountMilliViz: String(rec.amountMilliViz),
-    });
-    console.log(`[dispatcher] ${rec.id} PEG_IN HELD(INVALID_DESTINATION) -> REFUNDING +REFUND`);
+    if (children.length === 0) {
+      // Dust <= refund fee: nothing to send. Close the parent out directly so it doesn't
+      // hang in REFUNDING waiting for a child that never comes. Retained VIZ is over-backing.
+      await store.setStatus(rec.id, "REFUNDED", { lastError: "dust retained (<= refund fee)" });
+      notifyStaff("refund", `invalid-destination peg-in ${rec.id} is dust (<= refund fee); retained as surplus`, { id: rec.id, amountMilliViz: String(rec.amountMilliViz) });
+      console.log(`[dispatcher] ${rec.id} PEG_IN HELD(INVALID_DESTINATION) dust -> REFUNDED (retained)`);
+    } else {
+      await store.setStatus(rec.id, "REFUNDING");
+      notifyStaff("refund", `invalid-destination peg-in ${rec.id} routed to auto-refund`, {
+        id: rec.id,
+        sender: rec.sender,
+        amountMilliViz: String(rec.amountMilliViz),
+      });
+      console.log(`[dispatcher] ${rec.id} PEG_IN HELD(INVALID_DESTINATION) -> REFUNDING +REFUND`);
+    }
   }
 
   // Deliver every QUEUED row (PEG_IN mints; PEG_OUT/FEE_SWEEP/REFUND are VIZ releases).
@@ -163,8 +172,15 @@ async function tick(
     const children = planChildren(rec, t.status, {
       feesGateAccount: opts.feesGateAccount,
       sweepAmountMilliViz,
+      refundFeeMilliViz: opts.refundFeeMilliViz,
     });
     for (const child of children) await store.enqueue(child);
+    // Dust close-out: a REFUNDING PEG_IN whose gross <= refund fee produces no child.
+    // Close it out immediately so it doesn't hang waiting for a child that never comes.
+    if (t.status === "REFUNDING" && rec.direction === "PEG_IN" && children.length === 0) {
+      await store.setStatus(rec.id, "REFUNDED", { lastError: "dust retained (<= refund fee)" });
+      notifyStaff("refund", `window-exhausted peg-in ${rec.id} is dust (<= refund fee); retained as surplus`, { id: rec.id, amountMilliViz: String(rec.amountMilliViz) });
+    }
     // A confirmed REFUND closes out its parent PEG_IN (REFUNDING -> REFUNDED).
     // Use the stable parentId column; fall back to the legacy id-suffix for rows
     // that predate the parentId column.
@@ -195,6 +211,7 @@ async function main(): Promise<void> {
     submitTimeoutMs: cfg.dispatcher.submitTimeoutMs,
     feesGateAccount: cfg.feesGateAccount,
     fees: cfg.fees,
+    refundFeeMilliViz: cfg.fees.refundFeeMilliViz,
   };
   // Persists across ticks so a wedged row is alerted once, not every loop.
   const state = { alertedWedged: new Set<string>() };
