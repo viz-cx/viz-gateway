@@ -41,6 +41,9 @@ COPY --from=build /app/tools ./tools
 # register against the wrong operator set. Copied from the build CONTEXT (the build stage
 # never needs it), so it is NOT gated behind .dockerignore's env/keystore excludes.
 COPY federation.json ./federation.json
+# Static site served at / and CORS allowlist (loaded at startup by the coordinator).
+COPY site ./site
+COPY config ./config
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && mkdir -p /app/data && chown -R gw:gw /app/data
 USER gw
