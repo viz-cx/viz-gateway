@@ -1,7 +1,8 @@
 import { Address, TonClient, WalletContractV4, WalletContractV5R1, toNano } from "@ton/ton";
 import { Multisig, Order } from "@gateway/contracts-ton";
+import type { TransferRequest } from "@gateway/contracts-ton";
 import type { GramMintProposal } from "@gateway/common";
-import { buildMintTransfer, mintOrderCell } from "./gramChain";
+import { buildMintTransfer, mintOrderCell, buildReturnTransfer, returnOrderCell } from "./gramChain";
 import { keyPairFromMnemonic } from "./gramSign";
 
 /**
@@ -39,9 +40,23 @@ export interface GramApprovalReceipt {
   role: TonApprovalRole;
 }
 
+/** Rebuild the return order cell and assert its hash matches the proposal (binds recipient+amount). */
+export function assertReturnOrderHash(
+  gatewayJettonWallet: Address,
+  toAddr: Address,
+  amountBaseUnits: bigint,
+  expectedHex: string,
+): void {
+  const { hashHex } = returnOrderCell(gatewayJettonWallet, toAddr, amountBaseUnits);
+  if (hashHex !== expectedHex) {
+    throw new Error(`TON return order hash mismatch: rebuilt ${hashHex} != proposal ${expectedHex}`);
+  }
+}
+
 /** The on-chain approval surface KeyedSigner depends on (injectable for tests). */
 export interface GramApprovalClient {
   approveMint(proposal: GramMintProposal): Promise<GramApprovalReceipt>;
+  approveReturn(proposal: GramMintProposal): Promise<GramApprovalReceipt>;
 }
 
 /** TTL for a new multisig order (1 hour covers any realistic signing latency). */
@@ -65,6 +80,7 @@ export class GramApprover implements GramApprovalClient {
   private readonly client: TonClient;
   private readonly minter: Address;
   private readonly multisigAddr: Address;
+  private readonly gatewayJettonWallet: Address;
   private readonly pollIntervalMs: number;
   private readonly maxWaitMs: number;
   private readonly orderValueNano: bigint;
@@ -75,6 +91,7 @@ export class GramApprover implements GramApprovalClient {
     minterAddress: string,
     multisigAddress: string,
     private readonly mnemonic: string,
+    gatewayJettonWallet: Address,
     opts: GramApproverOpts = {},
   ) {
     if (!minterAddress) throw new Error("GramApprover: minter address is required");
@@ -83,6 +100,7 @@ export class GramApprover implements GramApprovalClient {
     this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
     this.minter = Address.parse(minterAddress);
     this.multisigAddr = Address.parse(multisigAddress);
+    this.gatewayJettonWallet = gatewayJettonWallet;
     this.pollIntervalMs = opts.pollIntervalMs ?? 3000;
     this.maxWaitMs = opts.maxWaitMs ?? 60000;
     this.orderValueNano = opts.orderValueNano ?? toNano("1");
@@ -110,6 +128,20 @@ export class GramApprover implements GramApprovalClient {
       );
     }
 
+    const mintTransfer = buildMintTransfer(this.minter, toAddr, amountBaseUnits);
+    return this.sendOrApprove(mintTransfer, proposal);
+  }
+
+  async approveReturn(proposal: GramMintProposal): Promise<GramApprovalReceipt> {
+    const toAddr = Address.parse(proposal.toAddress);
+    const amountBaseUnits = BigInt(proposal.amountMilliViz);
+    assertReturnOrderHash(this.gatewayJettonWallet, toAddr, amountBaseUnits, proposal.orderHashHex);
+    const returnTransfer = buildReturnTransfer(this.gatewayJettonWallet, toAddr, amountBaseUnits);
+    return this.sendOrApprove(returnTransfer, proposal);
+  }
+
+  /** Shared open-or-wait + approve for any single-action multisig order (mint OR return). */
+  private async sendOrApprove(transfer: TransferRequest, proposal: GramMintProposal): Promise<GramApprovalReceipt> {
     // Derive THIS operator's wallet + signer index from its own mnemonic. Operators
     // may run either a v4 or a v5r1 (W5) wallet, and the multisig stores only the
     // resolved address — so try both flavours and use whichever address is actually
@@ -160,7 +192,6 @@ export class GramApprover implements GramApprovalClient {
         .open(Multisig.createFromAddress(this.multisigAddr))
         .getOrderAddress(md.nextOrderSeqno);
       if (liveNext.equals(orderAddr)) {
-        const mintTransfer = buildMintTransfer(this.minter, toAddr, amountBaseUnits);
         const withConfig = new Multisig(this.multisigAddr, undefined, {
           threshold: Number(md.threshold),
           signers: md.signers,
@@ -171,7 +202,7 @@ export class GramApprover implements GramApprovalClient {
         // approve_on_init=true → the opener's own approval counts immediately.
         await this.client
           .open(withConfig)
-          .sendNewOrder(sender, [mintTransfer], expiration, this.orderValueNano, myIdx, true);
+          .sendNewOrder(sender, [transfer], expiration, this.orderValueNano, myIdx, true);
         await this.waitForOrderInited(orderAddr, proposal.actionId);
         return { orderAddr: proposal.orderAddr, myIdx, role: "propose" };
       }
