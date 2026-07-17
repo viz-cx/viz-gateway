@@ -46,7 +46,8 @@ VIZ side is free; peg-out is free. The only fee is on **peg-in**, to cover TON m
 - **Base fee = max(dynamic gas-covering floor, 0.20%)** — floor is derived from `mintGasTon × vizPerTon × margin` (operators quote their VIZ/TON rate; coordinator uses the median); 0.20% only overtakes the floor above ~5,000 VIZ.
 - **First-time recipients** pay an extra wallet-deploy surcharge (~0.05 TON equivalent) so the gateway isn't out-of-pocket for on-chain rent.
 - **No minimum** — but deposits below the minimum that can't cover the fee are refunded (minus a small refund fee to cover the return transfer gas). Dust ≤ refund fee is retained as gateway surplus.
-- **Invalid/no-memo deposits** are auto-refunded to the originating VIZ account.
+- **Invalid/no-memo peg-in deposits** are auto-refunded to the originating VIZ account.
+- **Peg-out to unusable destination** — if a peg-out memo names a VIZ account that is empty, malformed, or non-existent, the wVIZ is auto-returned to the original TON sender minus `refundFeeMilliViz` (currently 5 VIZ). If the peg-out amount ≤ 5 VIZ, it is retained as gateway surplus. This applies to TON/GRAM peg-outs only.
 
 Config: `FEE_FLOOR_MILLI_VIZ`, `FEE_BPS`, `FEE_ACTIVATION_GRAM_MILLI_VIZ`, `GRAM_MINT_GAS_TON`, `GRAM_VIZ_PER_TON`, `REFUND_FEE_MILLI_VIZ` (see `.env.example`).
 

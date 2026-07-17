@@ -15,7 +15,7 @@ export type ActionStatus =
   | "FAILED"; // terminal: even the refund could not be signed (federation degraded)
 
 /** What kind of on-chain action a row drives. */
-export type OutboxDirection = "PEG_IN" | "PEG_OUT" | "FEE_SWEEP" | "REFUND";
+export type OutboxDirection = "PEG_IN" | "PEG_OUT" | "FEE_SWEEP" | "REFUND" | "GRAM_RETURN";
 
 export type OutboxRemoteChain = "GRAM" | "SOLANA";
 

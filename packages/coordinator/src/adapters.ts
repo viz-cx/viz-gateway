@@ -192,6 +192,66 @@ export class GramMintBroadcaster implements Broadcaster {
   }
 }
 
+/**
+ * GRAM_RETURN: DESCRIBE the wVIZ return-transfer order for operators to approve on-chain.
+ * Same keyless Phase-B model as GramMintBroadcaster — the coordinator builds the order
+ * proposal (real cell hash + deterministic address) and pins the idempotency key; each
+ * operator's signer performs the on-chain propose/approve from its own wallet
+ * (KeyedSigner.approveGramReturn -> GramApprover.approveReturn). The amount is ALREADY net
+ * (gross − refund fee, computed by the dispatcher), so no fee is withheld here.
+ */
+export class GramReturnBroadcaster implements Broadcaster {
+  constructor(
+    private readonly chain: GramHttpChain,
+    private readonly store: IdempotencyStore,
+  ) {}
+
+  async buildProposal(action: CanonicalAction): Promise<BuildResult> {
+    const amountBaseUnits = action.amountMilliViz; // net (base units == milli-VIZ)
+    const orderHashHex = this.chain.returnOrderHashFor(action.recipient, amountBaseUnits);
+    const rec = await this.store.get(action.id);
+    let orderAddr: string;
+    let orderSeqno = "";
+    if (rec?.txid) {
+      orderAddr = rec.txid; // re-drive targets the SAME order (idempotent)
+    } else {
+      ({ orderAddr, seqno: orderSeqno } = await this.chain.nextOrderAddress());
+      await this.store.setStatus(action.id, "BROADCAST", { txid: orderAddr }); // pin BEFORE approvals
+    }
+    const proposal: GramMintProposal = {
+      orderSeqno,
+      orderAddr,
+      toAddress: action.recipient,
+      amountMilliViz: amountBaseUnits.toString(),
+      destProvisioned: false, // unused for a return; carried for proposal-shape parity
+      orderHashHex,
+      actionId: action.id,
+    };
+    return { proposal, feeMilliViz: 0n };
+  }
+
+  async broadcast(action: CanonicalAction, proposal: Proposal, _signatures: string[]): Promise<string> {
+    const orderAddr = (proposal as GramMintProposal).orderAddr;
+    const deadline = Date.now() + GRAM_EXECUTE_POLL_MAX_MS;
+    for (;;) {
+      if (await this.chain.orderExecuted(orderAddr)) return orderAddr;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `GRAM return order ${orderAddr} for ${action.id} not executed in time (approvals below threshold?)`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, GRAM_EXECUTE_POLL_INTERVAL_MS));
+    }
+  }
+
+  async actionExecuted(action: CanonicalAction): Promise<{ executed: boolean; txid?: string }> {
+    const rec = await this.store.get(action.id);
+    if (!rec?.txid) return { executed: false };
+    const executed = await this.chain.orderExecuted(rec.txid);
+    return executed ? { executed: true, txid: rec.txid } : { executed: false };
+  }
+}
+
 /** PEG_IN (Solana): build a durable-nonce SPL mint proposal (NET + pinned provisioning). */
 export class SolanaMintBroadcaster implements Broadcaster {
   constructor(

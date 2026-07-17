@@ -112,5 +112,26 @@ export function planChildren(
       },
     ];
   }
+  if (
+    status === "REFUNDING" &&
+    rec.direction === "PEG_OUT" &&
+    rec.lastError === "RETURN_INVALID_DEST" &&
+    rec.sender
+  ) {
+    const amt = refundAmount(rec.amountMilliViz, ctx.refundFeeMilliViz);
+    if (amt === 0n) return []; // dust: wVIZ <= refund fee, retained as gateway surplus
+    return [
+      {
+        id: `${rec.id}:return`,
+        direction: "GRAM_RETURN",
+        remoteChain: rec.remoteChain,
+        recipient: rec.sender, // original TON sender
+        amountMilliViz: amt, // gross − refund fee
+        digest: `${rec.digest}:return`,
+        status: "QUEUED",
+        parentId: rec.id,
+      },
+    ];
+  }
   return [];
 }
