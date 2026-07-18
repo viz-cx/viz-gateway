@@ -5,11 +5,11 @@ import { corsHeadersFor, serializeFees } from "../src/http";
 import type { GatewayFeeConfig } from "@gateway/common";
 
 const FEES: GatewayFeeConfig = {
-  floorMilliViz: 10000n, bps: 20,
-  activationSurchargeMilliViz: { GRAM: 10000n, SOLANA: 10000n },
+  floorMilliViz: 10000n, gramFloorMilliViz: 45000n, bps: 20,
+  activationSurchargeMilliViz: { GRAM: 37500n, SOLANA: 10000n },
   mintGasFloorMilliViz: { GRAM: 1000n, SOLANA: 1000n },
-  mintGasTon: 0.06, walletDeployGasTon: 0.05, margin: 1.1,
-  minVizPerTon: 1, maxVizPerTon: 100000, refundFeeMilliViz: 5000n,
+  mintGasTon: 0.06, walletDeployGasTon: 0.05, margin: 1.5,
+  gramVizPerTon: 500, refundFeeMilliViz: 5000n,
 };
 const ALLOWED = ["https://viz-cx.github.io"];
 
@@ -44,7 +44,7 @@ test("GET /fees returns serialized fees with cache header", async () => {
     assert.equal(r.status, 200);
     assert.equal(r.headers.get("cache-control"), "max-age=60");
     const body = await r.json() as Record<string, unknown>;
-    assert.equal(body.floorMilliViz, 10000);
+    assert.deepEqual(body.floorMilliViz, { GRAM: 45000, SOLANA: 10000 });
     assert.equal(body.refundFeeMilliViz, 5000);
     assert.equal(body.decimals, 3);
   } finally { s.close(); }
