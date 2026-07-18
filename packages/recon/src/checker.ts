@@ -1,4 +1,4 @@
-import type { GatewayStore, RemoteChainId, PegInFeePolicy } from "@gateway/common";
+import type { GatewayStore, RemoteChainId } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 
 /** True iff the TON balance is under the configured floor. */
@@ -48,10 +48,7 @@ export class Recon {
     private readonly store: GatewayStore,
     private readonly cfg: ReconCfg,
     private readonly chain?: RemoteChainId,
-    // When set, the peg invariant credits unsweptFees RE-DERIVED from each row's gross
-    // (baseFee), not the coordinator-pinned fee — so an understated pinned fee cannot mask
-    // under-backing. Production always passes it; legacy/empty-store tests may omit it.
-    private readonly feePolicy?: PegInFeePolicy,
+    private readonly sanityFloorMilliViz?: bigint,
   ) {
     // VG-02: zero remotes is a fatal misconfiguration — recon with no wVIZ supply
     // visibility always sees circulating = 0, so drift ≥ 0, so always "healthy".
@@ -90,12 +87,7 @@ export class Recon {
       [locked, settled, unsweptFees] = await Promise.all([
         this.getLockedBalance(),
         Promise.allSettled(this.remotes.map((r) => r.supply())),
-        // Derive from gross when a fee policy is configured (production) so the coordinator
-        // cannot understate the pinned fee to hide a shortfall; fall back to the pinned column
-        // only for legacy callers that pass no policy.
-        this.feePolicy
-          ? this.store.unsweptFeesDerivedMilliViz(this.feePolicy, this.chain)
-          : this.store.unsweptFeesMilliViz(this.chain),
+        this.store.unsweptFeesMilliViz(this.chain),
       ]);
     } catch (err) {
       console.error("[recon] check indeterminate (VIZ node or store unavailable):", err);
@@ -113,6 +105,19 @@ export class Recon {
     if (failedNames.length > 0) {
       console.error(`[recon] check indeterminate (${failedNames.join(",")} supply unavailable) — not reporting healthy`);
       return null;
+    }
+
+    // Rate-independent sanity floor: a pinned fee grossly below the absolute mint-gas floor
+    // signals a bug/mis-pin (recon trusts the pinned fee for backing, so guard its lower bound).
+    if (this.sanityFloorMilliViz !== undefined) {
+      const minFee = await this.store.minPegInFeeMilliViz(this.chain);
+      if (minFee !== null && minFee < this.sanityFloorMilliViz) {
+        const reason = `pinned PEG_IN fee ${minFee} mVIZ below sanity floor ${this.sanityFloorMilliViz} (${this.chain ?? "all"})`;
+        await this.store.pause(reason);
+        console.error(`[recon] CRITICAL: SANITY-FLOOR BREACH -> gateway paused: ${reason}`);
+        notifyStaff("drift", reason, { minFee: String(minFee), floor: String(this.sanityFloorMilliViz) });
+        return false;
+      }
     }
 
     // Over-sweep guard (M10): a NEGATIVE unswept fee means confirmed FEE_SWEEPs pulled MORE

@@ -1,87 +1,46 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { InMemoryGatewayStore } from "@gateway/common";
-import type { PegInFeePolicy } from "@gateway/common";
 import { Recon } from "../src/checker";
 
 const cfg = { driftToleranceMilliViz: 0n, maxConsecutiveFailures: 3 };
 
-// After fix/gram-sweep-floor-align-feelo: dispatcher, signer, and recon all use the band
-// floor feeLo (9000) as the GRAM sweep base, not the static manifest floor (10000).
-// feeLo ≤ dynamic mint floor always, so swept ≤ withheld — no over-pull is possible.
-// Any surplus (dynamicFloor − feeLo) stays on gram.gate as over-backing (safe direction).
-const GROSS = 1_000_000n; // pct = GROSS*20/10000 = 2000 < either floor, so base == floor
-const STATIC_FLOOR = 10_000n; // manifest floor — no longer used on the sweep side for GRAM
-const FEE_LO = 9_000n; // clampBand lower bound — the correct GRAM sweep floor after this fix
+// Recon now uses the pinned per-row fee (unsweptFeesMilliViz) for both chains.
+// The floor values are static: GRAM=45000, SOLANA=10000.
+const GROSS = 1_000_000n;
+const GRAM_FEE = 45_000n; // static GRAM floor
+const SOLANA_FEE = 10_000n;
 
-function policy(floorMilliViz: bigint): PegInFeePolicy {
-  return {
-    floorMilliViz,
-    bps: 20,
-    activationSurchargeMilliViz: 0n,
-    mintGasFloorMilliViz: 1_000n,
-  };
-}
-
-async function seedGramPegInAndSweep(store: InMemoryGatewayStore, sweptAmount: bigint): Promise<void> {
+async function seedGramPegInAndSweep(store: InMemoryGatewayStore, sweptAmount: bigint, pinnedFee?: bigint): Promise<void> {
   await store.enqueue({ id: "gram-1", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: GROSS, digest: "d1" });
   await store.setStatus("gram-1", "CONFIRMED");
-  await store.setFee("gram-1", sweptAmount);
+  await store.setFee("gram-1", pinnedFee ?? sweptAmount);
   await store.enqueue({ id: "gram-1:fee", direction: "FEE_SWEEP", remoteChain: "GRAM", recipient: "fees.gate", amountMilliViz: sweptAmount, digest: "d2" });
   await store.setStatus("gram-1:fee", "CONFIRMED");
 }
 
-test("over-sweep guard: feeLo sweep reconciles clean when recon uses feeLo policy", async () => {
+test("over-sweep guard: static GRAM sweep (45000) reconciles clean", async () => {
   const store = new InMemoryGatewayStore();
-  await seedGramPegInAndSweep(store, FEE_LO); // sweep = 9000 (feeLo-base)
+  await seedGramPegInAndSweep(store, GRAM_FEE); // pinned = swept = 45000
 
-  // derived base = baseFee(GROSS, floor 9000) = 9000; swept = 9000 → unsweptFees = 0.
-  // circulating = 0, locked = 0 → drift = 0 → OK, never paused.
+  // circulating = 0, locked = 0 → drift = 0 → OK
   const gram = new Recon(
     [{ name: "GRAM", supply: async () => 0n }],
     async () => 0n,
     store,
     cfg,
     "GRAM",
-    policy(FEE_LO),
+    1_000n, // sanityFloor
   );
 
-  assert.equal(await gram.check(), true, "feeLo-base sweep must reconcile clean");
-  assert.equal(await store.isPaused(), false, "gateway must NOT pause on a correctly-swept fee");
+  assert.equal(await gram.check(), true, "correct static-floor sweep must reconcile clean");
+  assert.equal(await store.isPaused(), false, "gateway must NOT pause on correctly-swept fee");
 });
 
-test("over-sweep guard: catches the latent bug — static-base sweep (10000) against feeLo-withheld mint (9000) reads as over-sweep", async () => {
+test("over-sweep guard: catches over-sweep — swept more than pinned fee", async () => {
   const store = new InMemoryGatewayStore();
-  // Deposit where mint withheld 9000 (feeLo) but sweep erroneously pulled 10000 (static).
-  // This is the scenario that was UNDETECTED before this fix (both sides used static → drift=0).
-  // Now that recon uses feeLo policy, it derives base=9000 while swept=10000 → −1000 → guard trips.
-  await seedGramPegInAndSweep(store, STATIC_FLOOR); // sweep = 10000 (old static-base)
-
-  const gram = new Recon(
-    [{ name: "GRAM", supply: async () => 0n }],
-    async () => 0n,
-    store,
-    cfg,
-    "GRAM",
-    policy(FEE_LO), // recon now derives with feeLo — reveals the over-pull
-  );
-
-  assert.equal(await gram.check(), false, "static-sweep against feeLo-mint must be caught as over-sweep");
-  assert.ok(await store.isPaused(), "gateway must pause when an over-sweep is detected");
-});
-
-// ---------------------------------------------------------------------------
-// Production recovery scenario (2026-07-17): historical static-floor FEE_SWEEPs
-// ---------------------------------------------------------------------------
-// After deploying feeLo recon (sweepFeePolicyFor), the 3 existing static-floor
-// FEE_SWEEPs (10000 each) triggered the over-sweep guard immediately on startup.
-// The operational fix was to DB-correct those rows from 10000 → 9000. These tests
-// document both the failure mode and the recovery so we don't re-derive this in prod.
-
-test("over-sweep guard: deploy scenario — historical static FEE_SWEEPs trigger guard under feeLo policy", async () => {
-  // Seed with the pre-correction state: FEE_SWEEP at STATIC_FLOOR (what was in prod DB).
-  const store = new InMemoryGatewayStore();
-  await seedGramPegInAndSweep(store, STATIC_FLOOR); // sweep=10000, feeLo-derived=9000
+  // pinned 45000 but swept 50000 → over-sweep
+  await seedGramPegInAndSweep(store, 50_000n, 45_000n);
 
   const gram = new Recon(
     [{ name: "GRAM", supply: async () => 0n }],
@@ -89,67 +48,41 @@ test("over-sweep guard: deploy scenario — historical static FEE_SWEEPs trigger
     store,
     cfg,
     "GRAM",
-    policy(FEE_LO),
+    1_000n,
   );
 
-  assert.equal(await gram.check(), false, "static-sweep under feeLo policy pauses on startup");
-  assert.ok(await store.isPaused(), "gateway is paused — DB correction required before unpause");
+  assert.equal(await gram.check(), false, "over-swept should trigger pause");
+  assert.ok(await store.isPaused(), "gateway must pause when over-sweep is detected");
 });
 
-test("over-sweep guard: recovery scenario — DB-corrected FEE_SWEEP (9000) clears the over-sweep", async () => {
-  // After DB correction: FEE_SWEEP amount changed from 10000 → 9000 in SQLite,
-  // matching what feeLo policy now derives. Recon must reconcile clean.
+test("over-sweep guard: activation retained as unswept surplus reconciles clean", async () => {
   const store = new InMemoryGatewayStore();
-  await seedGramPegInAndSweep(store, FEE_LO); // sweep=9000 (corrected)
+  // gross 1M, pinned fee = base + activation = 45000 + 37500 = 82500; only base swept (45000)
+  await store.enqueue({ id: "gram-1", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: GROSS, digest: "d1" });
+  await store.setStatus("gram-1", "CONFIRMED");
+  await store.setFee("gram-1", 82_500n); // base + activation pinned
+  await store.enqueue({ id: "gram-1:fee", direction: "FEE_SWEEP", remoteChain: "GRAM", recipient: "fees.gate", amountMilliViz: 45_000n, digest: "d2" });
+  await store.setStatus("gram-1:fee", "CONFIRMED");
 
+  // circulating = gross - fee = 1_000_000 - 82_500 = 917_500
+  // unswept = pinned(82500) - swept(45000) = 37_500 (activation surplus)
+  // locked = circulating + unswept = 917_500 + 37_500 = 955_000
+  // gatewayBalance = gross - swept = 1_000_000 - 45_000 = 955_000 ✓
   const gram = new Recon(
-    [{ name: "GRAM", supply: async () => 0n }],
-    async () => 0n,
+    [{ name: "GRAM", supply: async () => 917_500n }],
+    async () => 955_000n,
     store,
     cfg,
     "GRAM",
-    policy(FEE_LO),
+    1_000n,
   );
 
-  assert.equal(await gram.check(), true, "corrected records reconcile clean — safe to unpause");
-  assert.equal(await store.isPaused(), false, "gateway stays unpaused after correction");
+  assert.equal(await gram.check(), true, "activation retained as surplus must reconcile clean");
+  assert.equal(await store.isPaused(), false);
 });
 
-test("over-sweep guard: multiple corrected historical + new feeLo peg-ins all reconcile clean", async () => {
-  const store = new InMemoryGatewayStore();
-
-  // Simulate the production state after correction: 3 historical records fixed to 9000.
-  for (let i = 0; i < 3; i++) {
-    const id = `gram-hist-${i}`;
-    await store.enqueue({ id, direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: GROSS, digest: `d${i}` });
-    await store.setStatus(id, "CONFIRMED");
-    await store.setFee(id, FEE_LO);
-    await store.enqueue({ id: `${id}:fee`, direction: "FEE_SWEEP", remoteChain: "GRAM", recipient: "fees.gate", amountMilliViz: FEE_LO, digest: `d${i}f` });
-    await store.setStatus(`${id}:fee`, "CONFIRMED");
-  }
-
-  // Plus a new peg-in also swept at feeLo (the new normal going forward).
-  await store.enqueue({ id: "gram-new", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: GROSS, digest: "dnew" });
-  await store.setStatus("gram-new", "CONFIRMED");
-  await store.setFee("gram-new", FEE_LO);
-  await store.enqueue({ id: "gram-new:fee", direction: "FEE_SWEEP", remoteChain: "GRAM", recipient: "fees.gate", amountMilliViz: FEE_LO, digest: "dnewf" });
-  await store.setStatus("gram-new:fee", "CONFIRMED");
-
-  const gram = new Recon(
-    [{ name: "GRAM", supply: async () => 0n }],
-    async () => 0n,
-    store,
-    cfg,
-    "GRAM",
-    policy(FEE_LO),
-  );
-
-  assert.equal(await gram.check(), true, "mixed corrected-historical + new feeLo records all clean");
-});
-
-test("over-sweep guard: bps-dominated GRAM peg-in (floor irrelevant) — feeLo and static give same base", async () => {
-  // GROSS large enough that bps% > both floors; the floor choice doesn't matter here.
-  const LARGE_GROSS = 10_000_000_000n; // 10B mVIZ * 20 bps / 10000 = 20M >> 10000
+test("over-sweep guard: bps-dominated GRAM peg-in reconciles clean", async () => {
+  const LARGE_GROSS = 10_000_000_000n;
   const BPS_BASE = LARGE_GROSS * 20n / 10_000n; // 20_000_000n
 
   const store = new InMemoryGatewayStore();
@@ -165,8 +98,53 @@ test("over-sweep guard: bps-dominated GRAM peg-in (floor irrelevant) — feeLo a
     store,
     cfg,
     "GRAM",
-    policy(FEE_LO),
+    1_000n,
   );
 
-  assert.equal(await gram.check(), true, "bps-dominated peg-in must reconcile clean regardless of floor choice");
+  assert.equal(await gram.check(), true, "bps-dominated peg-in must reconcile clean");
+});
+
+test("over-sweep guard: multiple clean peg-ins all reconcile", async () => {
+  const store = new InMemoryGatewayStore();
+
+  for (let i = 0; i < 3; i++) {
+    const id = `gram-hist-${i}`;
+    await store.enqueue({ id, direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: GROSS, digest: `d${i}` });
+    await store.setStatus(id, "CONFIRMED");
+    await store.setFee(id, GRAM_FEE);
+    await store.enqueue({ id: `${id}:fee`, direction: "FEE_SWEEP", remoteChain: "GRAM", recipient: "fees.gate", amountMilliViz: GRAM_FEE, digest: `d${i}f` });
+    await store.setStatus(`${id}:fee`, "CONFIRMED");
+  }
+
+  const gram = new Recon(
+    [{ name: "GRAM", supply: async () => 0n }],
+    async () => 0n,
+    store,
+    cfg,
+    "GRAM",
+    1_000n,
+  );
+
+  assert.equal(await gram.check(), true, "multiple corrected historical records all clean");
+});
+
+test("SOLANA: pinned fee sweep reconciles clean", async () => {
+  const store = new InMemoryGatewayStore();
+  await store.enqueue({ id: "sol-1", direction: "PEG_IN", remoteChain: "SOLANA", recipient: "user", amountMilliViz: GROSS, digest: "s1" });
+  await store.setStatus("sol-1", "CONFIRMED");
+  await store.setFee("sol-1", SOLANA_FEE);
+  await store.enqueue({ id: "sol-1:fee", direction: "FEE_SWEEP", remoteChain: "SOLANA", recipient: "fees.gate", amountMilliViz: SOLANA_FEE, digest: "s2" });
+  await store.setStatus("sol-1:fee", "CONFIRMED");
+
+  const sol = new Recon(
+    [{ name: "SOLANA", supply: async () => 0n }],
+    async () => 0n,
+    store,
+    cfg,
+    "SOLANA",
+    1_000n,
+  );
+
+  assert.equal(await sol.check(), true);
+  assert.equal(await store.isPaused(), false);
 });

@@ -10,7 +10,6 @@ import type {
   StatusPatch,
 } from "./idempotency";
 import type { RemoteChainId } from "./types";
-import { baseFee, type PegInFeePolicy } from "./fees";
 
 /**
  * Persistent, cross-process gateway state:
@@ -55,14 +54,12 @@ export interface GatewayStore {
    */
   unsweptFeesMilliViz(chain?: RemoteChainId): Promise<bigint>;
   /**
-   * Like unsweptFeesMilliViz, but the minted-side fee is RE-DERIVED per row as
-   * baseFee(gross, feePolicy) from the row's immutable gross, instead of trusting the
-   * coordinator-written fee_milli_viz column. recon uses this so a compromised or
-   * recovery-path coordinator that understates the pinned fee cannot shrink expectedLocked
-   * and mask an under-backing. The activation surcharge is NOT credited (unrecoverable, and
-   * under-crediting is the safe direction — stricter backing check, never laxer).
+   * Smallest pinned fee_milli_viz among minted (BROADCAST/CONFIRMED) PEG_IN rows for the
+   * chain, or null if none. Recon asserts this stays ≥ the absolute mint-gas floor — a
+   * rate-independent sanity check that catches a grossly under-pinned fee without
+   * re-deriving from (and thus coupling to) the current fee config.
    */
-  unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint>;
+  minPegInFeeMilliViz(chain?: RemoteChainId): Promise<bigint | null>;
   /**
    * Distinct remote chains that have minted (or committed to minting) wVIZ — any chain with a
    * PEG_IN row past the caps gate (QUEUED/SIGNING/BROADCAST/CONFIRMED). Such a chain has live or
@@ -401,21 +398,19 @@ export class SqliteGatewayStore implements GatewayStore {
     return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
 
-  async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
+  async minPegInFeeMilliViz(chain?: RemoteChainId): Promise<bigint | null> {
     const ph = MINTED_STATUSES.map(() => "?").join(",");
     const chainFilter = chain ? " AND remote_chain = ?" : "";
     const chainArgs: string[] = chain ? [chain] : [];
-    // Re-derive the minted fee from each row's immutable GROSS (never the coordinator-pinned
-    // fee_milli_viz), so an understated pinned fee cannot mask under-backing (see interface doc).
-    const minted = this.db
-      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})${chainFilter}`)
+    const rows = this.db
+      .prepare(`SELECT fee_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})${chainFilter}`)
       .all(...MINTED_STATUSES, ...chainArgs) as Row[];
-    const mintedFees = minted.reduce((a, r) => a + baseFee(BigInt(String(r["v"])), feePolicy), 0n);
-    const swept = this.db
-      .prepare(`SELECT amount_milli_viz AS v FROM action_outbox WHERE direction='FEE_SWEEP' AND status='CONFIRMED'${chainFilter}`)
-      .all(...chainArgs) as Row[];
-    const v = mintedFees - sumBigIntColumn(swept);
-    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
+    if (rows.length === 0) return null;
+    // Min in JS with BigInt (fee_milli_viz is stored as TEXT; see unsweptFeesMilliViz note).
+    return rows.reduce((m, r) => {
+      const v = BigInt(String(r["v"]));
+      return v < m ? v : m;
+    }, BigInt(String(rows[0]!["v"])));
   }
 
   async activeRemoteChains(): Promise<RemoteChainId[]> {
@@ -623,17 +618,14 @@ export class InMemoryGatewayStore implements GatewayStore {
     const v = minted - swept;
     return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
   }
-  async unsweptFeesDerivedMilliViz(feePolicy: PegInFeePolicy, chain?: RemoteChainId): Promise<bigint> {
-    let minted = 0n;
-    let swept = 0n;
+  async minPegInFeeMilliViz(chain?: RemoteChainId): Promise<bigint | null> {
+    let min: bigint | null = null;
     for (const r of this.rows.values()) {
       if (r.direction === "PEG_IN" && (r.status === "BROADCAST" || r.status === "CONFIRMED") && (!chain || r.remoteChain === chain)) {
-        minted += baseFee(r.amountMilliViz, feePolicy); // re-derived from GROSS, not the pinned fee
+        if (min === null || r.feeMilliViz < min) min = r.feeMilliViz;
       }
-      if (r.direction === "FEE_SWEEP" && r.status === "CONFIRMED" && (!chain || r.remoteChain === chain)) swept += r.amountMilliViz;
     }
-    const v = minted - swept;
-    return v; // signed: negative = over-swept anomaly, surfaced by recon (see interface doc, M10)
+    return min;
   }
   async activeRemoteChains(): Promise<RemoteChainId[]> {
     const active = new Set<RemoteChainId>();
