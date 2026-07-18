@@ -78,8 +78,7 @@ assert.deepStrictEqual(mf.fees, {
   mintGasTon: 0.06,
   walletDeployGasTon: 0.05,
   margin: 1.5,
-  minVizPerTon: 100,
-  maxVizPerTon: 20000,
+  gramVizPerTon: 500,
   refundFeeMilliViz: 5000n,
 });
 assert.throws(() => parseManifest({ n: 3, threshold: 2, operators: [] }), /operators.length/);
