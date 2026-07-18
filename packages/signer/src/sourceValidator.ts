@@ -2,7 +2,7 @@ import {
   baseFee,
   canonicalPegIn,
   canonicalPegOut,
-  sweepFeePolicyFor,
+  pegInFeePolicyFor,
   type CanonicalAction,
   type GatewayAccounts,
   type GatewayFeeConfig,
@@ -237,7 +237,7 @@ async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDe
   if (action.digest !== `${parent.digest}${FEE_SWEEP_SUFFIX}`) {
     throw new SourceMismatchError(`FEE_SWEEP digest not bound to parent PEG_IN ${parent.id} (${action.id})`);
   }
-  const base = baseFee(deposit.amountMilliViz, sweepFeePolicyFor(deps.fees, deposit.remoteChain));
+  const base = baseFee(deposit.amountMilliViz, pegInFeePolicyFor(deps.fees, deposit.remoteChain));
   if (action.amountMilliViz !== base) {
     throw new SourceMismatchError(
       `FEE_SWEEP amount ${action.amountMilliViz} != exact derived base fee ${base} for ${action.id} ` +
