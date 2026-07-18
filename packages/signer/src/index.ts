@@ -232,7 +232,6 @@ async function main(): Promise<void> {
       advertiseUrl: cfg.signerAdvertiseUrl,
       wif: cfg.viz.signingWif,
       heartbeatMs: cfg.registration.heartbeatMs,
-      vizPerTon: cfg.gram.vizPerTon,
     });
   });
 

@@ -6,7 +6,6 @@ export interface Registration {
   operatorId: string;
   url: string;
   expiresAt: number;
-  vizPerTon?: number;
 }
 
 /**
@@ -50,7 +49,7 @@ export class SignerRegistry {
     return { nonce };
   }
 
-  register(operatorId: string, url: string, nonce: string, sigHex: string, vizPerTon?: number): Registration {
+  register(operatorId: string, url: string, nonce: string, sigHex: string): Registration {
     const rec = this.nonces.get(nonce);
     this.nonces.delete(nonce); // single-use regardless of outcome
     if (!rec) throw new Error("unknown or already-used nonce");
@@ -58,7 +57,7 @@ export class SignerRegistry {
     if (this.now() > rec.expiresAt) throw new Error("challenge nonce expired");
     let recovered: string;
     try {
-      recovered = recoverChallengeSigner(operatorId, url, nonce, sigHex, vizPerTon);
+      recovered = recoverChallengeSigner(operatorId, url, nonce, sigHex);
     } catch (err) {
       throw new Error(`registration signature unrecoverable: ${String(err)}`);
     }
@@ -74,7 +73,7 @@ export class SignerRegistry {
           `is labeled '${keyOwnerId}' in federation.json — fix OPERATOR_ID or correct the manifest pairing`,
       );
     }
-    const reg: Registration = { operatorId, url, expiresAt: this.now() + this.leaseMs, vizPerTon };
+    const reg: Registration = { operatorId, url, expiresAt: this.now() + this.leaseMs };
     this.byId.set(operatorId, reg);
     return reg;
   }
@@ -100,10 +99,4 @@ export class SignerRegistry {
     };
   }
 
-  /** Fresh, positive vizPerTon quotes from currently-live registrations. */
-  liveQuotes(): number[] {
-    return this.live()
-      .map((r) => r.vizPerTon)
-      .filter((v): v is number => typeof v === "number" && v > 0);
-  }
 }

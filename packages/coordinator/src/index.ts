@@ -1,8 +1,7 @@
 import { createServer } from "node:http";
 import { resolve } from "node:path";
-import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfig, readLimitedBody, pegInFeePolicyFor, median, deriveGramFeePolicy, type CanonicalAction, type PegInFeePolicy } from "@gateway/common";
+import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfig, readLimitedBody, pegInFeePolicyFor, type CanonicalAction, type PegInFeePolicy } from "@gateway/common";
 import { corsHeadersFor, serializeFees, loadAllowedOrigins, serveStatic } from "./http";
-import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
@@ -51,26 +50,9 @@ async function main(): Promise<void> {
   const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
   const vizBroadcaster = new VizReleaseBroadcaster(vizChain, accounts, store);
 
-  // Dynamic GRAM fee floor: median of live per-signer vizPerTon quotes, falling back to
-  // the last-good persisted quote, then to the static manifest floor (fail-toward-protection).
-  const LAST_GOOD_KEY = "fee:gram:lastGoodVizPerTon";
-  const QUOTE_QUORUM = 2; // min fresh quotes to trust the median; else fall back
-  const gramFeePolicy = async (): Promise<PegInFeePolicy> => {
-    const quotes = registry.liveQuotes();
-    if (quotes.length >= QUOTE_QUORUM) {
-      const v = median(quotes);
-      await store.setState(LAST_GOOD_KEY, String(v));
-      return deriveGramFeePolicy(cfg.fees, v);
-    }
-    const lastGood = await store.getState(LAST_GOOD_KEY);
-    if (lastGood) {
-      notifyStaff("fees", `GRAM fee: only ${quotes.length} fresh quote(s) < quorum ${QUOTE_QUORUM}; using last-good vizPerTon=${lastGood}`, {});
-      return deriveGramFeePolicy(cfg.fees, Number(lastGood));
-    }
-    // No quotes and no history: fall back to the static manifest floor (never an unprotected zero fee).
-    notifyStaff("fees", `GRAM fee: no quotes and no last-good; using static manifest floor`, {});
-    return pegInFeePolicyFor(cfg.fees, "GRAM");
-  };
+  // GRAM peg-in fee is a static, gas-derived floor (see loadConfig / FEE_GRAM_VIZ_PER_TON).
+  // No live quotes, no median, no fallback chain — every operator derives the same net.
+  const gramFeePolicy: PegInFeePolicy = pegInFeePolicyFor(cfg.fees, "GRAM");
 
   // Keyless on TON: no signer mnemonic. The coordinator only DESCRIBES the mint order;
   // operators open/approve it on-chain from their own wallets. There is no designated
@@ -91,7 +73,7 @@ async function main(): Promise<void> {
       )
     : null;
   const tonBroadcaster = gramChain
-    ? new GramMintBroadcaster(gramChain, gramFeePolicy, store)
+    ? new GramMintBroadcaster(gramChain, async () => gramFeePolicy, store)
     : null;
   const gramReturnBroadcaster = gramChain ? new GramReturnBroadcaster(gramChain, store) : null;
   const solanaBroadcaster =
@@ -201,10 +183,10 @@ async function main(): Promise<void> {
           return;
         }
         try {
-          const { operator, url, nonce, sig, vizPerTon } = JSON.parse(body) as {
-            operator: string; url: string; nonce: string; sig: string; vizPerTon?: number;
+          const { operator, url, nonce, sig } = JSON.parse(body) as {
+            operator: string; url: string; nonce: string; sig: string;
           };
-          const reg = registry.register(operator, url, nonce, sig, vizPerTon);
+          const reg = registry.register(operator, url, nonce, sig);
           console.log(`[coordinator] registered ${operator} -> ${url} (expires ${new Date(reg.expiresAt).toISOString()})`);
           json(200, { ok: true, expiresAt: reg.expiresAt });
         } catch (err) {
