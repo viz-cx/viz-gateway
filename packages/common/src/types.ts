@@ -209,17 +209,14 @@ export interface ManifestFees {
   bps: number;
   activationSurchargeMilliViz: { SOLANA: bigint; GRAM: bigint };
   mintGasFloorMilliViz: { SOLANA: bigint; GRAM: bigint };
-  // --- dynamic GRAM fee floor (see priceFloor.ts) ---
   /** TON burned by the recurring mint action (order value, ~0.06). */
   mintGasTon: number;
   /** TON burned to deploy a first-time recipient's jetton wallet (~0.05). */
   walletDeployGasTon: number;
   /** Safety multiplier over measured gas (1.5 = 50% margin). */
   margin: number;
-  /** Clamp floor for the median vizPerTon (VIZ per 1 TON) — spam-protection lower bound. */
-  minVizPerTon: number;
-  /** Clamp ceiling for the median vizPerTon — over-charge upper bound. */
-  maxVizPerTon: number;
+  /** Static VIZ per 1 TON used to derive the GRAM floor + activation. */
+  gramVizPerTon: number;
   /** Fixed deterrent deducted from a refund; dust <= this is retained (§2). */
   refundFeeMilliViz: bigint;
 }
