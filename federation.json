@@ -9,9 +9,14 @@
     { "id": "op-3", "vizPubkey": "VIZ81beKM3eDPMdQwNm1Nd65Pi9df5NY2MXbUypddhHg1TJM5gRBB", "tonPubkey": "EQAj-bGkyr-rmZJAEMaHUyjV_J7AJPNSVDbW6EK0UP8wOhR4" }
   ],
   "fees": {
+    "_fees": "PINNED so every operator loads byte-identical fee inputs — manifest wins over per-box env (config.ts loadConfig), and each signer independently re-derives net via assertNet; divergent inputs => a signer refuses to approve (fail-closed refund), so pinning here makes a fee split impossible. GRAM floor + GRAM activation are DERIVED at load from (mintGasTon|walletDeployGasTon) * gramVizPerTon * margin — the activationSurchargeMilliViz.GRAM value below is IGNORED (present only to satisfy the parser). Current derivation: floor = 0.06*500*1.5 = 45000 mVIZ; GRAM activation = 0.05*500*1.5 = 37500 mVIZ.",
     "floorMilliViz": 10000,
     "bps": 20,
     "activationSurchargeMilliViz": { "SOLANA": 10000, "GRAM": 10000 },
-    "mintGasFloorMilliViz": { "SOLANA": 1000, "GRAM": 1000 }
+    "mintGasFloorMilliViz": { "SOLANA": 1000, "GRAM": 1000 },
+    "mintGasTon": 0.06,
+    "walletDeployGasTon": 0.05,
+    "margin": 1.5,
+    "gramVizPerTon": 500
   }
 }
