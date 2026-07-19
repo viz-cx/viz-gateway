@@ -30,8 +30,7 @@ const FEES = {
   mintGasTon: 0.06,
   walletDeployGasTon: 0.05,
   margin: 1.5,
-  minVizPerTon: 100,
-  maxVizPerTon: 20000,
+  gramVizPerTon: 100,
   refundFeeMilliViz: 5000n,
 };
 

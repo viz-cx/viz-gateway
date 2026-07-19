@@ -13,4 +13,3 @@ export * from "./gatewayAccounts";
 export * from "./keystore";
 export * from "./http";
 export * from "./seenRecovery";
-export * from "./priceFloor";

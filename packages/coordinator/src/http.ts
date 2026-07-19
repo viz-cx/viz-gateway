@@ -23,7 +23,10 @@ export function corsHeadersFor(origin: string | undefined, allowed: string[]): R
  */
 export function serializeFees(fees: GatewayFeeConfig): Record<string, unknown> {
   return {
-    floorMilliViz: Number(fees.floorMilliViz),
+    floorMilliViz: {
+      GRAM: Number(fees.gramFloorMilliViz ?? fees.floorMilliViz),
+      SOLANA: Number(fees.floorMilliViz),
+    },
     bps: fees.bps,
     activationSurchargeMilliViz: {
       GRAM: Number(fees.activationSurchargeMilliViz.GRAM),

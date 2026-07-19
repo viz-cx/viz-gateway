@@ -49,7 +49,7 @@ VIZ side is free; peg-out is free. The only fee is on **peg-in**, to cover TON m
 - **Invalid/no-memo peg-in deposits** are auto-refunded to the originating VIZ account.
 - **Peg-out to unusable destination** — if a peg-out memo names a VIZ account that is empty, malformed, or non-existent, the wVIZ is auto-returned to the original TON sender minus `refundFeeMilliViz` (currently 5 VIZ). If the peg-out amount ≤ 5 VIZ, it is retained as gateway surplus. This applies to TON/GRAM peg-outs only.
 
-Config: `FEE_FLOOR_MILLI_VIZ`, `FEE_BPS`, `FEE_ACTIVATION_GRAM_MILLI_VIZ`, `GRAM_MINT_GAS_TON`, `GRAM_VIZ_PER_TON`, `REFUND_FEE_MILLI_VIZ` (see `.env.example`).
+Config: `FEE_FLOOR_MILLI_VIZ`, `FEE_BPS`, `FEE_ACTIVATION_GRAM_MILLI_VIZ`, `GRAM_MINT_GAS_TON`, `FEE_GRAM_VIZ_PER_TON`, `REFUND_FEE_MILLI_VIZ` (see `.env.example`).
 
 ## Status
 

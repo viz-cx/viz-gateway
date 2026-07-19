@@ -1,31 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalPegIn, clampBand, GatewayAccounts, type CanonicalAction, type VizDeposit } from "@gateway/common";
+import { canonicalPegIn, GatewayAccounts, pegInFeePolicyFor, baseFee, type CanonicalAction, type VizDeposit } from "@gateway/common";
 import { SourceMismatchError, validateAction, type SourceValidatorDeps } from "../src/sourceValidator";
 
-// Mirrors deployed defaults (minVizPerTon=100 → feeLo=9000, static floor=10000).
 const FEES = {
   floorMilliViz: 10_000n,
+  gramFloorMilliViz: 45_000n,
   bps: 20,
-  activationSurchargeMilliViz: { SOLANA: 10_000n, GRAM: 150_000n },
+  activationSurchargeMilliViz: { SOLANA: 10_000n, GRAM: 37_500n },
   mintGasFloorMilliViz: { SOLANA: 1_000n, GRAM: 1_000n },
   mintGasTon: 0.06,
   walletDeployGasTon: 0.05,
   margin: 1.5,
-  minVizPerTon: 100,
-  maxVizPerTon: 20_000,
+  gramVizPerTon: 500,
   refundFeeMilliViz: 5_000n,
 };
 
-// feeLo = deriveFloorMilliViz(0.06, 100, 1.5) = 9000
-const FEE_LO = clampBand(FEES).feeLo; // 9_000n
-const STATIC_FLOOR = FEES.floorMilliViz; // 10_000n
+const GRAM_FLOOR = pegInFeePolicyFor(FEES, "GRAM").floorMilliViz; // 45_000n
+const SOLANA_FLOOR = pegInFeePolicyFor(FEES, "SOLANA").floorMilliViz; // 10_000n
 
 const accounts = new GatewayAccounts({ SOLANA: "solana.gate", GRAM: "gram.gate" });
 
-// Floor-dominated gross: bps% = 1_000_000 * 20 / 10000 = 2000 < feeLo(9000) < static(10000)
+// Floor-dominated gross: bps% = 1_000_000 * 20 / 10000 = 2000 < GRAM floor (45000)
 const FLOOR_DOMINATED_GROSS = 1_000_000n;
-// bps-dominated gross: bps% = 10_000_000_000 * 20 / 10000 = 20_000_000 >> 10000
+// bps-dominated gross: bps% = 10_000_000_000 * 20 / 10000 = 20_000_000 >> both floors
 const BPS_DOMINATED_GROSS = 10_000_000_000n;
 
 function makeGramDeposit(gross: bigint, trxId = "tx1"): VizDeposit {
@@ -88,53 +86,33 @@ function makeFeeSweepAction(deposit: VizDeposit, amountMilliViz: bigint) {
 }
 
 // ---------------------------------------------------------------------------
-// GRAM: feeLo-sized sweep (the correct post-fix behaviour)
+// GRAM: static-floor sweep (correct post-static-config behaviour)
 // ---------------------------------------------------------------------------
 
-test("validateFeeSweep GRAM: feeLo-sized sweep accepted for floor-dominated peg-in", async () => {
+test("validateFeeSweep GRAM: static-floor sweep (45000) accepted for floor-dominated peg-in", async () => {
   const deposit = makeGramDeposit(FLOOR_DOMINATED_GROSS);
-  const action = makeFeeSweepAction(deposit, FEE_LO); // 9_000n
+  const action = makeFeeSweepAction(deposit, GRAM_FLOOR); // 45_000n
   await assert.doesNotReject(() => validateAction(action, makeDeps(deposit)));
 });
 
 // ---------------------------------------------------------------------------
-// GRAM: static-floor sweep (old bug — signer now rejects this)
+// GRAM: bps-dominated — floor is irrelevant
 // ---------------------------------------------------------------------------
 
-test("validateFeeSweep GRAM: static-floor sweep (10000) rejected for floor-dominated peg-in", async () => {
-  const deposit = makeGramDeposit(FLOOR_DOMINATED_GROSS);
-  const action = makeFeeSweepAction(deposit, STATIC_FLOOR); // 10_000n — old over-pull
-  await assert.rejects(
-    () => validateAction(action, makeDeps(deposit)),
-    (err: Error) => {
-      assert.ok(err instanceof SourceMismatchError);
-      assert.ok(
-        err.message.includes("10000") && err.message.includes("9000"),
-        `Should mention both amounts, got: ${err.message}`,
-      );
-      return true;
-    },
-  );
-});
-
-// ---------------------------------------------------------------------------
-// GRAM: bps-dominated — floor is irrelevant, both policies give same amount
-// ---------------------------------------------------------------------------
-
-test("validateFeeSweep GRAM: bps-dominated peg-in — bps% sweep accepted regardless of floor", async () => {
+test("validateFeeSweep GRAM: bps-dominated peg-in — bps% sweep accepted", async () => {
   const deposit = makeGramDeposit(BPS_DOMINATED_GROSS);
-  const bpsFee = BPS_DOMINATED_GROSS * BigInt(FEES.bps) / 10_000n; // 20_000_000n >> both floors
+  const bpsFee = baseFee(BPS_DOMINATED_GROSS, pegInFeePolicyFor(FEES, "GRAM"));
   const action = makeFeeSweepAction(deposit, bpsFee);
   await assert.doesNotReject(() => validateAction(action, makeDeps(deposit)));
 });
 
 // ---------------------------------------------------------------------------
-// GRAM: sweep exactly 1 mVIZ over feeLo is rejected (no tolerance)
+// GRAM: sweep 1 mVIZ over floor is rejected (exact match)
 // ---------------------------------------------------------------------------
 
-test("validateFeeSweep GRAM: sweep 1 mVIZ over feeLo is rejected", async () => {
+test("validateFeeSweep GRAM: sweep 1 mVIZ over static floor is rejected", async () => {
   const deposit = makeGramDeposit(FLOOR_DOMINATED_GROSS);
-  const action = makeFeeSweepAction(deposit, FEE_LO + 1n);
+  const action = makeFeeSweepAction(deposit, GRAM_FLOOR + 1n);
   await assert.rejects(
     () => validateAction(action, makeDeps(deposit)),
     SourceMismatchError,
@@ -142,18 +120,18 @@ test("validateFeeSweep GRAM: sweep 1 mVIZ over feeLo is rejected", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// SOLANA: still uses static floor (sweepFeePolicyFor is identical to pegInFeePolicyFor)
+// SOLANA: still uses static floor
 // ---------------------------------------------------------------------------
 
 test("validateFeeSweep SOLANA: static-floor sweep accepted (SOLANA policy unchanged)", async () => {
   const deposit = makeSolanaDeposit(FLOOR_DOMINATED_GROSS);
-  const action = makeFeeSweepAction(deposit, STATIC_FLOOR); // 10_000n — correct for SOLANA
+  const action = makeFeeSweepAction(deposit, SOLANA_FLOOR); // 10_000n
   await assert.doesNotReject(() => validateAction(action, makeDeps(deposit)));
 });
 
-test("validateFeeSweep SOLANA: feeLo amount (9000) rejected — SOLANA uses static floor", async () => {
+test("validateFeeSweep SOLANA: sweep below floor rejected", async () => {
   const deposit = makeSolanaDeposit(FLOOR_DOMINATED_GROSS);
-  const action = makeFeeSweepAction(deposit, FEE_LO); // 9_000n — wrong for SOLANA
+  const action = makeFeeSweepAction(deposit, SOLANA_FLOOR - 1n);
   await assert.rejects(
     () => validateAction(action, makeDeps(deposit)),
     SourceMismatchError,

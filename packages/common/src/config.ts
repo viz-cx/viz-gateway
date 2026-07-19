@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import type { CapPolicy } from "./caps";
-import type { PegInFeePolicy } from "./fees";
+import { deriveFloorMilliViz, type PegInFeePolicy } from "./fees";
 import type { FederationManifest, ManifestFees, OperatorRef, RemoteChainId } from "./types";
 import { GatewayAccounts } from "./gatewayAccounts";
 import { openKeystore } from "./keystore";
@@ -13,22 +13,26 @@ import { openKeystore } from "./keystore";
  * Per-chain values cover the different rent (Solana ATA vs TON jetton-wallet).
  */
 export interface GatewayFeeConfig {
+  /** Flat floor for Solana and any chain without a derived floor (default 10 VIZ). */
   floorMilliViz: bigint;
+  /** GRAM floor, derived once at load from gramVizPerTon; undefined only in legacy test fixtures. */
+  gramFloorMilliViz?: bigint;
   bps: number;
   activationSurchargeMilliViz: Record<RemoteChainId, bigint>;
   mintGasFloorMilliViz: Record<RemoteChainId, bigint>;
   mintGasTon: number;
   walletDeployGasTon: number;
   margin: number;
-  minVizPerTon: number;
-  maxVizPerTon: number;
+  /** Static VIZ per 1 TON used to derive the GRAM floor + activation (was a live signer quote). */
+  gramVizPerTon: number;
   refundFeeMilliViz: bigint;
 }
 
 /** Build the per-chain PegInFeePolicy the fee math consumes. */
 export function pegInFeePolicyFor(fees: GatewayFeeConfig, chain: RemoteChainId): PegInFeePolicy {
+  const floor = chain === "GRAM" ? (fees.gramFloorMilliViz ?? fees.floorMilliViz) : fees.floorMilliViz;
   return {
-    floorMilliViz: fees.floorMilliViz,
+    floorMilliViz: floor,
     bps: fees.bps,
     activationSurchargeMilliViz: fees.activationSurchargeMilliViz[chain],
     mintGasFloorMilliViz: fees.mintGasFloorMilliViz[chain],
@@ -66,7 +70,6 @@ export interface GatewayConfig {
     approvePollIntervalMs: number; // poll cadence while waiting for the above
     orderValueNano: number; // TON (nano) the proposer attaches to new_order
     submitterMinNano: number; // low-balance alert/pause floor for the operator TON wallet (nano-TON)
-    vizPerTon: number;        // THIS signer's manual VIZ/TON price opinion (0 = do not quote)
   };
   solana: {
     rpcUrl: string;
@@ -303,8 +306,7 @@ export function parseManifest(raw: unknown): FederationManifest {
       mintGasTon: num("mintGasTon", 0.06),
       walletDeployGasTon: num("walletDeployGasTon", 0.05),
       margin: num("margin", 1.5),
-      minVizPerTon: num("minVizPerTon", 100),
-      maxVizPerTon: num("maxVizPerTon", 20000),
+      gramVizPerTon: num("gramVizPerTon", 500),
       refundFeeMilliViz: f["refundFeeMilliViz"] === undefined ? 5000n : BigInt(f["refundFeeMilliViz"] as number),
     };
   }
@@ -437,7 +439,6 @@ export function loadConfig(): GatewayConfig {
       // at exactly this value) while cutting per-order accretion ~96% vs the old 1 TON.
       orderValueNano: int("GRAM_ORDER_VALUE_NANO", 100_000_000),
       submitterMinNano: int("GRAM_SUBMITTER_MIN_NANO", 2_000_000_000), // ~2 TON
-      vizPerTon: floatEnv("GRAM_VIZ_PER_TON", 0),
     },
     solana: {
       rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
@@ -519,24 +520,31 @@ export function loadConfig(): GatewayConfig {
     // rent). net = gross − fee must cover the per-chain mint-gas floor, else refund.
     // Manifest values take precedence over env vars — use the manifest for production
     // so all operators always agree; env vars remain useful for local testing.
-    fees: {
-      floorMilliViz: federation.fees?.floorMilliViz ?? big("FEE_FLOOR_MILLI_VIZ", "10000"),
-      bps: federation.fees?.bps ?? int("FEE_BPS", 20),
-      activationSurchargeMilliViz: {
-        SOLANA: federation.fees?.activationSurchargeMilliViz.SOLANA ?? big("FEE_ACTIVATION_SOLANA_MILLI_VIZ", "10000"),
-        GRAM: federation.fees?.activationSurchargeMilliViz.GRAM ?? big("FEE_ACTIVATION_GRAM_MILLI_VIZ", "10000"),
-      },
-      mintGasFloorMilliViz: {
-        SOLANA: federation.fees?.mintGasFloorMilliViz.SOLANA ?? big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"),
-        GRAM: federation.fees?.mintGasFloorMilliViz.GRAM ?? big("MINT_GAS_FLOOR_GRAM_MILLI_VIZ", "1000"),
-      },
-      mintGasTon: federation.fees?.mintGasTon ?? floatEnv("GRAM_MINT_GAS_TON", 0.06),
-      walletDeployGasTon: federation.fees?.walletDeployGasTon ?? floatEnv("GRAM_WALLET_DEPLOY_GAS_TON", 0.05),
-      margin: federation.fees?.margin ?? floatEnv("FEE_MARGIN", 1.5),
-      minVizPerTon: federation.fees?.minVizPerTon ?? floatEnv("FEE_MIN_VIZ_PER_TON", 100),
-      maxVizPerTon: federation.fees?.maxVizPerTon ?? floatEnv("FEE_MAX_VIZ_PER_TON", 20000),
-      refundFeeMilliViz: federation.fees?.refundFeeMilliViz ?? big("REFUND_FEE_MILLI_VIZ", "5000"),
-    },
+    fees: (() => {
+      const mintGasTon = federation.fees?.mintGasTon ?? floatEnv("GRAM_MINT_GAS_TON", 0.06);
+      const walletDeployGasTon = federation.fees?.walletDeployGasTon ?? floatEnv("GRAM_WALLET_DEPLOY_GAS_TON", 0.05);
+      const margin = federation.fees?.margin ?? floatEnv("FEE_MARGIN", 1.5);
+      const gramVizPerTon = federation.fees?.gramVizPerTon ?? floatEnv("FEE_GRAM_VIZ_PER_TON", 500);
+      return {
+        floorMilliViz: federation.fees?.floorMilliViz ?? big("FEE_FLOOR_MILLI_VIZ", "10000"),
+        gramFloorMilliViz: deriveFloorMilliViz(mintGasTon, gramVizPerTon, margin),
+        bps: federation.fees?.bps ?? int("FEE_BPS", 20),
+        activationSurchargeMilliViz: {
+          SOLANA: federation.fees?.activationSurchargeMilliViz.SOLANA ?? big("FEE_ACTIVATION_SOLANA_MILLI_VIZ", "10000"),
+          // GRAM activation is DERIVED from the static rate (was a flat manifest/env constant).
+          GRAM: deriveFloorMilliViz(walletDeployGasTon, gramVizPerTon, margin),
+        },
+        mintGasFloorMilliViz: {
+          SOLANA: federation.fees?.mintGasFloorMilliViz.SOLANA ?? big("MINT_GAS_FLOOR_SOLANA_MILLI_VIZ", "1000"),
+          GRAM: federation.fees?.mintGasFloorMilliViz.GRAM ?? big("MINT_GAS_FLOOR_GRAM_MILLI_VIZ", "1000"),
+        },
+        mintGasTon,
+        walletDeployGasTon,
+        margin,
+        gramVizPerTon,
+        refundFeeMilliViz: federation.fees?.refundFeeMilliViz ?? big("REFUND_FEE_MILLI_VIZ", "5000"),
+      };
+    })(),
     pegInRateLimit: {
       maxPerWindow: int("PEG_IN_RATE_MAX_PER_WINDOW", 10),
       windowMs: int("PEG_IN_RATE_WINDOW_MS", 3600000),

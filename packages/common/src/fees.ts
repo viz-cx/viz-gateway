@@ -77,3 +77,12 @@ export function quotePegIn(grossMilliViz: bigint, destProvisioned: boolean, p: P
   }
   return { ok: true, b: { gross: grossMilliViz, base, activation, fee, net } };
 }
+
+/**
+ * ceil(gasTon * vizPerTon * margin) VIZ in integer milli-VIZ. Rounds UP so a
+ * rounding unit can never make the fee under-cover the gas it must pay. Used once
+ * at config load to turn the static VIZ/TON rate into the GRAM floor + activation.
+ */
+export function deriveFloorMilliViz(gasTon: number, vizPerTon: number, margin: number): bigint {
+  return BigInt(Math.ceil(gasTon * vizPerTon * margin * 1000));
+}

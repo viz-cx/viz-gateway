@@ -17,7 +17,7 @@ const FEES = {
   activationSurchargeMilliViz: { SOLANA: 10000n, GRAM: 10000n },
   mintGasFloorMilliViz: { SOLANA: 1000n, GRAM: 1000n },
   mintGasTon: 0.06, walletDeployGasTon: 0.05, margin: 1.5,
-  minVizPerTon: 100, maxVizPerTon: 20000, refundFeeMilliViz: 5000n,
+  gramVizPerTon: 500, refundFeeMilliViz: 5000n,
 };
 const {
   mintMessageB64,

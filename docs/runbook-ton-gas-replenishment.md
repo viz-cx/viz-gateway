@@ -138,15 +138,18 @@ If this wedge fires, the action remains `REFUNDING`. A staff alert is triggered,
 
 ---
 
-## 5. Re-quoting GRAM_VIZ_PER_TON
+## 5. Updating the GRAM fee floor
 
-Each operator sets their own `GRAM_VIZ_PER_TON` (VIZ per 1 TON). The coordinator takes the **median** of all live signer quotes to derive the dynamic fee floor.
+The GRAM fee floor is **static**: `ceil(mintGasTon × FEE_GRAM_VIZ_PER_TON × margin × 1000)` mVIZ, computed once at config load. With defaults (`mintGasTon=0.06`, `FEE_GRAM_VIZ_PER_TON=500`, `margin=1.5`) the floor is **45,000 mVIZ (45 VIZ)**.
 
-The floor is bounded by `FEE_MIN_VIZ_PER_TON`..`FEE_MAX_VIZ_PER_TON` (default 100–20,000), so extreme quotes are clamped. A fee floor derived from an accurate quote covers gas + margin without overcharging users.
+All operators must use the same value — it is set in `federation.json` (manifest wins over env):
+
+```json
+{ "fees": { "gramVizPerTon": 500 } }
+```
 
 **When to update:**
-- TON price moves > 20% from the current quote (floor drifts outside comfortable gas coverage).
-- Margin erosion: floor approaching 0.06 TON × quote × 1.5 approaches mintGasFloor.
+- TON price moves enough that the derived floor no longer covers gas + margin.
 - After a federation upgrade that changes gas constants in `federation.json`.
 
-**Procedure:** update `GRAM_VIZ_PER_TON` in the signer's `.env.mainnet` and restart the signer daemon. The new quote is included in the next registration heartbeat (every `REGISTRATION_LEASE_MS`, default 5 min). No coordinator restart required.
+**Procedure:** update `gramVizPerTon` in `federation.json` and redeploy the coordinator and all signers together. A mismatch between operators will cause signature-merge failures (determinism requirement).

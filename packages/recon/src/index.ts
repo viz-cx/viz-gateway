@@ -1,4 +1,4 @@
-import { buildGatewayAccounts, createStore, loadConfig, sweepFeePolicyFor } from "@gateway/common";
+import { buildGatewayAccounts, createStore, loadConfig } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 // Import the adapter MODULES directly (not the package entrypoints, which start
 // the watcher loops on import).
@@ -58,19 +58,13 @@ async function main(): Promise<void> {
       cfg.gram.maxScanPages,
       cfg.gram.rpcTimeoutMs,
     );
-    // Derive the base fee with the SAME policy the dispatcher uses to size the sweep and the
-    // signer uses to validate it (sweepFeePolicyFor — feeLo-floored for GRAM). The over-sweep
-    // guard asks "did we sweep more than we withheld?", so its reference MUST match the actual
-    // sweep. For GRAM, feeLo ≤ dynamic mint floor always → sweep ≤ withheld → never over-pulls;
-    // any surplus stays on gram.gate as over-backing (safe direction).
-    const gramReconPolicy = sweepFeePolicyFor(cfg.fees, "GRAM");
     recons.push(new Recon(
       [{ name: "GRAM", supply: () => gram.circulatingSupplyMilliViz() }],
       () => viz.gatewayBalanceMilliViz(accounts.accountFor("GRAM")),
       store,
       reconCfg,
       "GRAM",
-      gramReconPolicy,
+      cfg.fees.mintGasFloorMilliViz.GRAM,
     ));
   }
   if (cfg.solana.wvizMint) {
@@ -81,7 +75,7 @@ async function main(): Promise<void> {
       store,
       reconCfg,
       "SOLANA",
-      sweepFeePolicyFor(cfg.fees, "SOLANA"), // recon derives unswept fees from gross, not the pinned fee
+      cfg.fees.mintGasFloorMilliViz.SOLANA,
     ));
   }
   // VG-02: no remotes = fatal misconfiguration (recon would always see circulating = 0).

@@ -124,30 +124,24 @@ async function missingExpectedRemoteThrows() {
   console.log("[recon-failclosed] missing expected remote fatal; present set OK; legacy unaffected OK");
 }
 
-// H6: recon must credit unswept fees RE-DERIVED from each row's gross, not the coordinator-pinned
-// fee_milli_viz. A compromised/failed coordinator that understates the pinned fee (e.g. 0) must not
-// be able to shrink expectedLocked and hide an under-backing.
+// H6 (updated for pinned model): recon trusts the pinned per-row fee, but guards it with a
+// rate-independent sanity floor (minPegInFeeMilliViz >= mintGasFloor). A coordinator that pins
+// fee_milli_viz=0 is caught by the sanity-floor check before the balance invariant runs,
+// causing a fail-closed pause instead of silently masking the under-backing.
 async function coordinatorUnderstatedFeeCannotMask() {
-  // base = max(floor 1000, 0.20% of gross). For gross 100_000 -> max(1000, 200) = 1000.
-  const feePolicy = { floorMilliViz: 1000n, bps: 20, activationSurchargeMilliViz: 0n, mintGasFloorMilliViz: 0n };
   const store = new InMemoryGatewayStore();
-  // A minted PEG_IN whose 1000 base fee was withheld as surplus but PINNED to 0 by the coordinator.
+  // A minted PEG_IN whose base fee was withheld but pinned to 0 by a compromised coordinator.
   await store.enqueue({ id: "gram-1:0", direction: "PEG_IN", remoteChain: "GRAM",
     recipient: "EQdest", sender: "alice", amountMilliViz: 100_000n, digest: "d", status: "CONFIRMED" });
-
-  // Store-level: derived reads the real fee from gross; the pinned column is understated.
-  assert.strictEqual(await store.unsweptFeesDerivedMilliViz(feePolicy, "GRAM"), 1000n, "derived fee comes from gross (1000)");
   assert.strictEqual(await store.unsweptFeesMilliViz("GRAM"), 0n, "coordinator understated the pinned fee to 0");
 
-  // locked == circulating (1000) but does NOT cover the 1000 withheld fee -> under-backed by 1000.
-  const remotes = () => [okRemote("GRAM", 1000)];
-  // Pinned recon (no fee policy) is fooled: unswept=0 -> expectedLocked=1000 -> drift 0 -> "OK".
-  const masked = await new Recon(remotes(), locked(1000), store, cfg, "GRAM").check();
-  assert.strictEqual(masked, true, "pinned-fee recon is masked into reporting healthy");
-  // Derived recon (production) sees unswept=1000 -> expectedLocked=2000 -> drift -1000 -> UNDER-BACKED.
-  const caught = await new Recon(remotes(), locked(1000), store, cfg, "GRAM", feePolicy).check();
-  assert.strictEqual(caught, false, "derived-fee recon catches the under-backing the coordinator tried to hide");
-  console.log("[recon-failclosed] H6: coordinator-understated fee cannot mask under-backing (derived from gross) OK");
+  // Recon with sanityFloorMilliViz=1000 catches the mis-pin and pauses before computing drift.
+  const r = await new Recon([okRemote("GRAM", 1000)], locked(1000), store, cfg, "GRAM", 1000n).check();
+  assert.strictEqual(r, false, "sanity-floor breach fails closed (false), does not report healthy");
+  assert.strictEqual(await store.isPaused(), true, "sanity-floor breach trips the pause");
+  const reason = await store.pauseReason();
+  assert.ok(reason && reason.includes("sanity floor"), `pause reason mentions sanity floor: "${reason}"`);
+  console.log("[recon-failclosed] H6: coordinator-understated fee (pinned=0) caught by sanity floor OK");
 }
 
 // M10: a NEGATIVE unswept fee (confirmed FEE_SWEEPs exceed the minted peg-in fees) is an

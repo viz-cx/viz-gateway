@@ -11,7 +11,7 @@
 //   - a missing/non-final parent, a malformed child id, or any tampered field FAILS CLOSED.
 //
 // Run (after `npm run build`): node tools/fee-sweep-refund-spike.cjs
-const { canonicalPegIn, baseFee, sweepFeePolicyFor, GatewayAccounts } = require("@gateway/common");
+const { canonicalPegIn, baseFee, pegInFeePolicyFor, GatewayAccounts } = require("@gateway/common");
 const { validateAction, SourceMismatchError } = require("../packages/signer/dist/sourceValidator.js");
 
 let failures = 0;
@@ -34,20 +34,17 @@ async function expectReject(promise, label) {
 (async () => {
   // --- shared fixtures ----------------------------------------------------------
   const FEES_GATE = "fees.gate";
-  // Identical fee config every operator runs — the FULL GatewayFeeConfig shape. The dynamic-floor
-  // fields (mintGasTon/margin/min-maxVizPerTon/walletDeployGasTon) are required by sweepFeePolicyFor
-  // -> clampBand for the GRAM sweep floor (feeLo); omitting them yields NaN. Values mirror
-  // packages/common/test/priceFloor.test.ts.
+  // Identical fee config every operator runs — the FULL GatewayFeeConfig shape.
   const fees = {
     floorMilliViz: 10_000n,
+    gramFloorMilliViz: 45_000n,
     bps: 20,
     activationSurchargeMilliViz: { SOLANA: 10_000n, GRAM: 10_000n },
     mintGasFloorMilliViz: { SOLANA: 1_000n, GRAM: 1_000n },
     mintGasTon: 0.06,
     walletDeployGasTon: 0.05,
     margin: 1.5,
-    minVizPerTon: 100,
-    maxVizPerTon: 20_000,
+    gramVizPerTon: 500,
     refundFeeMilliViz: 5_000n,
   };
 
@@ -66,9 +63,9 @@ async function expectReject(promise, label) {
   const parentId = parent.id; // "<trxId>:<opIndex>"
 
   // The independently-derived EXACT sweep amount for this deposit (VG-04): always `base`, computed
-  // with sweepFeePolicyFor — the SAME policy validateFeeSweep uses (GRAM sweep floor = band feeLo,
-  // per PR #91), so the spike's expected base matches the signer's byte-for-byte.
-  const policy = sweepFeePolicyFor(fees, deposit.remoteChain);
+  // with pegInFeePolicyFor — the SAME policy validateFeeSweep uses (GRAM static floor = 45000 mVIZ),
+  // so the spike's expected base matches the signer's byte-for-byte.
+  const policy = pegInFeePolicyFor(fees, deposit.remoteChain);
   const base = baseFee(deposit.amountMilliViz, policy); // the only amount the signer will sign
   const withheldMax = base + policy.activationSurchargeMilliViz; // base + activation — the OLD band max, now rejected
 

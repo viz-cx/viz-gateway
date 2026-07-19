@@ -8,14 +8,14 @@ import { join, sep } from "node:path";
 
 const FEES: GatewayFeeConfig = {
   floorMilliViz: 10000n,
+  gramFloorMilliViz: 45000n,
   bps: 20,
-  activationSurchargeMilliViz: { GRAM: 10000n, SOLANA: 10000n },
+  activationSurchargeMilliViz: { GRAM: 37500n, SOLANA: 10000n },
   mintGasFloorMilliViz: { GRAM: 1000n, SOLANA: 1000n },
   mintGasTon: 0.06,
   walletDeployGasTon: 0.05,
-  margin: 1.1,
-  minVizPerTon: 1,
-  maxVizPerTon: 100000,
+  margin: 1.5,
+  gramVizPerTon: 500,
   refundFeeMilliViz: 5000n,
 };
 
@@ -36,15 +36,16 @@ test("corsHeadersFor returns no header when Origin is absent", () => {
 test("serializeFees emits only whitelisted fields as numbers", () => {
   const out = serializeFees(FEES);
   assert.deepEqual(out, {
-    floorMilliViz: 10000,
+    floorMilliViz: { GRAM: 45000, SOLANA: 10000 },
     bps: 20,
-    activationSurchargeMilliViz: { GRAM: 10000, SOLANA: 10000 },
+    activationSurchargeMilliViz: { GRAM: 37500, SOLANA: 10000 },
     mintGasFloorMilliViz: { GRAM: 1000, SOLANA: 1000 },
     refundFeeMilliViz: 5000,
     decimals: 3,
   });
   assert.equal(Object.prototype.hasOwnProperty.call(out, "margin"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(out, "minVizPerTon"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "gramVizPerTon"), false);
 });
 
 test("loadAllowedOrigins parses a JSON string array", () => {
