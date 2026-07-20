@@ -2,6 +2,7 @@
   "name": "viz-gateway",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Federated multisig gateway between VIZ and remote chains (TON, Solana, ...): lock VIZ, mint wrapped VIZ.",
   "workspaces": [
     "packages/*",
@@ -14,6 +15,7 @@
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
     "test:unit": "npm run build && tsc -p tsconfig.test.json && node tools/run-unit-tests.mjs",
+    "coverage": "rm -rf coverage && mkdir -p coverage/tmp && npm run build && tsc -p tsconfig.test.json && NODE_V8_COVERAGE=coverage/tmp node tools/run-unit-tests.mjs && NODE_V8_COVERAGE=coverage/tmp npm run verify && c8 report --reporter=text-summary --reporter=lcov",
     "threshold": "node tools/threshold-calc.mjs",
     "verify": "node tools/threshold-calc.mjs && node tools/viz-multisig-spike.cjs && node tools/gram-notification-spike.cjs && node tools/writepaths-spike.cjs && node tools/orchestration-spike.cjs && node tools/rotation-spike.cjs && node tools/gram-rotation-spike.cjs && node tools/solana-rotation-spike.cjs && node tools/solana-writepath-spike.cjs && node tools/solana-orchestration-spike.cjs && node tools/solana-innerix-spike.cjs && node tools/outbox-spike.cjs && node tools/dispatcher-policy-spike.cjs && node tools/fee-viz-spike.cjs && node tools/canonical-spike.cjs && node tools/viz-scan-cursor-spike.cjs && node tools/viz-lying-node-spike.cjs && node tools/gram-scan-pagination-spike.cjs && node tools/solana-scan-pagination-spike.cjs && node tools/solana-upgrade-authority-spike.cjs && node tools/recon-failclosed-spike.cjs && node tools/pegout-address-spike.cjs && node tools/lookup-validate-spike.cjs && node tools/pegout-guard-spike.cjs && node tools/signer-f2-spike.cjs && node tools/gram-pegout-f2-spike.cjs && node tools/fee-sweep-refund-spike.cjs && node tools/no-memo-refund-spike.cjs && node tools/idempotent-delivery-spike.cjs && node tools/idempotency-collision-spike.cjs && node tools/seen-recovery-spike.cjs && node tools/fetch-timeout-spike.cjs && node tools/viz-rpc-retry-spike.cjs && node tools/pegout-release-sigcount-spike.cjs && node tools/staff-alert-spike.cjs && node tools/log-dir-fallback-spike.cjs && node tools/http-body-limit-spike.cjs && node tools/deploy-consistency-spike.cjs && node contracts/ton/tools/verify-offline.cjs && node tools/e2e-config-spike.cjs && node tools/deposit-pda-spike.cjs && node tools/gram-onchain-approval-spike.cjs && node tools/gram-proposer-fallback-spike.cjs && node tools/gateway-accounts-spike.cjs && node tools/viz-memo-decrypt-spike.cjs && node tools/gram-return-approval-spike.cjs",
     "start:viz-watcher": "node packages/viz-watcher/dist/index.js",
@@ -55,6 +57,7 @@
   "devDependencies": {
     "@ton/sandbox": "0.44.0",
     "@types/node": "^22.0.0",
+    "c8": "^12.0.0",
     "typescript": "^5.4.0",
     "viz-js-lib": "^0.12.7"
   }

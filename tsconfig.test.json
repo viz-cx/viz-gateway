@@ -10,7 +10,9 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": false,
+    // sourceMap on so c8 can remap coverage of relatively-imported sources (../src/*)
+    // compiled into dist-test/ back to the original .ts. Harmless: dist-test/ is test-only.
+    "sourceMap": true,
     "noEmit": false,
     // Test bodies index arrays right after asserting their length (children[0] after
     // assert.equal(children.length, 1)); the base config's noUncheckedIndexedAccess would flag

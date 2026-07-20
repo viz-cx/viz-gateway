@@ -1,0 +1,10 @@
+{
+  "reporter": ["text-summary", "lcov"],
+  "reports-dir": "coverage",
+  "include": ["packages/*/src/**/*.ts"],
+  "exclude": ["**/*.d.ts", "**/test/**", "dist-test/**", "tools/**", "**/dist/**"],
+  "all": false,
+  "clean": true,
+  "exclude-after-remap": true,
+  "check-coverage": false
+}
