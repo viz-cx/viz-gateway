@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>Peg-in deeplink XSS proof</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 900px; margin: 30px auto; padding: 0 16px; background: #0b0f16; color: #cbd5e1; }
+  h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 28px; color: #93c5fd; }
+  .row { padding: 8px 0; border-top: 1px solid #1e293b; word-break: break-all; }
+  .pl { color: #f59e0b; } .href { color: #6ee7b7; } code { color: #e2e8f0; }
+  #verdict { font-size: 16px; padding: 12px 16px; border-radius: 10px; margin: 20px 0; }
+  .ok { background: #052e1a; color: #6ee7b7; } .bad { background: #3b0a0a; color: #fca5a5; }
+  a { color: #60a5fa; }
+</style>
+</head><body>
+<h1>WebVIZWallet peg-in deeplink — injection proof</h1>
+<p>Replicates <code>site/app.js → updatePegInDeeplink()</code> exactly, then tries to fire <code>alert()</code>
+through the amount + memo params. A global <code>alert</code> hook counts any execution.</p>
+<div id="verdict"></div>
+
+<script>
+// ---- alert tripwire: any real XSS execution increments this ----
+let ALERTS_FIRED = 0;
+const _payloadsThatFired = [];
+window.alert = function (msg) { ALERTS_FIRED++; _payloadsThatFired.push(String(msg)); };
+window.__xss = function (msg) { window.alert(msg); }; // used by the vulnerable control below
+
+// ---- EXACT copy of the production URL builder ----
+const WALLET_TRANSFER_URL = "https://wallet.viz.world/assets/transfer/";
+const GATEWAY_ACCOUNT = "gram.gate";
+function buildDeeplink(userAddress, amountRaw) {
+  if (!userAddress) return null;
+  const raw = String(amountRaw ?? "").trim();
+  const params = [
+    "account=" + encodeURIComponent(GATEWAY_ACCOUNT),
+    "memo=" + encodeURIComponent(userAddress),
+  ];
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    params.splice(1, 0, "amount=" + encodeURIComponent(String(parseFloat(raw))));
+  }
+  return WALLET_TRANSFER_URL + "?" + params.join("&");
+}
+
+const LEGIT_MEMO = "UQBza2dHCsStHkqDmRASr6_boRTj415z6kKcGWfCeKVTPhtK";
+const AMOUNT_PAYLOADS = [`"><script>__xss('amount-tag')<\/script>`, `javascript:__xss('amount-js')`, `1"><img src=x onerror=__xss('amount-img')>`, `5000`];
+const MEMO_PAYLOADS = [`javascript:__xss('memo-js')`, `"><svg onload=__xss('memo-svg')>`, `' onmouseover='__xss('memo-attr')`, `x&account=attacker.gate`, LEGIT_MEMO];
+
+function section(title, items) {
+  const h = document.createElement("h2"); h.textContent = title; document.body.appendChild(h);
+  for (const { pl, href } of items) {
+    const d = document.createElement("div"); d.className = "row";
+    // This is how the app uses the value: assign to the .href PROPERTY of an <a>,
+    // then attach it to the DOM. If a payload could break out, it would run here.
+    const a = document.createElement("a");
+    a.href = href; a.textContent = "link"; a.target = "_blank"; a.rel = "noopener";
+    d.innerHTML = `<span class="pl">in: ${escapeHtml(pl)}</span><br><span class="href">out: ${escapeHtml(a.href)}</span> `;
+    d.appendChild(a);
+    document.body.appendChild(d);
+  }
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+section("amount payloads → our href", AMOUNT_PAYLOADS.map((pl) => ({ pl, href: buildDeeplink(LEGIT_MEMO, pl) })));
+section("memo payloads → our href", MEMO_PAYLOADS.map((pl) => ({ pl, href: buildDeeplink(pl, "5000") })));
+
+// ---- POSITIVE CONTROL: a DELIBERATELY unsafe sink, to prove this page CAN detect XSS ----
+const ctrl = document.createElement("h2"); ctrl.textContent = "positive control (intentionally vulnerable innerHTML sink)"; document.body.appendChild(ctrl);
+const bad = document.createElement("div"); bad.className = "row";
+bad.innerHTML = `<img src=x onerror="window.__xss('CONTROL-fired')">`; // this WILL fire
+document.body.appendChild(bad);
+
+// ---- verdict ----
+setTimeout(() => {
+  const v = document.getElementById("verdict");
+  const ours = _payloadsThatFired.filter((m) => m !== "CONTROL-fired");
+  const controlFired = _payloadsThatFired.includes("CONTROL-fired");
+  if (ours.length === 0 && controlFired) {
+    v.className = "ok";
+    v.textContent = "✓ PROVEN SAFE — 0 alerts from our deeplinks; the positive control DID fire (so the tripwire works).";
+  } else if (ours.length === 0 && !controlFired) {
+    v.className = "bad";
+    v.textContent = "⚠ INCONCLUSIVE — no alerts fired, but the positive control also didn't. Tripwire may be broken.";
+  } else {
+    v.className = "bad";
+    v.textContent = "✗ XSS FIRED from our deeplinks: " + ours.join(", ");
+  }
+}, 300);
+</script>
+</body></html>
