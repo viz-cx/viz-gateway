@@ -13,14 +13,14 @@
 <body>
 <header class="site-header" id="top">
   <div class="nav container">
-    <a class="brand" href="./index.html" aria-label="wVIZ — home">
+    <a class="brand" href="./" aria-label="wVIZ — home">
       <span class="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6" fill="#2DD4BF"></circle><circle cx="15" cy="12" r="6" fill="#0098EA" fill-opacity=".9"></circle></svg></span>
       <span>w<b>VIZ</b></span>
     </a>
     <nav class="nav-links" aria-label="Primary">
-      <a href="./index.html#how">How it works</a>
-      <a href="./index.html#fees">Fees</a>
-      <a href="./index.html#faq">FAQ</a>
+      <a href="./#how">How it works</a>
+      <a href="./#fees">Fees</a>
+      <a href="./#faq">FAQ</a>
       <a href="https://github.com/viz-cx/viz-gateway" target="_blank" rel="noopener">GitHub</a>
     </nav>
     <div class="nav-actions">
@@ -55,10 +55,11 @@
       <div class="field">
         <div class="field-label-row">
           <label for="wviz-amt">Amount of wVIZ to return</label>
-          <button class="bal-btn hidden" id="wviz-bal" type="button"></button>
+          <span class="bal-line hidden" id="wviz-bal-line">Balance: <button class="bal-link" id="wviz-bal" type="button"></button></span>
         </div>
         <input id="wviz-amt" type="text" inputmode="decimal" autocomplete="off" placeholder="0.000">
         <span class="err" id="wviz-amt-err"></span>
+        <span class="warn-msg" id="wviz-amt-warn"></span>
       </div>
       <button class="btn btn-primary" id="pegout-send" type="button" disabled>Connect wallet to continue</button>
       <p class="hint" style="margin-top:14px;">Peg-out is free and 1:1. You'll confirm the transfer in your TON wallet; ~0.1 TON covers network gas (excess is refunded).</p>
