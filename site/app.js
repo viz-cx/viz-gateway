@@ -49,7 +49,12 @@ $("tab-in").addEventListener("click", () => selectTab("in"));
 
 /* ---------- TON Connect ---------- */
 const tonConnectUI = new TonConnectUI({
-  manifestUrl: CONFIG.siteUrl + "tonconnect-manifest.json",
+  // Canonicalize to the coordinator domain: TON Connect enforces that the
+  // manifest URL's origin matches the dApp's serving origin, and the app only
+  // works when served from gateway.viz.cx (live /fees, coordinator RPC, peg-in
+  // submit). An absolute manifest URL avoids the phishing block when the app is
+  // opened from the GitHub Pages mirror.
+  manifestUrl: CONFIG.rpc.coordinator + "/tonconnect-manifest.json",
   buttonRootId: "tonConnectButton",
 });
 const ton = new TonClient({ endpoint: CONFIG.rpc.toncenter });
