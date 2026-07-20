@@ -349,15 +349,26 @@ async function loadHealth() {
   try {
     const r = await fetch(`${CONFIG.rpc.coordinator}/health`, { mode: "cors" });
     const h = await r.json();
+    const el = $("st-health");
+    el.textContent = "";
     if (h.paused) {
       const span = document.createElement("span");
       span.className = "warn";
       span.textContent = "⏸ Paused — new deposits discouraged";
-      const el = $("st-health");
-      el.textContent = "";
+      el.appendChild(span);
+    } else {
+      // Show a plain health status rather than the operator count — the federation's
+      // liveness (e.g. 2/3) is an internal detail; users only need "is it working".
+      const span = document.createElement("span");
+      span.className = "ok";
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.setAttribute("aria-hidden", "true");
+      span.appendChild(dot);
+      span.append("Operational");
       el.appendChild(span);
     }
-    else setItem("st-health", "Operators", `${h.registered}/${h.expected} online`);
+    el.classList.remove("hidden");
   } catch (_) { hideItem("st-health"); }
 }
 
