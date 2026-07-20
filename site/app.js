@@ -37,12 +37,18 @@ document.addEventListener("click", async (e) => {
 });
 
 /* ---------- Tabs ---------- */
-function selectTab(which) {
+// The active tab is reflected in the URL hash (#peg-out / #peg-in) so a reload
+// (or a shared link) restores the same tab. replaceState avoids scroll jumps and
+// polluting history on every switch.
+function selectTab(which, updateUrl = true) {
   const out = which === "out";
   $("tab-out").setAttribute("aria-selected", String(out));
   $("tab-in").setAttribute("aria-selected", String(!out));
   $("panel-out").classList.toggle("hidden", !out);
   $("panel-in").classList.toggle("hidden", out);
+  if (updateUrl) {
+    try { history.replaceState(null, "", "#" + (out ? "peg-out" : "peg-in")); } catch (e) {}
+  }
 }
 $("tab-out").addEventListener("click", () => selectTab("out"));
 $("tab-in").addEventListener("click", () => selectTab("in"));
@@ -89,10 +95,19 @@ function validatePegout() {
   sendBtn.textContent = "Return wVIZ";
   $("viz-acct-err").textContent = acct && !isValidVizAccount(acct) ? "Not a valid VIZ account name." : "";
   if (!acct || !isValidVizAccount(acct)) ok = false;
-  let amtErr = "";
-  try { if (amtInput.value.trim()) wvizToBaseUnits(amtInput.value, CONFIG.wviz.decimals); else ok = false; }
+  let amtErr = "", amtWarn = "";
+  try {
+    if (amtInput.value.trim()) {
+      const entered = wvizToBaseUnits(amtInput.value, CONFIG.wviz.decimals);
+      if (userBalanceBaseUnits !== null && entered > userBalanceBaseUnits) {
+        amtWarn = `Amount exceeds your balance of ${baseUnitsToDecimal(userBalanceBaseUnits, CONFIG.wviz.decimals)} wVIZ.`;
+        ok = false;
+      }
+    } else ok = false;
+  }
   catch (e) { amtErr = String(e.message || e); ok = false; }
   $("wviz-amt-err").textContent = amtErr;
+  $("wviz-amt-warn").textContent = amtWarn;
   sendBtn.disabled = !ok;
 }
 acctInput.addEventListener("input", validatePegout);
@@ -150,11 +165,11 @@ $("wviz-bal").addEventListener("click", () => {
 });
 
 async function onWalletChange() {
-  const memoEl = $("pegin-memo"), copyEl = $("pegin-memo-copy"), balEl = $("wviz-bal");
+  const memoEl = $("pegin-memo"), copyEl = $("pegin-memo-copy"), balEl = $("wviz-bal"), balLineEl = $("wviz-bal-line");
   if (!userAddress) {
     memoEl.textContent = "Connect your TON wallet to fill this in";
     copyEl.classList.add("hidden");
-    balEl.classList.add("hidden");
+    balLineEl.classList.add("hidden");
     userBalanceBaseUnits = null;
     firstTimeSurcharge = true;
     updatePegInFee();
@@ -182,20 +197,21 @@ async function onWalletChange() {
         const res = await withRetry(() => ton.runMethod(jw, "get_wallet_data", []));
         userBalanceBaseUnits = res.stack.readBigNumber();
         const display = (Number(userBalanceBaseUnits) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
-        balEl.textContent = `Balance: ${display} wVIZ`;
-        balEl.classList.remove("hidden");
-      } catch (_) { balEl.classList.add("hidden"); userBalanceBaseUnits = null; }
+        balEl.textContent = `${display} wVIZ`;
+        balLineEl.classList.remove("hidden");
+      } catch (_) { balLineEl.classList.add("hidden"); userBalanceBaseUnits = null; }
     } else {
-      balEl.classList.add("hidden");
+      balLineEl.classList.add("hidden");
       userBalanceBaseUnits = null;
     }
   } catch (_) {
     firstTimeSurcharge = true;
-    balEl.classList.add("hidden");
+    balLineEl.classList.add("hidden");
     userBalanceBaseUnits = null;
   }
   updatePegInFee();
   updatePegInDeeplink();
+  validatePegout();
 }
 
 function fmtViz(milli) { return (Number(milli) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 }); }
@@ -345,6 +361,6 @@ async function loadHealth() {
   } catch (_) { hideItem("st-health"); }
 }
 
-selectTab("out");
+selectTab(location.hash === "#peg-in" ? "in" : "out", false);
 validatePegout();
 loadSupply(); loadVizLocked(); loadHealth(); loadFees();
