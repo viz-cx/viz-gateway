@@ -268,9 +268,9 @@ function updatePegInDeeplink() {
     "memo=" + encodeURIComponent(userAddress),
   ];
   // Amount is optional in the deep-link; include it only when the field holds a
-  // valid number, formatted as the wallet expects ("N.NNN VIZ").
+  // valid number, as a bare numeric value (e.g. amount=5000).
   if (/^\d+(\.\d+)?$/.test(raw)) {
-    params.splice(1, 0, "amount=" + encodeURIComponent(parseFloat(raw).toFixed(3) + " VIZ"));
+    params.splice(1, 0, "amount=" + encodeURIComponent(String(parseFloat(raw))));
   }
   el.href = CONFIG.pegIn.walletTransferUrl + "?" + params.join("&");
   el.classList.remove("hidden");
