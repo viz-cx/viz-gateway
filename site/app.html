@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bridge — wVIZ</title>
-<meta name="description" content="Bridge VIZ and wVIZ safely: connect your TON wallet, return wVIZ to VIZ in one click, and get the exact peg-in memo — no fat-finger mistakes.">
+<meta name="description" content="Bridge VIZ and wVIZ safely: connect your GRAM wallet, return wVIZ to VIZ in one click, and get the exact peg-in memo — no fat-finger mistakes.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#060910">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='15'%20fill='%23060910'/%3E%3Ccircle%20cx='25'%20cy='32'%20r='13'%20fill='%232DD4BF'/%3E%3Ccircle%20cx='40'%20cy='32'%20r='13'%20fill='%230098EA'%20fill-opacity='.92'/%3E%3C/svg%3E">
@@ -62,7 +62,7 @@
         <span class="warn-msg" id="wviz-amt-warn"></span>
       </div>
       <button class="btn btn-primary" id="pegout-send" type="button" disabled>Connect wallet to continue</button>
-      <p class="hint" style="margin-top:14px;">Peg-out is free and 1:1. You'll confirm the transfer in your TON wallet; ~0.1 TON covers network gas (excess is refunded).</p>
+      <p class="hint" style="margin-top:14px;">Peg-out is free and 1:1. You'll confirm the transfer in your GRAM wallet; ~0.1 GRAM covers network gas (excess is refunded).</p>
     </section>
 
     <section class="panel-card hidden" id="panel-in" role="tabpanel" aria-labelledby="tab-in">
@@ -73,7 +73,7 @@
       </div>
       <div class="field">
         <label>Memo (your TON address — paste exactly, nothing else)</label>
-        <div class="addr"><code id="pegin-memo">Connect your TON wallet to fill this in</code><button class="copy-btn hidden" id="pegin-memo-copy" type="button" aria-label="Copy memo"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
+        <div class="addr"><code id="pegin-memo">Connect your GRAM wallet to fill this in</code><button class="copy-btn hidden" id="pegin-memo-copy" type="button" aria-label="Copy memo"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
       </div>
       <div class="field">
         <label for="pegin-amt">VIZ amount (to preview the fee)</label>
