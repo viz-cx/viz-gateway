@@ -271,6 +271,11 @@
     border-radius: 100px;
     margin-bottom: 22px;
   }
+  html[data-theme="light"] .hero-badge {
+    color: #0f766e;
+    background: color-mix(in oklab, var(--viz) 20%, transparent);
+    border-color: color-mix(in oklab, var(--viz) 48%, transparent);
+  }
   .hero-badge .dot {
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--viz);
