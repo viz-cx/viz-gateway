@@ -64,6 +64,84 @@ test("sanity floor breach pauses gateway", async () => {
   assert.ok(await store.isPaused(), "gateway must be paused on sanity-floor breach");
 });
 
+test("sanity floor ignores recovery-path CONFIRMED peg-in with fee 0", async () => {
+  const store = new InMemoryGatewayStore();
+  // The coordinator's recovery path can report fee 0 (rebuild failed); planTransition
+  // leaves the column at 0 rather than clobbering. That is "fee unknown", not "under-pinned".
+  await store.enqueue({ id: "rec", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 1_000_000n, digest: "drec" });
+  await store.setStatus("rec", "CONFIRMED"); // fee stays default 0
+
+  const recon = new Recon(
+    [{ name: "GRAM", supply: async () => 0n }],
+    async () => 0n,
+    store, cfg, "GRAM", 1_000n,
+  );
+  assert.equal(await recon.check(), true, "fee-0 recovery row must not trip the sanity floor");
+  assert.equal(await store.isPaused(), false);
+});
+
+test("sanity floor STILL pauses on a genuine under-pin next to a fee-0 in-flight row", async () => {
+  const store = new InMemoryGatewayStore();
+  await store.enqueue({ id: "bc", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 45_000n, digest: "dbc2" });
+  await store.setStatus("bc", "BROADCAST"); // fee 0, in-flight (must be ignored)
+  await store.enqueue({ id: "bad", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 1_000_000n, digest: "dbad" });
+  await store.setStatus("bad", "CONFIRMED");
+  await store.setFee("bad", 100n); // a real mis-pin below the floor
+
+  const recon = new Recon(
+    [{ name: "GRAM", supply: async () => 0n }],
+    async () => 0n,
+    store, cfg, "GRAM", 1_000n,
+  );
+  assert.equal(await recon.check(), false, "the fix must not mask a genuine under-pin");
+  assert.ok(await store.isPaused());
+});
+
+test("sanity floor does not pause at the exact floor (strict <)", async () => {
+  const store = new InMemoryGatewayStore();
+  await store.enqueue({ id: "edge", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 1_000_000n, digest: "dedge" });
+  await store.setStatus("edge", "CONFIRMED");
+  await store.setFee("edge", 1_000n); // exactly the floor
+
+  const recon = new Recon(
+    [{ name: "GRAM", supply: async () => 0n }],
+    async () => 1_000n, // locked == unswept fee -> drift 0
+    store, cfg, "GRAM", 1_000n,
+  );
+  assert.equal(await recon.check(), true, "fee == floor is within bounds");
+  assert.equal(await store.isPaused(), false);
+});
+
+test("sanity floor pauses one mVIZ below the floor", async () => {
+  const store = new InMemoryGatewayStore();
+  await store.enqueue({ id: "under", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 1_000_000n, digest: "dunder" });
+  await store.setStatus("under", "CONFIRMED");
+  await store.setFee("under", 999n);
+
+  const recon = new Recon(
+    [{ name: "GRAM", supply: async () => 0n }],
+    async () => 0n,
+    store, cfg, "GRAM", 1_000n,
+  );
+  assert.equal(await recon.check(), false);
+  assert.ok(await store.isPaused());
+});
+
+test("no sanity floor configured skips the guard entirely", async () => {
+  const store = new InMemoryGatewayStore();
+  await store.enqueue({ id: "tiny", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 1_000_000n, digest: "dtiny" });
+  await store.setStatus("tiny", "CONFIRMED");
+  await store.setFee("tiny", 100n); // would breach a 1_000 floor — but none is set
+
+  const recon = new Recon(
+    [{ name: "GRAM", supply: async () => 0n }],
+    async () => 100n, // drift 0 against the unswept 100
+    store, cfg, "GRAM", // no sanity floor arg
+  );
+  assert.equal(await recon.check(), true, "guard must be inert when unconfigured");
+  assert.equal(await store.isPaused(), false);
+});
+
 test("sanity floor ignores in-flight BROADCAST peg-in with unpinned fee 0", async () => {
   const store = new InMemoryGatewayStore();
   // A peg-in mid-mint: the dispatcher marks BROADCAST before the coordinator call, so the
