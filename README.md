@@ -1,6 +1,11 @@
 # viz-gateway
 
 [![CI](https://github.com/viz-cx/viz-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/viz-cx/viz-gateway/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/viz-cx/viz-gateway/branch/main/graph/badge.svg)](https://codecov.io/gh/viz-cx/viz-gateway)
+[![License: MIT](https://img.shields.io/github/license/viz-cx/viz-gateway)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](./package.json)
+[![Federation](https://img.shields.io/badge/federation-5--of--7-blueviolet)](./VIZ-Gateway-Research-and-Plan.md)
+[![Last commit](https://img.shields.io/github/last-commit/viz-cx/viz-gateway)](https://github.com/viz-cx/viz-gateway/commits/main)
 
 Federated multisig gateway between the **VIZ blockchain** and external networks
 (TON live, Solana in progress). Lock VIZ on VIZ, mint wrapped VIZ (`wVIZ`) on

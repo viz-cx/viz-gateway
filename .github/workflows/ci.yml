@@ -9,6 +9,11 @@ on:
 jobs:
   build-and-verify:
     runs-on: ubuntu-latest
+    env:
+      # Collect V8 coverage across every node process in the job (the unit suite AND the
+      # offline verify spikes, which exercise most of the write-path/orchestration code).
+      # c8 aggregates the raw output and remaps it to the TS sources in the report step.
+      NODE_V8_COVERAGE: coverage/tmp
     steps:
       - uses: actions/checkout@v5
 
@@ -37,3 +42,16 @@ jobs:
       # so a broken outDir/glob can't silently no-op the whole tier while CI stays green.
       - name: Unit tests (node:test)
         run: npx tsc -p tsconfig.test.json && node tools/run-unit-tests.mjs
+
+      # Aggregate the V8 coverage written by the two steps above and remap it (via source
+      # maps) onto packages/*/src/*.ts. Config in .c8rc.json (include/exclude, remap).
+      - name: Coverage report (lcov)
+        run: npx c8 report --reporter=lcov --reporter=text-summary
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # A Codecov outage must never fail a security-critical bridge's CI.
+          fail_ci_if_error: false
