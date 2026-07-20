@@ -6,7 +6,11 @@ export const CONFIG = {
     gatewayJettonWallet: "EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy", // display only
     decimals: 3,
   },
-  pegIn: { vizAccount: "gram.gate" },
+  pegIn: {
+    vizAccount: "gram.gate",
+    // WebVIZWallet deep-link (DEEPLINKS.md): hash-routed, amount formatted "N.NNN VIZ".
+    walletTransferUrl: "https://wallet.viz.world/#/assets/transfer/",
+  },
   fees: {
     floorMilliViz: 45000n,               // 45 VIZ (GRAM static floor)
     bps: 20,                             // 0.20%

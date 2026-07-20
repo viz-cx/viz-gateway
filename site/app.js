@@ -158,6 +158,7 @@ async function onWalletChange() {
     userBalanceBaseUnits = null;
     firstTimeSurcharge = true;
     updatePegInFee();
+    updatePegInDeeplink();
     return;
   }
   memoEl.textContent = userAddress;
@@ -194,6 +195,7 @@ async function onWalletChange() {
     userBalanceBaseUnits = null;
   }
   updatePegInFee();
+  updatePegInDeeplink();
 }
 
 function fmtViz(milli) { return (Number(milli) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 }); }
@@ -254,7 +256,27 @@ function updatePegInFee() {
   netEl.textContent = net > fees.mintGasFloorMilliViz ? fmtViz(net) + " wVIZ" : "too small — would be refunded";
 }
 
-$("pegin-amt").addEventListener("input", updatePegInFee);
+// WebVIZWallet deep-link: pre-fills the peg-in transfer (account=gram.gate, the
+// connected TON address as memo) so the user signs it in their VIZ wallet without
+// hand-copying. Only shown once a TON wallet is connected — the memo comes from it.
+function updatePegInDeeplink() {
+  const el = $("pegin-open");
+  if (!userAddress) { el.classList.add("hidden"); return; }
+  const raw = $("pegin-amt").value.trim();
+  const params = [
+    "account=" + encodeURIComponent(CONFIG.pegIn.vizAccount),
+    "memo=" + encodeURIComponent(userAddress),
+  ];
+  // Amount is optional in the deep-link; include it only when the field holds a
+  // valid number, formatted as the wallet expects ("N.NNN VIZ").
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    params.splice(1, 0, "amount=" + encodeURIComponent(parseFloat(raw).toFixed(3) + " VIZ"));
+  }
+  el.href = CONFIG.pegIn.walletTransferUrl + "?" + params.join("&");
+  el.classList.remove("hidden");
+}
+
+$("pegin-amt").addEventListener("input", () => { updatePegInFee(); updatePegInDeeplink(); });
 
 /* ---------- React to connect/disconnect ---------- */
 tonConnectUI.onStatusChange((w) => {
