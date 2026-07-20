@@ -8,9 +8,9 @@ export const CONFIG = {
   },
   pegIn: { vizAccount: "gram.gate" },
   fees: {
-    floorMilliViz: 10000n,               // 10 VIZ
+    floorMilliViz: 45000n,               // 45 VIZ (GRAM static floor)
     bps: 20,                             // 0.20%
-    activationSurchargeMilliViz: 10000n, // 10 VIZ, first peg-in per TON wallet
+    activationSurchargeMilliViz: 37500n, // 37.5 VIZ, first peg-in per TON wallet
     mintGasFloorMilliViz: 1000n,         // 1 VIZ
   },
   gas: {

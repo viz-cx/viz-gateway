@@ -217,7 +217,7 @@ async function loadFees() {
     const r = await fetch(`${CONFIG.rpc.coordinator}/fees`, { mode: "cors" });
     const d = await r.json();
     // /fees is per-chain; this app only pegs in to GRAM (TON), so flatten to GRAM.
-    fees.floorMilliViz = BigInt(d.floorMilliViz);
+    fees.floorMilliViz = BigInt(d.floorMilliViz.GRAM);
     fees.bps = d.bps;
     fees.activationSurchargeMilliViz = BigInt(d.activationSurchargeMilliViz.GRAM);
     fees.mintGasFloorMilliViz = BigInt(d.mintGasFloorMilliViz.GRAM);
