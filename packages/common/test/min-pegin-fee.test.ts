@@ -95,4 +95,33 @@ for (const [label, make] of STORES) {
     await addPegIn(store, "s", "SOLANA", "CONFIRMED", 8_000n);
     assert.equal(await store.minPegInFeeMilliViz(), 8_000n);
   });
+
+  test(`[${label}] BROADCAST row with a PINNED positive fee is counted (only fee-0 BROADCAST is skipped)`, async () => {
+    // pinFee can land while the row is still BROADCAST; a positive fee there is a real pin
+    // and must count — the exclusion is fee-0-specific, not "ignore all BROADCAST rows".
+    const store = make();
+    await addPegIn(store, "bcp", "GRAM", "BROADCAST", 30_000n);
+    assert.equal(await store.minPegInFeeMilliViz("GRAM"), 30_000n);
+  });
+
+  test(`[${label}] a CONFIRMED fee-0 row surfaces past healthy positives (masking not hidden)`, async () => {
+    const store = make();
+    await addPegIn(store, "ok1", "GRAM", "CONFIRMED", 84_000n);
+    await addPegIn(store, "ok2", "GRAM", "CONFIRMED", 45_000n);
+    await addPegIn(store, "mask", "GRAM", "CONFIRMED", 0n); // understated to mask under-backing
+    assert.equal(await store.minPegInFeeMilliViz("GRAM"), 0n);
+  });
+
+  test(`[${label}] BROADCAST fee-0 excluded but CONFIRMED fee-0 counted in the same store`, async () => {
+    const store = make();
+    await addPegIn(store, "bc0", "GRAM", "BROADCAST", 0n); // in-flight -> excluded
+    await addPegIn(store, "cf0", "GRAM", "CONFIRMED", 0n); // mis-pin -> counted
+    assert.equal(await store.minPegInFeeMilliViz("GRAM"), 0n);
+  });
+
+  test(`[${label}] HELD peg-in (not minted) is never counted`, async () => {
+    const store = make();
+    await addPegIn(store, "h", "GRAM", "HELD", 0n);
+    assert.equal(await store.minPegInFeeMilliViz("GRAM"), null);
+  });
 }
