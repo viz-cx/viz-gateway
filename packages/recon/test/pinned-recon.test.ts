@@ -64,10 +64,12 @@ test("sanity floor breach pauses gateway", async () => {
   assert.ok(await store.isPaused(), "gateway must be paused on sanity-floor breach");
 });
 
-test("sanity floor ignores recovery-path CONFIRMED peg-in with fee 0", async () => {
+test("sanity floor STILL pauses on a CONFIRMED peg-in with fee 0 (mis-pin/masking, H6)", async () => {
   const store = new InMemoryGatewayStore();
-  // The coordinator's recovery path can report fee 0 (rebuild failed); planTransition
-  // leaves the column at 0 rather than clobbering. That is "fee unknown", not "under-pinned".
+  // A CONFIRMED row can only reach fee 0 via a mis-pin or a coordinator understating the
+  // fee to mask under-backing: the recovery path COALESCEs (never clobbers the fee pinned
+  // before broadcast), so a legit CONFIRMED row always carries its positive fee. Fee 0 here
+  // is below any sanity floor and MUST fail closed — the H6 masking guard.
   await store.enqueue({ id: "rec", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 1_000_000n, digest: "drec" });
   await store.setStatus("rec", "CONFIRMED"); // fee stays default 0
 
@@ -76,8 +78,8 @@ test("sanity floor ignores recovery-path CONFIRMED peg-in with fee 0", async () 
     async () => 0n,
     store, cfg, "GRAM", 1_000n,
   );
-  assert.equal(await recon.check(), true, "fee-0 recovery row must not trip the sanity floor");
-  assert.equal(await store.isPaused(), false);
+  assert.equal(await recon.check(), false, "CONFIRMED fee-0 must trip the sanity floor");
+  assert.ok(await store.isPaused(), "gateway must pause on a CONFIRMED fee-0 mis-pin");
 });
 
 test("sanity floor STILL pauses on a genuine under-pin next to a fee-0 in-flight row", async () => {

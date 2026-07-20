@@ -5,11 +5,12 @@ import type { ActionStatus } from "../src/idempotency";
 import type { RemoteChainId } from "../src/types";
 
 // Edge cases for minPegInFeeMilliViz — the query behind recon's rate-independent
-// sanity floor. The invariant under test: it returns the smallest PINNED (fee > 0)
-// fee among BROADCAST/CONFIRMED PEG_IN rows, and treats fee 0 as "not yet pinned"
-// (a BROADCAST row mid-mint, or a recovery-path CONFIRMED row) rather than a real
-// under-pin. Run against BOTH store implementations so the SQLite production path
-// and the in-memory test path stay in lockstep.
+// sanity floor. The invariant under test: among BROADCAST/CONFIRMED PEG_IN rows it
+// returns the smallest fee, excluding ONLY a not-yet-pinned BROADCAST row (fee still
+// default 0 mid-mint, before the coordinator pins it). A CONFIRMED row always carries
+// its positive pinned fee, so fee 0 on a CONFIRMED row is a genuine mis-pin / masking
+// attempt and MUST count (fail closed, H6). Run against BOTH store implementations so
+// the SQLite production path and the in-memory test path stay in lockstep.
 
 const STORES: Array<[string, () => GatewayStore]> = [
   ["InMemory", () => new InMemoryGatewayStore()],
@@ -46,10 +47,13 @@ for (const [label, make] of STORES) {
     assert.equal(await store.minPegInFeeMilliViz("GRAM"), null);
   });
 
-  test(`[${label}] recovery-path CONFIRMED row with fee 0 -> null (excluded)`, async () => {
+  test(`[${label}] CONFIRMED row with fee 0 -> 0 (NOT excluded: mis-pin/masking, H6)`, async () => {
     const store = make();
-    await addPegIn(store, "rec", "GRAM", "CONFIRMED", 0n); // coordinator reported fee 0
-    assert.equal(await store.minPegInFeeMilliViz("GRAM"), null);
+    // A CONFIRMED row can only reach fee 0 via mis-pin or a coordinator understating the
+    // fee — the recovery path COALESCEs and never clobbers the fee pinned before broadcast.
+    // So it must surface (0 < any sanity floor) and fail closed, not be masked as "unpinned".
+    await addPegIn(store, "rec", "GRAM", "CONFIRMED", 0n);
+    assert.equal(await store.minPegInFeeMilliViz("GRAM"), 0n);
   });
 
   test(`[${label}] fee 0 alongside positives -> smallest POSITIVE (0 ignored)`, async () => {
