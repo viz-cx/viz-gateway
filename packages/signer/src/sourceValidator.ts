@@ -247,10 +247,14 @@ async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDe
 }
 
 /**
- * REFUND — the gateway returns a stranded peg-in to its original VIZ sender (gross, no
- * fee). Fully independent: both the recipient (the deposit's sender) and the amount (the
- * gross deposit) come straight from the operator's own re-read of the source deposit, so
- * no tolerance is needed. The child digest MUST be bound to the parent ("<parentDigest>:refund").
+ * REFUND — the gateway returns a stranded peg-in to its original VIZ sender, minus the
+ * fixed refund fee (anti-spam, PR #87). Fully independent: the recipient (the deposit's
+ * sender) and the gross both come from the operator's own re-read of the source deposit,
+ * and refundFeeMilliViz is a single fixed manifest constant every operator shares — so the
+ * amount is `gross − refundFee`, exact (no band), exactly as the dispatcher spawns it and
+ * mirroring validateGramReturn. A non-positive net is dust the dispatcher retains and never
+ * spawns a child for, so refuse it outright. The child digest MUST be bound to the parent
+ * ("<parentDigest>:refund").
  */
 async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
   const { deposit, parent } = await reReadParentPegIn(action, REFUND_SUFFIX, deps);
@@ -264,9 +268,19 @@ async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps
       `REFUND recipient ${action.recipient} != deposit sender ${deposit.from} (${action.id})`,
     );
   }
-  if (action.amountMilliViz !== deposit.amountMilliViz) {
+  const net = deposit.amountMilliViz - deps.fees.refundFeeMilliViz;
+  // Defense-in-depth (mirrors validateGramReturn): a legitimate refund only exists when the
+  // gross exceeds the refund fee — the dispatcher's dust rule retains anything <= fee and
+  // spawns no child. Refuse a non-positive net so a compromised coordinator can never harvest
+  // signatures on a zero/negative-value transfer (the exact check below would accept a 0n).
+  if (net <= 0n) {
     throw new SourceMismatchError(
-      `REFUND amount ${action.amountMilliViz} != deposit gross ${deposit.amountMilliViz} (${action.id})`,
+      `REFUND ${action.id} gross ${deposit.amountMilliViz} <= refund fee ${deps.fees.refundFeeMilliViz} — dust must be retained, never refunded`,
+    );
+  }
+  if (action.amountMilliViz !== net) {
+    throw new SourceMismatchError(
+      `REFUND amount ${action.amountMilliViz} != gross ${deposit.amountMilliViz} − refund fee ${deps.fees.refundFeeMilliViz} (${action.id})`,
     );
   }
   if (action.digest !== `${parent.digest}${REFUND_SUFFIX}`) {

@@ -6,7 +6,7 @@
 //     independently-derived `base` fee (VG-04: no range — base + activation, the old band
 //     maximum, is now REJECTED, closing the backing-drain vector; the surcharge is retained
 //     as gateway surplus);
-//   - REFUND may only ever return the GROSS deposit to the deposit's ORIGINAL sender;
+//   - REFUND may only ever return gross − refund fee (anti-spam, PR #87) to the deposit's ORIGINAL sender;
 //   - every child digest is bound to the re-derived parent PEG_IN digest;
 //   - a missing/non-final parent, a malformed child id, or any tampered field FAILS CLOSED.
 //
@@ -91,11 +91,12 @@ async function expectReject(promise, label) {
     remoteChain: deposit.remoteChain, // inherited from parent (Task 3.2/3.4)
     ...over,
   });
+  const refundNet = deposit.amountMilliViz - fees.refundFeeMilliViz; // gross − refund fee (anti-spam, PR #87)
   const refund = (over = {}) => ({
     direction: "PEG_OUT",
     id: `${parentId}:refund`,
     recipient: deposit.from, // back to the original sender
-    amountMilliViz: deposit.amountMilliViz, // gross, no fee
+    amountMilliViz: refundNet, // gross − refund fee (exactly what dispatcher/policy.ts spawns)
     digest: `${parent.digest}:refund`,
     remoteChain: deposit.remoteChain, // inherited from parent (Task 3.2/3.4)
     ...over,
@@ -143,10 +144,10 @@ async function expectReject(promise, label) {
 
   // ============================== REFUND =========================================
 
-  // 8) Honest REFUND: gross back to the original sender -> passes.
+  // 8) Honest REFUND: gross − refund fee back to the original sender -> passes.
   {
     await validateAction(refund(), deps(deposit));
-    ok("8 honest REFUND (gross -> original sender) -> signs");
+    ok("8 honest REFUND (gross − refund fee -> original sender) -> signs");
   }
 
   // 9) Redirected REFUND: coordinator sends the refund to someone other than the sender -> rejected.
@@ -154,9 +155,11 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(refund({ recipient: "attacker" }), deps(deposit)), "9 REFUND wrong recipient");
   }
 
-  // 10) Tampered REFUND amount: not the gross deposit -> rejected (no tolerance on a refund).
+  // 10) REFUND at the FULL gross (fee not deducted) -> rejected. This is the exact PR #87 regression:
+  //     the dispatcher spawns gross − refundFee, so a full-gross refund over-pays the sender by the fee.
   {
-    await expectReject(validateAction(refund({ amountMilliViz: deposit.amountMilliViz + 1n }), deps(deposit)), "10 REFUND wrong amount");
+    await expectReject(validateAction(refund({ amountMilliViz: deposit.amountMilliViz }), deps(deposit)), "10 REFUND full gross (fee not deducted)");
+    await expectReject(validateAction(refund({ amountMilliViz: refundNet + 1n }), deps(deposit)), "10b REFUND 1 mVIZ over net");
   }
 
   // 11) Tampered REFUND digest: not bound to the parent -> rejected.
@@ -184,7 +187,7 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(feeSweep({ id: `${deposit.trxId}:000:fee` }), deps(deposit)), "14 FEE_SWEEP triple-padded child id");
   }
 
-  // 15) Same padding attack on REFUND (returns GROSS to the sender — a double refund is worse).
+  // 15) Same padding attack on REFUND (returns gross − fee to the sender — a double refund is worse).
   {
     await expectReject(validateAction(refund({ id: `${deposit.trxId}:00:refund` }), deps(deposit)), "15 REFUND zero-padded child id (double-refund)");
   }
@@ -194,7 +197,7 @@ async function expectReject(promise, label) {
     process.exit(1);
   }
   console.log("\nRESULT: FEE_SWEEP sweeps only to the operator's own fees.gate for EXACTLY the derived base fee");
-  console.log("(VG-04: base+activation drain rejected); REFUND returns only the gross deposit to the original");
+  console.log("(VG-04: base+activation drain rejected); REFUND returns exactly gross − refund fee to the original");
   console.log("sender; both bind to the parent PEG_IN.");
 })().catch((e) => {
   console.error(e);
