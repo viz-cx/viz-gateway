@@ -864,6 +864,8 @@
 .statusbar .item { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .statusbar .item b { color: var(--text); font-weight: 600; }
 .statusbar .warn { color: #ffb454; }
+.statusbar .ok { display: inline-flex; align-items: center; gap: 7px; color: var(--viz-2); font-weight: 600; }
+.statusbar .ok .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--viz); box-shadow: 0 0 8px 1px color-mix(in oklab, var(--viz) 70%, transparent); animation: pulse-dot 2.4s ease-out infinite; }
 .hidden { display: none !important; }
 .field-label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .bal-line { font-size: 12px; color: var(--muted); }
