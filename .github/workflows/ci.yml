@@ -43,6 +43,13 @@ jobs:
       - name: Unit tests (node:test)
         run: npx tsc -p tsconfig.test.json && node tools/run-unit-tests.mjs
 
+      # Regression guard for the peg-in deep-link builder (site/app.js updatePegInDeeplink):
+      # feeds XSS/injection payloads through the exact URL-construction logic and asserts every
+      # produced href stays inert (https scheme, everything encoded, no injected query params).
+      # Standalone node script — no build needed; exits non-zero on any breakout.
+      - name: Deep-link XSS proof
+        run: node tools/deeplink-xss-proof.cjs
+
       # Aggregate the V8 coverage written by the two steps above and remap it (via source
       # maps) onto packages/*/src/*.ts. Config in .c8rc.json (include/exclude, remap).
       - name: Coverage report (lcov)

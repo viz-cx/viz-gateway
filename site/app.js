@@ -256,7 +256,7 @@ function updatePegInFee() {
   const raw = $("pegin-amt").value.trim();
   const feeEl = $("pegin-fee"), netEl = $("pegin-net"), ftEl = $("pegin-firsttime");
   ftEl.textContent = firstTimeSurcharge
-    ? "Includes a one-time 10 VIZ activation surcharge (first peg-in to this GRAM wallet)."
+    ? `Includes a one-time ${fmtViz(fees.activationSurchargeMilliViz)} VIZ activation surcharge (first peg-in to this GRAM wallet).`
     : "";
   if (!/^\d+(\.\d+)?$/.test(raw)) { feeEl.textContent = "—"; netEl.textContent = "—"; return; }
   const grossMilli = BigInt(Math.round(parseFloat(raw) * 1000));
