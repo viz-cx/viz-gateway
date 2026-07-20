@@ -64,6 +64,24 @@ test("sanity floor breach pauses gateway", async () => {
   assert.ok(await store.isPaused(), "gateway must be paused on sanity-floor breach");
 });
 
+test("sanity floor ignores in-flight BROADCAST peg-in with unpinned fee 0", async () => {
+  const store = new InMemoryGatewayStore();
+  // A peg-in mid-mint: the dispatcher marks BROADCAST before the coordinator call, so the
+  // fee is still the default 0 until CONFIRMED. Recon must not read that as an under-pin.
+  await store.enqueue({ id: "bc", direction: "PEG_IN", remoteChain: "GRAM", recipient: "user", amountMilliViz: 45_000n, digest: "dbc" });
+  await store.setStatus("bc", "BROADCAST");
+
+  const recon = new Recon(
+    [{ name: "GRAM", supply: async () => 0n }],
+    async () => 0n,
+    store, cfg, "GRAM",
+    1_000n, // sanity floor
+  );
+  assert.equal(await recon.check(), true, "in-flight fee-0 row must not trip the sanity floor");
+  assert.equal(await store.isPaused(), false, "gateway must stay unpaused for an unpinned peg-in");
+  assert.equal(await store.minPegInFeeMilliViz("GRAM"), null, "fee-0 rows are not counted as pinned");
+});
+
 test("minPegInFeeMilliViz returns null on empty store", async () => {
   const store = new InMemoryGatewayStore();
   assert.equal(await store.minPegInFeeMilliViz("GRAM"), null);

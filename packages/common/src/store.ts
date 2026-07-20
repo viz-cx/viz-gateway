@@ -58,6 +58,13 @@ export interface GatewayStore {
    * chain, or null if none. Recon asserts this stays ≥ the absolute mint-gas floor — a
    * rate-independent sanity check that catches a grossly under-pinned fee without
    * re-deriving from (and thus coupling to) the current fee config.
+   *
+   * Rows with fee 0 are EXCLUDED: 0 means the fee is not yet pinned — a BROADCAST row
+   * mid-mint (the dispatcher marks BROADCAST *before* the coordinator call and only pins
+   * the fee on CONFIRMED), or a recovery-path CONFIRMED row where the coordinator reported
+   * fee 0. Neither is a fee "pinned at zero", so counting them would false-trip the guard
+   * whenever recon's tick lands inside a peg-in's in-flight window. A genuine mis-pin is a
+   * small *positive* value, which is still caught.
    */
   minPegInFeeMilliViz(chain?: RemoteChainId): Promise<bigint | null>;
   /**
@@ -402,8 +409,10 @@ export class SqliteGatewayStore implements GatewayStore {
     const ph = MINTED_STATUSES.map(() => "?").join(",");
     const chainFilter = chain ? " AND remote_chain = ?" : "";
     const chainArgs: string[] = chain ? [chain] : [];
+    // fee_milli_viz != '0' excludes not-yet-pinned rows (BROADCAST mid-mint / recovery
+    // fee 0); see the interface doc on minPegInFeeMilliViz for why.
     const rows = this.db
-      .prepare(`SELECT fee_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph})${chainFilter}`)
+      .prepare(`SELECT fee_milli_viz AS v FROM action_outbox WHERE direction='PEG_IN' AND status IN (${ph}) AND fee_milli_viz != '0'${chainFilter}`)
       .all(...MINTED_STATUSES, ...chainArgs) as Row[];
     if (rows.length === 0) return null;
     // Min in JS with BigInt (fee_milli_viz is stored as TEXT; see unsweptFeesMilliViz note).
@@ -622,7 +631,9 @@ export class InMemoryGatewayStore implements GatewayStore {
     let min: bigint | null = null;
     for (const r of this.rows.values()) {
       if (r.direction === "PEG_IN" && (r.status === "BROADCAST" || r.status === "CONFIRMED") && (!chain || r.remoteChain === chain)) {
-        if (min === null || r.feeMilliViz < min) min = r.feeMilliViz;
+        // Skip fee 0 (not yet pinned): a BROADCAST row mid-mint or recovery fee 0 — see
+        // the interface doc on minPegInFeeMilliViz.
+        if (r.feeMilliViz > 0n && (min === null || r.feeMilliViz < min)) min = r.feeMilliViz;
       }
     }
     return min;
