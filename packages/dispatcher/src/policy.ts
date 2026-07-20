@@ -30,8 +30,8 @@ export interface RetryOpts {
  *                                    the row so unsweptFeesMilliViz() can see it)
  *  - failure, still within window -> QUEUED again with backoff (retry)
  *  - failure, window exhausted    -> for a PEG_IN: REFUNDING (the dispatcher spawns
- *                                    a REFUND child that returns gross to the sender,
- *                                    itself a T-of-N transfer). For a PEG_OUT /
+ *                                    a REFUND child that returns gross − refund fee to the
+ *                                    sender, itself a T-of-N transfer). For a PEG_OUT /
  *                                    FEE_SWEEP / REFUND there is nothing to refund —
  *                                    the gateway already owes that release — so we
  *                                    keep retrying (QUEUED) until the federation can
