@@ -93,9 +93,11 @@ co-located `viz-cpp-node`, which owns `8090`/`8091` (HTTP/WS RPC) and `8092`/`80
 Each signer independently re-reads the source event from **its own** nodes. Therefore on
 every signer box:
 
-- `VIZ_NODE_URL` MUST be that operator's own VIZ node — never the coordinator's.
+- `VIZ_NODE_URL` MUST be that operator's own VIZ node — never the coordinator's. May be a
+  comma/whitespace-separated list of that operator's own nodes for read failover.
 - `GRAM_ENDPOINT` / `GRAM_GATEWAY_JETTON_WALLET` MUST point at that operator's own TON
-  node (used to re-read peg-out burns).
+  node (used to re-read peg-out burns). `GRAM_ENDPOINT` also accepts a comma-list; set
+  `GRAM_ORBS_FALLBACK=true` to append an Orbs ton-access read fallback.
 
 If a signer points these at the coordinator's RPC, F2 silently degrades to trusting the
 coordinator. Nothing in the code can prove independence — **verify it per box**, and
@@ -141,8 +143,9 @@ Fill it in:
   behind mTLS/VPN — it is an authenticated-by-network surface). Default is `8101`, not
   `8090`: a co-located `viz-cpp-node` owns `8090`/`8091` (HTTP/WS RPC) and `8092`/`8093`
   (snapshot/wallet), so the `810x` block avoids an `EADDRINUSE` on the same host.
-- `VIZ_NODE_URL` = **your own** VIZ node (F2).
+- `VIZ_NODE_URL` = **your own** VIZ node (F2). Comma-list of your nodes for read failover.
 - `GRAM_ENDPOINT` = **your own** TON node; keep the public `GRAM_*` addresses as shipped.
+  Comma-list OK; `GRAM_ORBS_FALLBACK=true` appends an Orbs ton-access read fallback.
 - `GRAM_API_KEY` = your own toncenter key.
 - `SIGNER_ADVERTISE_URL` = the URL the coordinator can reach this signer at
   (e.g. `http://op-N-host:8101`) — the coordinator discovers you by self-registration.
