@@ -58,21 +58,25 @@ env:
     COORDINATOR_URL: https://gateway.viz.cx
     # --- Sealed key custody (secret vars come from the keystore, not the env) ---
     FED_KEYSTORE: /app/data/keystore.mainnet.json
-    # --- VIZ chain (op-1 self-trusts node.viz.cx this launch; F2 independence rests on
-    #     op-2/op-3 running separate hardware/keys/nodes) ---
+    # --- VIZ chain (F2 independence rests on each operator running separate hardware/keys/nodes) ---
     # F2: VIZ_NODE_URL / GRAM_ENDPOINT are OPERATOR-CHOSEN. Each operator MAY set a comma-separated
     # failover list of ITS OWN trusted nodes/endpoints (VizJsChain/GramHttpChain rotate on a
     # transient error) — do NOT force all operators onto the same public nodes, that would defeat
-    # the independent-source guarantee. op-1's list below is illustrative; op-2/op-3 supply theirs.
-    VIZ_NODE_URL: https://node.viz.cx
+    # the independent-source guarantee. This file is the AXVEER co-located signer's config; the
+    # list below is ITS chosen set (public VIZ nodes verified in sync). A separate-box operator
+    # (e.g. op-3) supplies its own list in its own deploy config, NOT this one.
+    VIZ_NODE_URL: https://node.viz.cx,https://api.viz.world,https://mirror.viz.world
     VIZ_GATEWAY_ACCOUNT_GRAM: gram.gate
     VIZ_GATEWAY_ACCOUNT_SOLANA: solana.gate
     FEES_GATE_ACCOUNT: fees.gate
     # --- GRAM (TON) runtime ---
-    # GRAM_ENDPOINT may be a comma list; set GRAM_ORBS_FALLBACK: "true" to also append an Orbs
-    # ton-access fallback at boot (each operator decides — the send path stays on the operator's
-    # own current endpoint; only the read polls fail over).
+    # GRAM_ENDPOINT may be a comma list; GRAM_ORBS_FALLBACK: "true" also appends an Orbs ton-access
+    # fallback at boot (each operator decides — the send path stays on the operator's own current
+    # endpoint; only the read polls fail over). Enabled here so this signer's GramApprover reads
+    # (order/multisig state polls) get a second provider — the write-path analogue of the recon
+    # fix, so a toncenter blip during an approval can't stall the mint.
     GRAM_ENDPOINT: https://toncenter.com/api/v2/jsonRPC
+    GRAM_ORBS_FALLBACK: "true"
     GRAM_JETTON_MINTER_ADDRESS: EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
     GRAM_MULTISIG_ADDRESS: EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
     GRAM_GATEWAY_JETTON_WALLET: EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
