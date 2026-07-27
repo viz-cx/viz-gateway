@@ -4,6 +4,7 @@ import { notifyStaff } from "@gateway/log";
 // the watcher loops on import).
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
+import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { SolanaChain, pubkeyOf } from "@gateway/solana-watcher/dist/solanaChain";
 import { Recon, uncoveredActiveChains, belowTonFloor } from "./checker";
 
@@ -22,7 +23,11 @@ export { Recon, uncoveredActiveChains, belowTonFloor } from "./checker";
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const accounts = buildGatewayAccounts(cfg);
-  const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
+  const viz = new VizJsChain(cfg.viz.nodeUrls, accounts);
+  // TON endpoint failover list (optionally + an Orbs fallback; fail-soft), resolved once at boot
+  // and reused by both the supply check and the per-tick reserve monitor. recon lives on the
+  // coordinator box — the read path this list protects is the one that false-paused on 2026-07-27.
+  const gramEndpoints = await resolveGramEndpoints(cfg.gram.endpoints, cfg.gram.orbsFallback);
   // One Recon per chain: each checks locked(accountₖ) ≥ circulating(k) + unsweptFees(k).
   // A per-chain split prevents a surplus on one chain from masking under-backing on another.
   const store = createStore(cfg.storeUrl);
@@ -48,7 +53,7 @@ async function main(): Promise<void> {
   const reconCfg = { ...cfg.recon, expectedRemotes: undefined };
   if (cfg.gram.jettonMinterAddress) {
     const gram = new GramHttpChain(
-      cfg.gram.endpoint,
+      gramEndpoints,
       cfg.gram.apiKey,
       cfg.gram.jettonMinterAddress,
       cfg.gram.gatewayJettonWallet,
@@ -126,7 +131,7 @@ async function main(): Promise<void> {
     if (!cfg.gram.jettonMinterAddress || !cfg.gram.multisigAddress) return;
     try {
       const gram = new GramHttpChain(
-        cfg.gram.endpoint, cfg.gram.apiKey, cfg.gram.jettonMinterAddress,
+        gramEndpoints, cfg.gram.apiKey, cfg.gram.jettonMinterAddress,
         cfg.gram.gatewayJettonWallet, cfg.gram.multisigAddress,
         cfg.gram.finalityConfirmations, cfg.gram.scanMaxTransactions,
         cfg.gram.maxScanPages, cfg.gram.rpcTimeoutMs,

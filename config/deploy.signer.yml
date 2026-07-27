@@ -60,11 +60,18 @@ env:
     FED_KEYSTORE: /app/data/keystore.mainnet.json
     # --- VIZ chain (op-1 self-trusts node.viz.cx this launch; F2 independence rests on
     #     op-2/op-3 running separate hardware/keys/nodes) ---
+    # F2: VIZ_NODE_URL / GRAM_ENDPOINT are OPERATOR-CHOSEN. Each operator MAY set a comma-separated
+    # failover list of ITS OWN trusted nodes/endpoints (VizJsChain/GramHttpChain rotate on a
+    # transient error) — do NOT force all operators onto the same public nodes, that would defeat
+    # the independent-source guarantee. op-1's list below is illustrative; op-2/op-3 supply theirs.
     VIZ_NODE_URL: https://node.viz.cx
     VIZ_GATEWAY_ACCOUNT_GRAM: gram.gate
     VIZ_GATEWAY_ACCOUNT_SOLANA: solana.gate
     FEES_GATE_ACCOUNT: fees.gate
     # --- GRAM (TON) runtime ---
+    # GRAM_ENDPOINT may be a comma list; set GRAM_ORBS_FALLBACK: "true" to also append an Orbs
+    # ton-access fallback at boot (each operator decides — the send path stays on the operator's
+    # own current endpoint; only the read polls fail over).
     GRAM_ENDPOINT: https://toncenter.com/api/v2/jsonRPC
     GRAM_JETTON_MINTER_ADDRESS: EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
     GRAM_MULTISIG_ADDRESS: EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0

@@ -15,6 +15,7 @@ import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { GramApprover } from "@gateway/gram-watcher/dist/gramApprove";
+import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { KeyedSigner } from "./keyedSigner";
 import { routeApproval } from "./routeApproval";
 import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
@@ -81,7 +82,11 @@ async function main(): Promise<void> {
   // F2 INDEPENDENCE LINCHPIN: these readers MUST point at the operator's OWN nodes
   // (VIZ_NODE_URL / SOLANA_RPC_URL), never a coordinator-fed endpoint. They re-derive
   // the source event so a compromised coordinator cannot forge a (action, proposal) pair.
-  const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts, cfg.viz.memoWifs);
+  const vizChain = new VizJsChain(cfg.viz.nodeUrls, accounts, cfg.viz.memoWifs);
+  // TON endpoint failover list (optionally + an Orbs fallback; fail-soft), resolved ONCE and
+  // shared by this signer's GRAM reader and its on-chain approver. Operator-chosen (F2): each
+  // operator supplies its own GRAM_ENDPOINT list, never forced onto shared public endpoints.
+  const gramEndpoints = await resolveGramEndpoints(cfg.gram.endpoints, cfg.gram.orbsFallback);
   // Read-only Solana reader (no writer): only getBurn is exercised here. Constructing it
   // needs a real mint; if Solana is not configured on this signer, a Solana peg-out can
   // never be validated, so fail closed if one ever arrives.
@@ -107,7 +112,7 @@ async function main(): Promise<void> {
   // closed if one ever arrives (mirrors the Solana stub above).
   const tonReader: BurnReader = cfg.gram.gatewayJettonWallet
     ? new GramHttpChain(
-        cfg.gram.endpoint,
+        gramEndpoints,
         cfg.gram.apiKey,
         cfg.gram.jettonMinterAddress,
         cfg.gram.gatewayJettonWallet,
@@ -155,7 +160,7 @@ async function main(): Promise<void> {
   const gramApprover =
     cfg.gram.jettonMinterAddress && cfg.gram.multisigAddress && cfg.gram.signerMnemonic
       ? new GramApprover(
-          cfg.gram.endpoint,
+          gramEndpoints,
           cfg.gram.apiKey,
           cfg.gram.jettonMinterAddress,
           cfg.gram.multisigAddress,

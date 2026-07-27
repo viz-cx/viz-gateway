@@ -44,7 +44,14 @@ export interface GatewayConfig {
   operatorId: string;
   federation: FederationManifest;
   viz: {
+    /** First node URL — kept for back-compat callers/logging (equals nodeUrls[0]). */
     nodeUrl: string;
+    /**
+     * Full VIZ node list for read-path failover. Parsed from VIZ_NODE_URL (comma- or
+     * whitespace-separated). VizJsChain rotates through these on a TRANSIENT RPC error so a
+     * single node blip can't latch recon into an indeterminate "cannot verify backing" pause.
+     */
+    nodeUrls: string[];
     gatewayAccounts: Record<RemoteChainId, string>;
     signingWif: string;
     /**
@@ -56,7 +63,23 @@ export interface GatewayConfig {
     extraConfirmations: number;
   };
   gram: {
+    /** First toncenter/v2 endpoint — kept for back-compat callers/logging (equals endpoints[0]). */
     endpoint: string;
+    /**
+     * Full TON (toncenter-v2-compatible) endpoint list for read-path failover. Parsed from
+     * GRAM_ENDPOINT (comma-/whitespace-separated). GramHttpChain/GramApprover rotate through
+     * these on a TRANSIENT error. The GRAM_API_KEY is applied ONLY to toncenter-host entries
+     * (Orbs / self-hosted liteservers ignore it). Default is a single toncenter endpoint, so
+     * behaviour is unchanged until the list is populated (see orbsFallback).
+     */
+    endpoints: string[];
+    /**
+     * When true, resolve an Orbs ton-access decentralized v2 endpoint at boot and append it
+     * to `endpoints` as a fallback (verified against getMasterchainInfo first; fail-soft —
+     * a resolution/verify failure just leaves the configured list unchanged). Off by default
+     * so tests / local runs never make a network call at startup.
+     */
+    orbsFallback: boolean;
     apiKey: string;
     multisigAddress: string;
     jettonMinterAddress: string;
@@ -163,6 +186,26 @@ function int(name: string, dflt: number): number {
 
 function big(name: string, dflt: string): bigint {
   return BigInt(opt(name, dflt));
+}
+
+/** True for a truthy boolean env value (1/true/yes, case-insensitive); everything else false. */
+function bool(name: string, dflt: boolean): boolean {
+  const v = process.env[name];
+  if (v === undefined || v === "") return dflt;
+  return /^(1|true|yes)$/i.test(v.trim());
+}
+
+/**
+ * Split a comma- or whitespace-separated env value into a trimmed, de-duped, non-empty list
+ * (order preserved). Used for the VIZ node / TON endpoint failover lists — a single URL yields
+ * a singleton list, so the scalar default paths are unchanged.
+ */
+function splitList(raw: string): string[] {
+  const parts = raw
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return [...new Set(parts)];
 }
 
 function floatEnv(name: string, dflt: number): number {
@@ -386,13 +429,20 @@ export function loadConfig(): GatewayConfig {
   if (gramGateAccount && gramMemoWif) memoWifs[gramGateAccount] = gramMemoWif;
   if (solanaGateAccount && solanaMemoWif) memoWifs[solanaGateAccount] = solanaMemoWif;
 
+  // VIZ node + TON endpoint failover lists. A single URL parses to a singleton list, so the
+  // scalar `nodeUrl`/`endpoint` (= list[0]) and the default single-endpoint behaviour are
+  // unchanged until an operator populates the list.
+  const nodeUrls = splitList(opt("VIZ_NODE_URL", opt("VIZ_NODE_WS", "https://node.viz.cx")));
+  const gramEndpoints = splitList(opt("GRAM_ENDPOINT", "https://toncenter.com/api/v2/jsonRPC"));
+
   return {
     service: opt("SERVICE", "signer"),
     operatorId: opt("OPERATOR_ID", "op-1"),
     federation,
     viz: {
       // Accepts http(s):// or ws(s)://; viz-js-lib picks the transport from the scheme.
-      nodeUrl: opt("VIZ_NODE_URL", opt("VIZ_NODE_WS", "https://node.viz.cx")),
+      nodeUrl: nodeUrls[0]!,
+      nodeUrls,
       gatewayAccounts: {
         GRAM: gramGateAccount,
         SOLANA: solanaGateAccount,
@@ -402,7 +452,9 @@ export function loadConfig(): GatewayConfig {
       extraConfirmations: int("VIZ_EXTRA_CONFIRMATIONS", 2),
     },
     gram: {
-      endpoint: opt("GRAM_ENDPOINT", "https://toncenter.com/api/v2/jsonRPC"),
+      endpoint: gramEndpoints[0]!,
+      endpoints: gramEndpoints,
+      orbsFallback: bool("GRAM_ORBS_FALLBACK", false),
       apiKey: opt("GRAM_API_KEY", ""),
       multisigAddress: opt("GRAM_MULTISIG_ADDRESS", ""),
       jettonMinterAddress: opt("GRAM_JETTON_MINTER_ADDRESS", ""),

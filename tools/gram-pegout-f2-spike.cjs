@@ -64,7 +64,7 @@ function makeTx(hashHex, nowSec, body) {
   };
 }
 
-// A mock TonClient injected over the private `client` field: getBurn only calls
+// A mock TonClient injected into the failover client list: getBurn only calls
 // getTransactions + getMasterchainInfo.
 function mockClient(txs) {
   return {
@@ -84,7 +84,9 @@ function tonChainWith(txs) {
     1, // finalityConfirmations -> ~10s buffer
     20, // scanMaxTransactions
   );
-  chain.client = mockClient(txs);
+  // GramHttpChain now holds a `clients` failover list read through a getter-only `client`
+  // (RPC failover), so inject the mock into clients[0] rather than the getter.
+  chain.clients = [mockClient(txs)];
   return chain;
 }
 

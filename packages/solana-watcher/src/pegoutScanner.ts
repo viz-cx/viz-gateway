@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   // Read-only VIZ node, used ONLY to confirm the release target exists before the
   // irreversible burn. A release to a non-existent account would never land and,
   // with PEG_OUT never refunding, would lose the user's wVIZ permanently.
-  const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
+  const viz = new VizJsChain(cfg.viz.nodeUrls, accounts);
 
   let running = true;
   const stop = () => {

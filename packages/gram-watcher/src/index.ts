@@ -2,6 +2,7 @@ import { buildGatewayAccounts, canonicalPegOut, CircuitBreaker, createStore, loa
 import { notifyStaff } from "@gateway/log";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { coldStartAnchorLt, GramHttpChain } from "./gramChain";
+import { resolveGramEndpoints } from "./orbsEndpoint";
 import { classifyPegOutDestination } from "./returnClassify";
 
 /** Durable scan-cursor name; value is the last-processed logical time (lt). */
@@ -22,8 +23,11 @@ async function main(): Promise<void> {
       "GRAM_JETTON_MINTER_ADDRESS is required (set it after deploying the wVIZ Jetton minter).",
     );
   }
+  // Resolve the TON endpoint failover list once at boot (optionally appending an Orbs
+  // fallback; fail-soft). Passed to every TON reader in this process.
+  const gramEndpoints = await resolveGramEndpoints(cfg.gram.endpoints, cfg.gram.orbsFallback);
   const chain = new GramHttpChain(
-    cfg.gram.endpoint,
+    gramEndpoints,
     cfg.gram.apiKey,
     cfg.gram.jettonMinterAddress,
     cfg.gram.gatewayJettonWallet,
@@ -35,7 +39,7 @@ async function main(): Promise<void> {
   );
   const store = createStore(cfg.storeUrl);
   const breaker = new CircuitBreaker(cfg.caps, store);
-  const vizChain = new VizJsChain(cfg.viz.nodeUrl, buildGatewayAccounts(cfg));
+  const vizChain = new VizJsChain(cfg.viz.nodeUrls, buildGatewayAccounts(cfg));
 
   // Last-processed logical time, resumed from the durable store so downtime never
   // silently skips burns (VG-06). Cold start (0) begins at the wallet tip's lt.
