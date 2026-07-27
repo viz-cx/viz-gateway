@@ -41,9 +41,10 @@ FEDERATION_MANIFEST=./federation.json
 FED_KEYSTORE=./keystore.mainnet.json
 # FED_KEYSTORE_PASSPHRASE=             # leave unset → prompts on start
 
-VIZ_NODE_URL=<YOUR OWN VIZ node>       # F2: must be yours, never mine
-GRAM_ENDPOINT=<YOUR OWN toncenter URL> # F2: must be yours, never mine
+VIZ_NODE_URL=<YOUR OWN VIZ node>       # F2: must be yours, never mine (comma-list OK)
+GRAM_ENDPOINT=<YOUR OWN toncenter URL> # F2: must be yours, never mine (comma-list OK)
 GRAM_API_KEY=<your toncenter key>
+# GRAM_ORBS_FALLBACK=true              # optional: append Orbs ton-access read fallback
 
 # public, fixed — copy verbatim:
 GRAM_JETTON_MINTER_ADDRESS=EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
@@ -51,7 +52,7 @@ GRAM_MULTISIG_ADDRESS=EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
 GRAM_GATEWAY_JETTON_WALLET=EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
 ```
 
-⚠️ *F2 independence:* `VIZ_NODE_URL` and `GRAM_ENDPOINT` MUST be your own nodes. Your signer re-reads every peg-in/peg-out from these before signing — if they point at mine, your independent check is gone.
+⚠️ *F2 independence:* `VIZ_NODE_URL` and `GRAM_ENDPOINT` MUST be your own nodes. Your signer re-reads every peg-in/peg-out from these before signing — if they point at mine, your independent check is gone. Both accept a comma/whitespace-separated list of *your* endpoints for read failover (the signer rotates to the next on a transient error) — every entry must still be one you control.
 
 ℹ️ *Port note:* the signer listens on *8101*, not 8090. If your VIZ node runs on the same box, it already owns 8090/8091 (its HTTP/WS RPC) — 8101 stays clear of it. Pick any free port if 8101 is taken; just keep `SIGNER_LISTEN` and `SIGNER_ADVERTISE_URL` on the same one.
 
