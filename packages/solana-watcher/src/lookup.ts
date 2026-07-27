@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   console.log(`[lookup] deposit program = ${cfg.solana.depositProgramId}`);
   const accounts = buildGatewayAccounts(cfg);
   const store = createStore(cfg.storeUrl);
-  const viz = new VizJsChain(cfg.viz.nodeUrl, accounts);
+  const viz = new VizJsChain(cfg.viz.nodeUrls, accounts);
   const [host, portStr] = cfg.solana.lookupListen.split(":");
   const port = Number.parseInt(portStr ?? "8110", 10);
 

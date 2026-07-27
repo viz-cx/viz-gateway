@@ -2,7 +2,15 @@ import { Address, TonClient, WalletContractV4, WalletContractV5R1, toNano } from
 import { Multisig, Order } from "@gateway/contracts-ton";
 import type { TransferRequest } from "@gateway/contracts-ton";
 import type { GramMintProposal } from "@gateway/common";
-import { buildMintTransfer, mintOrderCell, buildReturnTransfer, returnOrderCell } from "./gramChain";
+import {
+  buildMintTransfer,
+  mintOrderCell,
+  buildReturnTransfer,
+  returnOrderCell,
+  buildTonClients,
+  isTransientTonError,
+  TON_RETRY_BASE_MS,
+} from "./gramChain";
 import { keyPairFromMnemonic } from "./gramSign";
 
 /**
@@ -77,7 +85,19 @@ export interface GramApproverOpts {
 }
 
 export class GramApprover implements GramApprovalClient {
-  private readonly client: TonClient;
+  /**
+   * One TonClient per endpoint + a sticky index. READS (order/multisig state polls) go through
+   * tonCall(), which rotates to the next endpoint on a TRANSIENT error, so a toncenter blip
+   * during an approval doesn't stall the mint. SENDS re-open the wallet on the CURRENT
+   * (post-rotation) client at send time, so a message goes out on a healthy endpoint but is
+   * never itself rotate-retried (that could double-send); a failed send propagates and the
+   * coordinator re-drives, exactly as before. A single endpoint = one client = today's behaviour.
+   */
+  private readonly clients: TonClient[];
+  private idx = 0;
+  private get client(): TonClient {
+    return this.clients[this.idx]!;
+  }
   private readonly minter: Address;
   private readonly multisigAddr: Address;
   private readonly gatewayJettonWallet: Address;
@@ -86,7 +106,7 @@ export class GramApprover implements GramApprovalClient {
   private readonly orderValueNano: bigint;
 
   constructor(
-    endpoint: string,
+    endpoints: string | string[],
     apiKey: string,
     minterAddress: string,
     multisigAddress: string,
@@ -97,7 +117,7 @@ export class GramApprover implements GramApprovalClient {
     if (!minterAddress) throw new Error("GramApprover: minter address is required");
     if (!multisigAddress) throw new Error("GramApprover: GRAM_MULTISIG_ADDRESS is required");
     if (!mnemonic) throw new Error("GramApprover: GRAM_SIGNER_MNEMONIC is required to approve on-chain");
-    this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: 10000 });
+    this.clients = buildTonClients(Array.isArray(endpoints) ? endpoints : [endpoints], apiKey, 10000);
     this.minter = Address.parse(minterAddress);
     this.multisigAddr = Address.parse(multisigAddress);
     this.gatewayJettonWallet = gatewayJettonWallet;
@@ -110,8 +130,33 @@ export class GramApprover implements GramApprovalClient {
     await new Promise((r) => setTimeout(r, ms));
   }
 
+  /**
+   * Read helper with endpoint failover (reads only — never wraps a send). One pass through the
+   * endpoint ring on a transient error; a single endpoint = one attempt, unchanged from before.
+   */
+  private async tonCall<T>(fn: () => Promise<T>): Promise<T> {
+    const attempts = this.clients.length;
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (attempt === attempts || !isTransientTonError(err)) throw err;
+        this.idx = (this.idx + 1) % this.clients.length;
+        await this.sleep(TON_RETRY_BASE_MS * 2 ** (attempt - 1));
+      }
+    }
+    throw lastErr; // unreachable
+  }
+
   private async orderIsInited(orderAddr: Address): Promise<boolean> {
-    return (await this.client.getContractState(orderAddr)).state === "active";
+    return this.tonCall(async () => (await this.client.getContractState(orderAddr)).state === "active");
+  }
+
+  /** Current-endpoint sender bound to this operator's key; re-derived per send so it uses the live (post-rotation) client. */
+  private senderFor(wallet: WalletContractV4 | WalletContractV5R1, secretKey: Uint8Array) {
+    return this.client.open(wallet as WalletContractV4).sender(Buffer.from(secretKey));
   }
 
   async approveMint(proposal: GramMintProposal): Promise<GramApprovalReceipt> {
@@ -153,7 +198,9 @@ export class GramApprover implements GramApprovalClient {
       WalletContractV4.create({ workchain: 0, publicKey: pk }),
       WalletContractV5R1.create({ workchain: 0, publicKey: pk }),
     ];
-    const md = await this.client.open(Multisig.createFromAddress(this.multisigAddr)).getMultisigData();
+    const md = await this.tonCall(() =>
+      this.client.open(Multisig.createFromAddress(this.multisigAddr)).getMultisigData(),
+    );
     let wallet: WalletContractV4 | WalletContractV5R1 | undefined;
     let myIdx = -1;
     for (const cand of candidates) {
@@ -172,10 +219,6 @@ export class GramApprover implements GramApprovalClient {
     }
 
     const orderAddr = Address.parse(proposal.orderAddr);
-    // Union type: open() typing is pinned to one flavour but runtime dispatch hits
-    // the resolved instance; both expose the same sender()/send methods we use.
-    const openedWallet = this.client.open(wallet as WalletContractV4);
-    const sender = openedWallet.sender(Buffer.from(secretKey));
 
     // --- Open-or-wait (no single designated proposer; role fails over across operators) ---
     // Whichever live operator is contacted while the order is still absent opens it. The
@@ -188,9 +231,9 @@ export class GramApprover implements GramApprovalClient {
       // If our seqno is free, WE open the order. If it advanced (a foreign order took the
       // seqno) our pinned order will never appear — waitForOrderInited then fails closed
       // rather than minting at the wrong seqno (single-purpose gateway multisig).
-      const liveNext = await this.client
-        .open(Multisig.createFromAddress(this.multisigAddr))
-        .getOrderAddress(md.nextOrderSeqno);
+      const liveNext = await this.tonCall(() =>
+        this.client.open(Multisig.createFromAddress(this.multisigAddr)).getOrderAddress(md.nextOrderSeqno),
+      );
       if (liveNext.equals(orderAddr)) {
         const withConfig = new Multisig(this.multisigAddr, undefined, {
           threshold: Number(md.threshold),
@@ -199,10 +242,12 @@ export class GramApprover implements GramApprovalClient {
           allowArbitrarySeqno: false,
         });
         const expiration = Math.floor(Date.now() / 1000) + ORDER_TTL_SEC;
-        // approve_on_init=true → the opener's own approval counts immediately.
+        // approve_on_init=true → the opener's own approval counts immediately. Sent on the
+        // CURRENT (post-rotation) endpoint via senderFor; the send itself is NOT rotate-retried
+        // (a re-sent new_order at the same seqno would be a second open).
         await this.client
           .open(withConfig)
-          .sendNewOrder(sender, [transfer], expiration, this.orderValueNano, myIdx, true);
+          .sendNewOrder(this.senderFor(wallet, secretKey), [transfer], expiration, this.orderValueNano, myIdx, true);
         await this.waitForOrderInited(orderAddr, proposal.actionId);
         return { orderAddr: proposal.orderAddr, myIdx, role: "propose" };
       }
@@ -212,12 +257,15 @@ export class GramApprover implements GramApprovalClient {
     }
 
     // --- Approve (order exists) ---
-    const order = this.client.open(Order.createFromAddress(orderAddr));
-    const od = await order.getOrderData();
+    const od = await this.tonCall(() =>
+      this.client.open(Order.createFromAddress(orderAddr)).getOrderData(),
+    );
     if (od.executed) return { orderAddr: proposal.orderAddr, myIdx, role: "executed" };
     if (od.approvals[myIdx]) return { orderAddr: proposal.orderAddr, myIdx, role: "already" };
 
-    await order.sendApprove(sender, myIdx);
+    await this.client
+      .open(Order.createFromAddress(orderAddr))
+      .sendApprove(this.senderFor(wallet, secretKey), myIdx);
     await this.waitForApproval(orderAddr, myIdx, proposal.actionId);
     return { orderAddr: proposal.orderAddr, myIdx, role: "approve" };
   }
@@ -235,9 +283,12 @@ export class GramApprover implements GramApprovalClient {
   /** Bounded poll until this operator's approval bit is set (or the order already executed). */
   private async waitForApproval(orderAddr: Address, myIdx: number, actionId: string): Promise<void> {
     const deadline = Date.now() + this.maxWaitMs;
-    const order = this.client.open(Order.createFromAddress(orderAddr));
     while (Date.now() < deadline) {
-      const od = await order.getOrderData();
+      // Re-open per poll so a rotated (post-transient) client is used; the read itself
+      // also fails over via tonCall within a single poll.
+      const od = await this.tonCall(() =>
+        this.client.open(Order.createFromAddress(orderAddr)).getOrderData(),
+      );
       if (od.executed || od.approvals[myIdx]) return;
       await this.sleep(this.pollIntervalMs);
     }

@@ -29,6 +29,41 @@ import { Multisig, Order } from "@gateway/contracts-ton";
  * constructed round-trip (tools/gram-notification-spike.cjs).
  */
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Backoff base between failover attempts (500/1000/2000…ms); no sleep when there is only one endpoint. */
+export const TON_RETRY_BASE_MS = 500;
+
+/**
+ * True for TON/toncenter transport failures that failing over to another endpoint can clear:
+ * 5xx, 429 rate limits, socket resets/timeouts (incl. axios "timeout of Xms exceeded"), DNS
+ * blips, "socket hang up" / "network error". This is the class that latched recon on
+ * 2026-07-27 (toncenter ETIMEDOUT). Deliberately does NOT match a contract-level result
+ * (an "exit_code" / "unable to execute get method" is a genuine chain state), so a real
+ * not-found / executed read stays fast and fail-closed rather than churning the ring.
+ */
+export function isTransientTonError(err: unknown): boolean {
+  const msg = String((err as { message?: unknown })?.message ?? err);
+  return /\b(429|50[0234])\b|too many requests|bad gateway|service unavailable|gateway time-?out|time-?d?\s?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|socket hang up|network error/i.test(
+    msg,
+  );
+}
+
+/**
+ * Build one TonClient per endpoint for read-path failover. The GRAM_API_KEY is a toncenter
+ * credential, so apply it ONLY to toncenter-host endpoints; an Orbs / self-hosted liteserver
+ * entry gets no key (it would reject or ignore it). Every client shares the same per-call
+ * timeout. A single endpoint yields a single client — behaviour is unchanged from today.
+ */
+export function buildTonClients(endpoints: string[], apiKey: string, timeout: number): TonClient[] {
+  const list = endpoints.map((e) => e.trim()).filter(Boolean);
+  if (list.length === 0) throw new Error("GramHttpChain: at least one GRAM endpoint is required");
+  return list.map((endpoint) => {
+    const key = apiKey && /toncenter/i.test(endpoint) ? apiKey : undefined;
+    return new TonClient({ endpoint, apiKey: key, timeout });
+  });
+}
+
 // TEP-74 op codes. A jetton wallet RECEIVES internal_transfer (from the sender's
 // wallet) and EMITS transfer_notification (to its own owner). So the gateway's OWN
 // jetton wallet sees internal_transfer as its inbound message; transfer_notification
@@ -255,7 +290,17 @@ export async function paginateBurnsByLt(params: {
 }
 
 export class GramHttpChain implements RemoteChain<GramMintProposal> {
-  private readonly client: TonClient;
+  /**
+   * One TonClient per endpoint and the sticky index of the one currently in use. Reads go
+   * through tonCall(), which rotates to the next client on a TRANSIENT error so a single
+   * toncenter outage can't latch recon (2026-07-27). A single endpoint = a single client =
+   * exactly today's behaviour (one attempt, no rotation).
+   */
+  private readonly clients: TonClient[];
+  private idx = 0;
+  private get client(): TonClient {
+    return this.clients[this.idx]!;
+  }
   private readonly minter: Address;
   private readonly gatewayWallet: Address | null;
   private readonly multisigAddress: string;
@@ -264,7 +309,7 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
   private readonly maxScanPages: number;
 
   constructor(
-    endpoint: string,
+    endpoints: string | string[],
     apiKey: string,
     minterAddress: string,
     gatewayJettonWallet: string,
@@ -278,7 +323,7 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     // after which the strictly-newer forward scan skips it. See config.ts gram.rpcTimeoutMs.
     rpcTimeoutMs = 30_000,
   ) {
-    this.client = new TonClient({ endpoint, apiKey: apiKey || undefined, timeout: rpcTimeoutMs });
+    this.clients = buildTonClients(Array.isArray(endpoints) ? endpoints : [endpoints], apiKey, rpcTimeoutMs);
     this.minter = Address.parse(minterAddress);
     this.gatewayWallet = gatewayJettonWallet ? Address.parse(gatewayJettonWallet) : null;
     this.multisigAddress = multisigAddress;
@@ -288,38 +333,69 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     this.maxScanPages = Math.max(1, maxScanPages);
   }
 
+  /**
+   * Run a read against the current endpoint; on a TRANSIENT error rotate to the next client
+   * (sticky idx) and retry, one pass through the ring (attempts = endpoint count). A single
+   * endpoint means one attempt with no rotation — identical to the pre-failover behaviour, so
+   * the outer watcher/recon loop still owns the tick-level retry. Non-transient errors (a real
+   * contract read result, a bad address) throw immediately without rotating (fail-closed). The
+   * whole read runs inside fn(), so a multi-page scan re-runs from the top on a rotated client —
+   * safe because every read here is idempotent.
+   */
+  private async tonCall<T>(fn: () => Promise<T>): Promise<T> {
+    const attempts = this.clients.length;
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (attempt === attempts || !isTransientTonError(err)) throw err;
+        this.idx = (this.idx + 1) % this.clients.length;
+        await sleep(TON_RETRY_BASE_MS * 2 ** (attempt - 1));
+      }
+    }
+    throw lastErr; // unreachable
+  }
+
   async finalizedHeight(): Promise<number> {
-    return (await this.client.getMasterchainInfo()).latestSeqno;
+    return this.tonCall(async () => (await this.client.getMasterchainInfo()).latestSeqno);
   }
 
   async circulatingSupplyMilliViz(): Promise<bigint> {
-    const master = this.client.open(JettonMaster.create(this.minter));
-    const data = await master.getJettonData();
-    // Subtract wVIZ held INERT in the gateway's OWN jetton wallet. A peg-out TRANSFERS
-    // wVIZ into the gateway wallet (it is not burned), so that balance is non-circulating
-    // reserve — counting it as circulating makes recon see phantom under-backing (mirrors
-    // the site display fix 497f835: circulating = totalSupply − gatewayHeld). If the wallet
-    // read fails, fall back to raw totalSupply, which OVER-counts circulating → recon is
-    // stricter/fail-closed, never masking a genuine shortfall.
-    if (this.gatewayWallet) {
-      try {
-        const wallet = this.client.open(JettonWallet.create(this.gatewayWallet));
-        const held = await wallet.getBalance();
-        const circulating = data.totalSupply - held;
-        return circulating > 0n ? circulating : 0n;
-      } catch (err) {
-        console.warn(`[gram] gateway-held balance read failed; using raw totalSupply (stricter): ${String(err)}`);
+    return this.tonCall(async () => {
+      const master = this.client.open(JettonMaster.create(this.minter));
+      const data = await master.getJettonData();
+      // Subtract wVIZ held INERT in the gateway's OWN jetton wallet. A peg-out TRANSFERS
+      // wVIZ into the gateway wallet (it is not burned), so that balance is non-circulating
+      // reserve — counting it as circulating makes recon see phantom under-backing (mirrors
+      // the site display fix 497f835: circulating = totalSupply − gatewayHeld). If the wallet
+      // read fails, fall back to raw totalSupply, which OVER-counts circulating → recon is
+      // stricter/fail-closed, never masking a genuine shortfall. (A transient failure on the
+      // primary read is caught by tonCall and rotates to another endpoint BEFORE we reach this
+      // fallback, so the stricter path is only taken when the held read genuinely errors.)
+      if (this.gatewayWallet) {
+        try {
+          const wallet = this.client.open(JettonWallet.create(this.gatewayWallet));
+          const held = await wallet.getBalance();
+          const circulating = data.totalSupply - held;
+          return circulating > 0n ? circulating : 0n;
+        } catch (err) {
+          console.warn(`[gram] gateway-held balance read failed; using raw totalSupply (stricter): ${String(err)}`);
+        }
       }
-    }
-    return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
+      return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
+    });
   }
 
   /** Is the recipient's jetton-wallet already deployed? (else minting deploys it, costing gas). */
   async isDestinationProvisioned(recipient: string): Promise<boolean> {
-    const master = this.client.open(JettonMaster.create(this.minter));
-    const jettonWallet = await master.getWalletAddress(Address.parse(recipient));
-    const state = await this.client.getContractState(jettonWallet);
-    return state.state === "active";
+    return this.tonCall(async () => {
+      const master = this.client.open(JettonMaster.create(this.minter));
+      const jettonWallet = await master.getWalletAddress(Address.parse(recipient));
+      const state = await this.client.getContractState(jettonWallet);
+      return state.state === "active";
+    });
   }
 
   /**
@@ -360,9 +436,12 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
    */
   async newestLt(): Promise<number> {
     if (!this.gatewayWallet) return 0;
-    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: 1 });
-    const tip = txs[0];
-    return tip ? Number(tip.lt) : 0;
+    const wallet = this.gatewayWallet;
+    return this.tonCall(async () => {
+      const txs = await this.client.getTransactions(wallet, { limit: 1 });
+      const tip = txs[0];
+      return tip ? Number(tip.lt) : 0;
+    });
   }
 
   /**
@@ -383,24 +462,29 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
   ): Promise<{ burns: RemoteBurn[]; newestFinalLt: number; drained: boolean }> {
     if (!this.gatewayWallet) return { burns: [], newestFinalLt: fromLt, drained: true };
     const wallet = this.gatewayWallet;
-    const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
-    const height = (await this.client.getMasterchainInfo()).latestSeqno;
-    const res = await paginateBurnsByLt({
-      fromLt: BigInt(fromLt),
-      cutoff,
-      height,
-      limit: this.maxTransactions,
-      maxScanPages: this.maxScanPages,
-      fetchPage: (anchor) =>
-        this.client.getTransactions(
-          wallet,
-          anchor
-            ? { limit: this.maxTransactions, lt: anchor.lt, hash: anchor.hash, inclusive: true }
-            : { limit: this.maxTransactions },
-        ),
-      toBurn: (tx, h) => this.burnFromTx(tx, cutoff, h),
+    return this.tonCall(async () => {
+      const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
+      const height = (await this.client.getMasterchainInfo()).latestSeqno;
+      const res = await paginateBurnsByLt({
+        fromLt: BigInt(fromLt),
+        cutoff,
+        height,
+        limit: this.maxTransactions,
+        maxScanPages: this.maxScanPages,
+        // Pin to THIS attempt's client so a whole page walk uses one endpoint; a transient
+        // failure mid-walk rejects out to tonCall, which rotates and re-runs the walk from
+        // fromLt (idempotent).
+        fetchPage: (anchor) =>
+          this.client.getTransactions(
+            wallet,
+            anchor
+              ? { limit: this.maxTransactions, lt: anchor.lt, hash: anchor.hash, inclusive: true }
+              : { limit: this.maxTransactions },
+          ),
+        toBurn: (tx, h) => this.burnFromTx(tx, cutoff, h),
+      });
+      return { burns: res.burns, newestFinalLt: Number(res.newestFinalLt), drained: res.drained };
     });
-    return { burns: res.burns, newestFinalLt: Number(res.newestFinalLt), drained: res.drained };
   }
 
   /**
@@ -426,14 +510,17 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
    */
   async getBurn(sourceId: string): Promise<RemoteBurn | null> {
     if (!this.gatewayWallet) return null;
-    const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
-    const txs = await this.client.getTransactions(this.gatewayWallet, { limit: this.maxTransactions });
-    for (const tx of txs) {
-      if (tx.hash().toString("hex") !== sourceId) continue;
-      const height = (await this.client.getMasterchainInfo()).latestSeqno;
-      return this.burnFromTx(tx, cutoff, height);
-    }
-    return null;
+    const wallet = this.gatewayWallet;
+    return this.tonCall(async () => {
+      const cutoff = Math.floor(Date.now() / 1000) - this.finalityBufferSec;
+      const txs = await this.client.getTransactions(wallet, { limit: this.maxTransactions });
+      for (const tx of txs) {
+        if (tx.hash().toString("hex") !== sourceId) continue;
+        const height = (await this.client.getMasterchainInfo()).latestSeqno;
+        return this.burnFromTx(tx, cutoff, height);
+      }
+      return null;
+    });
   }
 
   /**
@@ -447,10 +534,12 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
    */
   async nextOrderAddress(): Promise<{ orderAddr: string; seqno: string }> {
     if (!this.multisigAddress) throw new Error("GRAM_MULTISIG_ADDRESS is required for nextOrderAddress");
-    const dataMultisig = this.client.open(Multisig.createFromAddress(Address.parse(this.multisigAddress)));
-    const data = await dataMultisig.getMultisigData();
-    const orderAddr = await dataMultisig.getOrderAddress(data.nextOrderSeqno);
-    return { orderAddr: orderAddr.toString(), seqno: data.nextOrderSeqno.toString() };
+    return this.tonCall(async () => {
+      const dataMultisig = this.client.open(Multisig.createFromAddress(Address.parse(this.multisigAddress)));
+      const data = await dataMultisig.getMultisigData();
+      const orderAddr = await dataMultisig.getOrderAddress(data.nextOrderSeqno);
+      return { orderAddr: orderAddr.toString(), seqno: data.nextOrderSeqno.toString() };
+    });
   }
 
   /**
@@ -462,8 +551,10 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
    * a SECOND order.
    */
   async orderExists(orderAddr: string): Promise<boolean> {
-    const state = await this.client.getContractState(Address.parse(orderAddr));
-    return state.state === "active";
+    return this.tonCall(async () => {
+      const state = await this.client.getContractState(Address.parse(orderAddr));
+      return state.state === "active";
+    });
   }
 
   /**
@@ -494,15 +585,17 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     orderAddr: string,
   ): Promise<{ inited: boolean; executed: boolean; approvalsNum: number; threshold: number }> {
     const addr = Address.parse(orderAddr);
-    const state = await this.client.getContractState(addr);
-    if (state.state !== "active") return { inited: false, executed: false, approvalsNum: 0, threshold: 0 };
-    const od = await this.client.open(Order.createFromAddress(addr)).getOrderData();
-    return {
-      inited: Boolean(od.inited),
-      executed: Boolean(od.executed),
-      approvalsNum: Number(od.approvals_num ?? 0),
-      threshold: Number(od.threshold ?? 0),
-    };
+    return this.tonCall(async () => {
+      const state = await this.client.getContractState(addr);
+      if (state.state !== "active") return { inited: false, executed: false, approvalsNum: 0, threshold: 0 };
+      const od = await this.client.open(Order.createFromAddress(addr)).getOrderData();
+      return {
+        inited: Boolean(od.inited),
+        executed: Boolean(od.executed),
+        approvalsNum: Number(od.approvals_num ?? 0),
+        threshold: Number(od.threshold ?? 0),
+      };
+    });
   }
 
   /**
@@ -518,7 +611,7 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
 
   /** Native TON balance of an address, in nano-TON. Used by the recon reserve monitor. */
   async tonBalanceNano(address: string): Promise<bigint> {
-    return this.client.getBalance(Address.parse(address));
+    return this.tonCall(async () => this.client.getBalance(Address.parse(address)));
   }
 
   /**

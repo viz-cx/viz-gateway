@@ -101,12 +101,20 @@ env:
     COORDINATOR_LISTEN: 0.0.0.0:8100
     COORDINATOR_URL: https://gateway.viz.cx
     # --- VIZ chain (home: lock/release). Read-only for the keyless coordinator side. ---
-    VIZ_NODE_URL: https://node.viz.cx
+    # Comma-separated failover list: recon (which lives here) rotates onto the next node on a
+    # TRANSIENT RPC error, so a single node blip can't latch the "cannot verify backing" pause
+    # (2026-07-27). All three verified in sync via database_api/get_dynamic_global_properties.
+    VIZ_NODE_URL: https://node.viz.cx,https://api.viz.world,https://mirror.viz.world
     VIZ_GATEWAY_ACCOUNT_GRAM: gram.gate
     VIZ_GATEWAY_ACCOUNT_SOLANA: solana.gate    # dormant this launch, but the registry requires it
     FEES_GATE_ACCOUNT: fees.gate
     # --- GRAM (TON) runtime — mainnet wVIZ minter + 2-of-3 multisig ---
+    # GRAM_ENDPOINT is a comma-separated failover list (keyed toncenter first). GRAM_ORBS_FALLBACK
+    # additionally resolves an Orbs ton-access decentralized v2 endpoint at boot and appends it as
+    # a fallback (verified live first; fail-soft — a bad resolve just keeps the toncenter entry).
+    # This is what gives the TON backing read (the 2026-07-27 false-pause source) a second provider.
     GRAM_ENDPOINT: https://toncenter.com/api/v2/jsonRPC
+    GRAM_ORBS_FALLBACK: "true"
     GRAM_JETTON_MINTER_ADDRESS: EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
     GRAM_MULTISIG_ADDRESS: EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
     GRAM_GATEWAY_JETTON_WALLET: EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy

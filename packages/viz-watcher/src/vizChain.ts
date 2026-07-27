@@ -83,6 +83,13 @@ export const RELEASE_CONFIRM_POLLS = 20;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** Normalize the node argument to a non-empty list; a bare string becomes a singleton. */
+function normalizeNodeUrls(nodeUrls: string | string[]): string[] {
+  const list = (Array.isArray(nodeUrls) ? nodeUrls : [nodeUrls]).map((u) => u.trim()).filter(Boolean);
+  if (list.length === 0) throw new Error("VizJsChain: at least one node URL is required");
+  return list;
+}
+
 /**
  * Bound the per-call block scan so a watcher tick can't accidentally scan the
  * chain. Exported so the watcher advances its cursor only to what a single call
@@ -133,26 +140,6 @@ function callOnce<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promis
   });
 }
 
-/**
- * Every VIZ read/broadcast goes through here: one attempt (callOnce) plus bounded
- * retry on transient failures with exponential backoff (500/1000/2000ms). Safe for
- * the broadcast path too — the release id is deterministic and confirmReleaseByTxId
- * dedupes, so a re-sent transfer is a no-op on the chain.
- */
-async function call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= RPC_MAX_ATTEMPTS; attempt++) {
-    try {
-      return await callOnce(exec);
-    } catch (err) {
-      lastErr = err;
-      if (attempt === RPC_MAX_ATTEMPTS || !isTransientRpcError(err)) throw err;
-      await sleep(RPC_RETRY_BASE_MS * 2 ** (attempt - 1));
-    }
-  }
-  throw lastErr; // unreachable: the loop either returns or throws on the last attempt
-}
-
 /** "189.027 VIZ" -> 189027n (integer milli-VIZ). VIZ assets always have 3 decimals. */
 export function vizToMilli(amount: string): bigint {
   const numeric = amount.trim().split(" ")[0] ?? "0";
@@ -172,19 +159,62 @@ export function milliToViz(milli: bigint): string {
 
 export class VizJsChain implements VizChain {
   /**
+   * The node list this instance fails over across, and the sticky index of the node
+   * currently selected on the (process-global) viz singleton. Idempotent reads and the
+   * deterministic-id broadcast are safe to retry on a rotated node.
+   */
+  private readonly nodeUrls: string[];
+  private idx = 0;
+
+  /**
+   * @param nodeUrls  one node URL or a failover list (VIZ_NODE_URL, comma/whitespace split).
+   *   On a TRANSIENT RPC error `call()` advances to the next node (viz.config is a process-
+   *   global singleton, so failover re-sets it per attempt rather than holding N instances)
+   *   and retries; the index is sticky across calls so a healthy node keeps serving once found.
+   *   A single URL preserves today's behaviour exactly (4 attempts, same node).
    * @param memoWifs  per-gate-account memo private keys (WIF), keyed by account name,
    *   for decrypting `#`-encrypted peg-in memos. Omit (or leave empty) to keep the
    *   historical plaintext-only behaviour — an encrypted memo then fails validation
    *   and auto-refunds. MUST match across all operators (see resolveMemoDestination).
    */
   constructor(
-    nodeUrl: string,
+    nodeUrls: string | string[],
     private readonly accounts: GatewayAccounts,
     private readonly memoWifs: Record<string, string> = {},
   ) {
+    this.nodeUrls = normalizeNodeUrls(nodeUrls);
     // viz-js-lib selects http/ws transport from the "websocket" config value;
     // it accepts http(s):// and ws(s):// URLs alike.
-    viz.config.set("websocket", nodeUrl);
+    viz.config.set("websocket", this.nodeUrls[0]!);
+  }
+
+  /**
+   * Every VIZ read/broadcast goes through here: one attempt (callOnce) plus bounded retry on
+   * transient failures with exponential backoff (500/1000/2000ms). On a transient failure that
+   * is not the final attempt, rotate to the NEXT node in the list before retrying — a single
+   * node's 5xx/timeout/rate-limit spike then fails over instead of latching (the recon
+   * false-pause that motivated this). Rotation touches the process-global viz.config singleton;
+   * concurrent in-flight reads on this instance share it, which is benign for idempotent reads
+   * and the deterministic-id broadcast (confirmReleaseByTxId dedupes a re-sent transfer).
+   * Non-transient (application) errors still throw immediately WITHOUT rotating — fail-closed,
+   * exactly as before, so a genuine "unknown transaction" stays fast.
+   */
+  private async call<T>(exec: (cb: (err: unknown, res: T) => void) => void): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= RPC_MAX_ATTEMPTS; attempt++) {
+      try {
+        return await callOnce(exec);
+      } catch (err) {
+        lastErr = err;
+        if (attempt === RPC_MAX_ATTEMPTS || !isTransientRpcError(err)) throw err;
+        if (this.nodeUrls.length > 1) {
+          this.idx = (this.idx + 1) % this.nodeUrls.length;
+          viz.config.set("websocket", this.nodeUrls[this.idx]!);
+        }
+        await sleep(RPC_RETRY_BASE_MS * 2 ** (attempt - 1));
+      }
+    }
+    throw lastErr; // unreachable: the loop either returns or throws on the last attempt
   }
 
   /**
@@ -197,7 +227,7 @@ export class VizJsChain implements VizChain {
   }
 
   async lastIrreversibleBlock(): Promise<number> {
-    const gp = await call<DynamicGlobalProperties>((cb) =>
+    const gp = await this.call<DynamicGlobalProperties>((cb) =>
       viz.api.getDynamicGlobalProperties(cb),
     );
     return gp.last_irreversible_block_num;
@@ -210,7 +240,7 @@ export class VizJsChain implements VizChain {
 
     const deposits: VizDeposit[] = [];
     for (let b = start; b <= end; b++) {
-      const ops = await call<OpWrapper[]>((cb) => viz.api.getOpsInBlock(b, false, cb));
+      const ops = await this.call<OpWrapper[]>((cb) => viz.api.getOpsInBlock(b, false, cb));
       for (const w of ops ?? []) {
         if (w.virtual_op !== 0) continue; // skip virtual ops (rewards etc.)
         if (w.trx_id === ZERO_TRX) continue; // belt-and-suspenders
@@ -265,7 +295,7 @@ export class VizJsChain implements VizChain {
   async getDeposit(trxId: string, opIndex: number): Promise<VizDeposit | null> {
     let tx: AnnotatedTransaction | null;
     try {
-      tx = await call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(trxId, cb));
+      tx = await this.call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(trxId, cb));
     } catch (err) {
       // operation_history returns an error for an unknown trx id; treat as not-found
       // (fail-closed). A transport failure also lands here and correctly refuses.
@@ -323,7 +353,7 @@ export class VizJsChain implements VizChain {
   }
 
   async gatewayBalanceMilliViz(account: string): Promise<bigint> {
-    const accounts = await call<Account[]>((cb) => viz.api.getAccounts([account], cb));
+    const accounts = await this.call<Account[]>((cb) => viz.api.getAccounts([account], cb));
     const acct = accounts?.[0];
     if (!acct) return 0n;
     return vizToMilli(acct.balance);
@@ -332,7 +362,7 @@ export class VizJsChain implements VizChain {
   /** getAccounts returns only existing accounts, so a present row means it exists. */
   async accountExists(name: string): Promise<boolean> {
     if (!name) return false;
-    const accounts = await call<Account[]>((cb) => viz.api.getAccounts([name], cb));
+    const accounts = await this.call<Account[]>((cb) => viz.api.getAccounts([name], cb));
     return Boolean(accounts?.[0]);
   }
 
@@ -345,7 +375,7 @@ export class VizJsChain implements VizChain {
    * exactly the signatures whose keys are in key_auths, up to weight_threshold.
    */
   async activeAuthority(account: string): Promise<VizAuthority> {
-    const accounts = await call<Account[]>((cb) => viz.api.getAccounts([account], cb));
+    const accounts = await this.call<Account[]>((cb) => viz.api.getAccounts([account], cb));
     const auth = accounts?.[0]?.active_authority;
     if (!auth || !auth.weight_threshold || auth.weight_threshold < 1) {
       throw new Error(`activeAuthority(${account}): no active authority found`);
@@ -362,7 +392,7 @@ export class VizJsChain implements VizChain {
     action: CanonicalAction,
     gatewayAccount: string,
   ): Promise<VizReleaseProposal> {
-    const gp = await call<DynamicGlobalProperties>((cb) =>
+    const gp = await this.call<DynamicGlobalProperties>((cb) =>
       viz.api.getDynamicGlobalProperties(cb),
     );
     // TaPoS: low 16 bits of head block number + bytes 4..8 of the head block id.
@@ -397,7 +427,7 @@ export class VizJsChain implements VizChain {
   async confirmReleaseByTxId(txid: string): Promise<{ txid: string } | null> {
     if (!txid) return null;
     try {
-      const tx = await call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(txid, cb));
+      const tx = await this.call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(txid, cb));
       return tx ? { txid } : null;
     } catch {
       // operation_history errors for an unknown id; treat as not-found (never broadcast).
@@ -435,7 +465,7 @@ export class VizJsChain implements VizChain {
     const txid = releaseTxId(proposal); // deterministic; equals the on-chain id
     let broadcastErr = "";
     try {
-      await call<BroadcastResult>((cb) => viz.api.broadcastTransaction(tx, cb));
+      await this.call<BroadcastResult>((cb) => viz.api.broadcastTransaction(tx, cb));
     } catch (err) {
       // An async broadcast can still land even when the HTTP call errors (proxy hiccup,
       // or a duplicate-in-pool rejection after a prior attempt already queued it), so we

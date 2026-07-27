@@ -4,6 +4,7 @@ import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfi
 import { corsHeadersFor, serializeFees, loadAllowedOrigins, serveStatic } from "./http";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
+import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { Orchestrator } from "./orchestrator";
 import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, GramReturnBroadcaster, VizReleaseBroadcaster } from "./adapters";
@@ -47,8 +48,10 @@ async function main(): Promise<void> {
     registry.live().map((r) => new HttpSignerClient(r.operatorId, r.url, cfg.coordinator.signerApproveTimeoutMs));
 
   const accounts = buildGatewayAccounts(cfg);
-  const vizChain = new VizJsChain(cfg.viz.nodeUrl, accounts);
+  const vizChain = new VizJsChain(cfg.viz.nodeUrls, accounts);
   const vizBroadcaster = new VizReleaseBroadcaster(vizChain, accounts, store);
+  // TON endpoint failover list (optionally + an Orbs fallback; fail-soft), resolved once at boot.
+  const gramEndpoints = await resolveGramEndpoints(cfg.gram.endpoints, cfg.gram.orbsFallback);
 
   // GRAM peg-in fee is a static, gas-derived floor (see loadConfig / FEE_GRAM_VIZ_PER_TON).
   // No live quotes, no median, no fallback chain — every operator derives the same net.
@@ -61,7 +64,7 @@ async function main(): Promise<void> {
   // when any single operator is down.
   const gramChain = cfg.gram.jettonMinterAddress
     ? new GramHttpChain(
-        cfg.gram.endpoint,
+        gramEndpoints,
         cfg.gram.apiKey,
         cfg.gram.jettonMinterAddress,
         cfg.gram.gatewayJettonWallet,
