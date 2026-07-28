@@ -32,12 +32,58 @@ test("empty getAccounts throws (indeterminate) — never a phantom 0 balance", a
   );
 });
 
+test("null/undefined getAccounts result also throws (not just [])", async () => {
+  const chain = new VizJsChain("https://node.example", accounts);
+  for (const bad of [null, undefined]) {
+    await withGetAccounts(
+      (_names, cb) => cb(null, bad),
+      async () => {
+        await assert.rejects(
+          () => chain.gatewayBalanceMilliViz("gram.gate"),
+          /gram\.gate.*not found|empty getAccounts/i,
+        );
+      },
+    );
+  }
+});
+
 test("present account returns its balance in mVIZ", async () => {
   const chain = new VizJsChain("https://node.example", accounts);
   await withGetAccounts(
     (_names, cb) => cb(null, [{ name: "gram.gate", balance: "43587.408 VIZ" }]),
     async () => {
       assert.equal(await chain.gatewayBalanceMilliViz("gram.gate"), 43587408n);
+    },
+  );
+});
+
+// A genuine on-chain zero (account exists, balance "0.000 VIZ") is NOT the empty-read case —
+// it must pass through as 0n so a real drained backing account is still caught by recon.
+test("present account with a real 0.000 VIZ balance returns 0n (not a throw)", async () => {
+  const chain = new VizJsChain("https://node.example", accounts);
+  await withGetAccounts(
+    (_names, cb) => cb(null, [{ name: "gram.gate", balance: "0.000 VIZ" }]),
+    async () => {
+      assert.equal(await chain.gatewayBalanceMilliViz("gram.gate"), 0n);
+    },
+  );
+});
+
+// Sibling read on the SAME empty getAccounts shape: accountExists deliberately treats "empty" as
+// "does not exist" (→ false), which is its fail-closed contract for peg-out lookups. Lock that the
+// backing-balance fix did NOT change this different-by-design handling.
+test("accountExists keeps its empty->false contract (fail-closed, unchanged)", async () => {
+  const chain = new VizJsChain("https://node.example", accounts);
+  await withGetAccounts(
+    (_names, cb) => cb(null, []),
+    async () => {
+      assert.equal(await chain.accountExists("nope.acct"), false);
+    },
+  );
+  await withGetAccounts(
+    (_names, cb) => cb(null, [{ name: "gram.gate", balance: "1.000 VIZ" }]),
+    async () => {
+      assert.equal(await chain.accountExists("gram.gate"), true);
     },
   );
 });
