@@ -8,7 +8,7 @@ const base: OutboxRecord = {
   recipient: "ghost", sender: "EQ" + "B".repeat(46),
   amountMilliViz: 100000n, feeMilliViz: 0n, digest: "PARENTDIGEST",
   status: "HELD", attempts: 0, lastError: "RETURN_INVALID_DEST",
-  txid: null, createdAt: 0, updatedAt: 0, nextAttemptAt: 0, parentId: null,
+  txid: null, createdAt: 0, updatedAt: 0, nextAttemptAt: 0, parentId: null, blockNum: null,
 };
 const ctx = { feesGateAccount: "fees.gate", sweepAmountMilliViz: 0n, refundFeeMilliViz: 5000n };
 

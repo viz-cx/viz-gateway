@@ -112,6 +112,61 @@ match as sev-1). See `docs/AUDIT.md §F2` and `RUNBOOK.md §5 F2`.
 
 ---
 
+## 2a. Block-log retention (F2 must survive operation_history pruning)
+
+The signer's F2 re-read (`VizChain.getDeposit`) first asks `operation_history.get_transaction`.
+That index is **pruned** once a deposit's block ages past a node's retention. A deposit ingested
+late (through an outage/pause window) can therefore be un-re-readable by the time its refund/mint
+is signed — the 2026-07-26 `kristi` 100 VIZ incident, where both signers rejected every retry with
+`SourceMismatchError … not found or not yet irreversible`.
+
+The fix: `getDeposit` falls back to the raw **block log** (`database_api.get_block(blockNum)`),
+which survives that pruning, and recomputes the graphene trx id to bind it trustlessly (the block
+number is an UNTRUSTED hint — each signer reads the block from its OWN node and matches the
+recomputed id, so a wrong hint just fails closed). **Requirement:** at least one entry in every
+signer's `VIZ_NODE_URL` MUST retain the full block log. As of 2026-07-28:
+
+- ✅ `https://api.viz.world` — serves `get_block` for old blocks (keep it in every list).
+- ❌ `https://node.viz.cx`, `https://mirror.viz.world` — `get_block` returns 0 transactions for
+  aged blocks (block log limited). They are fine as failover but MUST NOT be the only entry.
+
+If the block log is ever pruned on ALL reachable nodes too, a true archive node is required.
+Prove reachability with `node tools/refund-getblock-spike.cjs <nodeUrl> <blockNum> <trxId>`.
+
+## 2c. Resolving a stuck peg-in (edit a file, pull, restart — never hand-sign)
+
+For a deposit that predates the `block_num` column (so the DB has no hint) OR any peg-in wedged by
+pruned history, use the operator directive file `config/source-hints.json` — read ONLY by the
+coordinator. Each entry is keyed by the parent PEG_IN action id `"<trxIdHex>:<opIndex>"` (lowercase;
+a pasted UPPERCASE explorer id is normalized):
+
+```json
+{ "779ffb…:0": { "sourceBlockNum": 81976371, "resolution": "mint" } }
+```
+
+- `sourceBlockNum` — supplies the block-log hint when the DB `block_num` is NULL (DB value wins when
+  present). Trustless: still verified own-node.
+- `resolution: "mint"` — redirect a stuck refund to COMPLETE the peg-in (full wVIZ) instead of
+  refunding. Omit (or `"refund"`) for today's default. The directive selects mint-vs-refund ONLY;
+  the recipient is memo-derived and re-validated by every signer, so operators cannot redirect funds.
+
+**Procedure (the mint redirect mutates outbox state, so it runs ONLY while paused):**
+1. Edit `config/source-hints.json`, commit, and ensure every signer's `VIZ_NODE_URL` includes an
+   archive node (§2a).
+2. **Pause** the gateway (set `gateway_state.paused=1`). This stops the dispatcher and makes signers
+   refuse — no delivery/signing can race the redirect.
+3. Deploy/pull the new code to the coordinator + all signers and restart. On boot the coordinator
+   runs the redirect **once** (idempotent marker): it abandons the stuck `:refund` child and
+   re-drives the parent PEG_IN to `QUEUED`. It **refuses to mint** if the refund already
+   delivered/in-flight (never double-pays).
+4. **Unpause.** The dispatcher re-drives the parent → the mint now validates via the block-log path
+   and completes. The stuck `:refund` child is `FAILED` (never delivered).
+
+Future deposits self-heal automatically — `block_num` is persisted at enqueue, so `getDeposit`
+always has a hint and no file entry is needed.
+
+---
+
 ## 2b. Run every command from the repo root (relative paths)
 
 `.env.mainnet` uses **relative** paths — `FEDERATION_MANIFEST=./federation.json`,

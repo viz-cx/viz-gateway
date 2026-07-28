@@ -6,7 +6,7 @@ import type { OutboxRecord } from "@gateway/common";
 const base: OutboxRecord = {
   id: "d1", direction: "PEG_IN", remoteChain: "GRAM", recipient: "", sender: "alice",
   amountMilliViz: 100000n, feeMilliViz: 0n, digest: "x", status: "REFUNDING",
-  attempts: 0, lastError: null, txid: null, createdAt: 0, updatedAt: 0, nextAttemptAt: 0, parentId: null,
+  attempts: 0, lastError: null, txid: null, createdAt: 0, updatedAt: 0, nextAttemptAt: 0, parentId: null, blockNum: null,
 };
 
 test("refundAmount deducts the fee, floored at 0", () => {

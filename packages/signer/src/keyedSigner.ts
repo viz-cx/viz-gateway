@@ -4,6 +4,7 @@ import type {
   GatewayFeeConfig,
   Signer,
   SolanaMintProposal,
+  SourceHint,
   GramMintProposal,
   VizReleaseProposal,
 } from "@gateway/common";
@@ -41,7 +42,7 @@ import { signMint } from "@gateway/solana-watcher/dist/solanaSign";
  * `DISABLED_SOURCE_VALIDATION` — a forgotten argument throws rather than silently
  * signing unvalidated.
  */
-export type SourceValidator = (action: CanonicalAction) => Promise<void>;
+export type SourceValidator = (action: CanonicalAction, hint?: SourceHint) => Promise<void>;
 
 /**
  * The Solana accounts this operator trusts, read from its OWN config. Pinning these
@@ -102,14 +103,14 @@ export class KeyedSigner implements Signer {
   }
 
   /** F2 gate: independently re-validate the source event before signing. */
-  private async assertSource(action: CanonicalAction): Promise<void> {
+  private async assertSource(action: CanonicalAction, hint?: SourceHint): Promise<void> {
     if (!this.validateSource) {
       console.warn(
         `[signer] SOURCE VALIDATION DISABLED for ${action.id}: explicit test-only sentinel — NEVER production.`,
       );
       return;
     }
-    await this.validateSource(action);
+    await this.validateSource(action, hint);
   }
 
   /** Re-derive the expected NET for a PEG_IN and assert the proposal matches. */
@@ -130,9 +131,9 @@ export class KeyedSigner implements Signer {
     }
   }
 
-  async signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval> {
+  async signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal, hint?: SourceHint): Promise<Approval> {
     if (action.direction !== "PEG_OUT") throw new Error("signVizRelease expects a PEG_OUT action");
-    await this.assertSource(action);
+    await this.assertSource(action, hint);
     if (this.accounts) {
       if (!action.remoteChain) throw new Error(`release ${action.id} missing remoteChain — cannot verify from-account`);
       const expectedFrom = this.accounts.accountFor(action.remoteChain);
@@ -153,9 +154,9 @@ export class KeyedSigner implements Signer {
     return { actionId: action.id, operatorId: this.operatorId, signature };
   }
 
-  async approveGramMint(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval> {
+  async approveGramMint(action: CanonicalAction, proposal: GramMintProposal, hint?: SourceHint): Promise<Approval> {
     if (action.direction !== "PEG_IN") throw new Error("approveGramMint expects a PEG_IN action");
-    await this.assertSource(action);
+    await this.assertSource(action, hint);
     if (proposal.toAddress !== action.recipient) {
       throw new Error(`proposal.toAddress (${proposal.toAddress}) != action.recipient (${action.recipient})`);
     }
@@ -172,9 +173,9 @@ export class KeyedSigner implements Signer {
     return { actionId: action.id, operatorId: this.operatorId, signature: encodeReceipt(receipt) };
   }
 
-  async approveGramReturn(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval> {
+  async approveGramReturn(action: CanonicalAction, proposal: GramMintProposal, hint?: SourceHint): Promise<Approval> {
     if (action.direction !== "GRAM_RETURN") throw new Error("approveGramReturn expects a GRAM_RETURN action");
-    await this.assertSource(action); // validateGramReturn: dest re-check + recipient + exact amount + digest
+    await this.assertSource(action, hint); // validateGramReturn: dest re-check + recipient + exact amount + digest
     if (proposal.toAddress !== action.recipient) {
       throw new Error(`proposal.toAddress (${proposal.toAddress}) != action.recipient (${action.recipient})`);
     }
@@ -188,9 +189,9 @@ export class KeyedSigner implements Signer {
     return { actionId: action.id, operatorId: this.operatorId, signature: encodeReceipt(receipt) };
   }
 
-  async approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval> {
+  async approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal, hint?: SourceHint): Promise<Approval> {
     if (action.direction !== "PEG_IN") throw new Error("approveSolanaMint expects a PEG_IN action");
-    await this.assertSource(action);
+    await this.assertSource(action, hint);
     // Pin the Solana accounts to this operator's own config: a compromised coordinator
     // must not be able to redirect the mint to an attacker-controlled mint / authority
     // multisig / nonce account. Skipped only when unconfigured (spikes).

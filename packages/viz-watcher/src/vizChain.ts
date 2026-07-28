@@ -4,7 +4,13 @@ import viz, {
   type BroadcastResult,
   type DynamicGlobalProperties,
   type OpWrapper,
+  type VizBlock,
+  type VizTransaction,
 } from "viz-js-lib";
+// Internal serializer + hash: recompute a transaction's graphene id from the block-log
+// tx (get_block carries no transaction_ids). git-pinned; paths stable for this version.
+import { transaction as txSerializer } from "viz-js-lib/lib/auth/serializer/src/operations";
+import { sha256 } from "viz-js-lib/lib/auth/ecc/src/hash";
 import {
   isValidRemoteAddress,
   GatewayAccounts,
@@ -108,6 +114,27 @@ export function assertTransactionIdMatches(returnedId: string | undefined, reque
   if (!returnedId || returnedId !== requestedId) {
     throw new Error(`getDeposit(${requestedId}): node returned transaction_id "${returnedId ?? ""}" != requested ${requestedId}`);
   }
+}
+
+/**
+ * The graphene transaction id: sha256 of the serialized UNSIGNED transaction, first
+ * 20 bytes, hex. `get_block` returns each transaction's operations+signatures but NO
+ * transaction_id (transaction_ids is null), so to bind a block-log tx to a requested
+ * trxId the signer MUST recompute it here — otherwise the coordinator would control the
+ * trxId↔transaction mapping (a real transfer could be re-pointed to a fabricated trxId).
+ * The `transaction` serializer excludes signatures; chain_id is prepended ONLY for signing
+ * (Auth.signTransaction), NOT for the id. PROVEN 2026-07-28 against the incident tx
+ * (golden vector in the unit test) and live via tools/refund-getblock-spike.cjs.
+ */
+export function computeTrxId(tx: VizTransaction): string {
+  const buf = txSerializer.toBuffer({
+    ref_block_num: tx.ref_block_num,
+    ref_block_prefix: tx.ref_block_prefix,
+    expiration: tx.expiration,
+    operations: tx.operations,
+    extensions: tx.extensions ?? [],
+  });
+  return sha256(buf).subarray(0, 20).toString("hex");
 }
 
 /**
@@ -292,27 +319,113 @@ export class VizJsChain implements VizChain {
    * structural violation (no such op, or the op is not a transfer to the gateway),
    * which signals a coordinator referencing a source event that doesn't match.
    */
-  async getDeposit(trxId: string, opIndex: number): Promise<VizDeposit | null> {
-    let tx: AnnotatedTransaction | null;
+  async getDeposit(trxId: string, opIndex: number, blockNumHint?: number): Promise<VizDeposit | null> {
+    // PRIMARY: operation_history.get_transaction. Works for timely refunds (the common
+    // case). On success this is unchanged behaviour.
+    let tx: AnnotatedTransaction | null = null;
     try {
       tx = await this.call<AnnotatedTransaction | null>((cb) => viz.api.getTransaction(trxId, cb));
     } catch (err) {
-      // operation_history returns an error for an unknown trx id; treat as not-found
-      // (fail-closed). A transport failure also lands here and correctly refuses.
-      console.warn(`[viz-chain] getDeposit(${trxId}): lookup failed: ${String(err)}`);
-      return null;
+      // operation_history returns an error for an unknown trx id (also fires once the
+      // block ages past the node's history retention). A transport failure also lands
+      // here. Fall through to the block-log fallback if we have a hint; else fail-closed.
+      console.warn(`[viz-chain] getDeposit(${trxId}): operation_history lookup failed: ${String(err)}`);
     }
-    if (!tx || !Array.isArray(tx.operations)) return null;
+    if (tx && Array.isArray(tx.operations)) {
+      // Defense-in-depth: a correct node echoes the id we asked for. Missing OR mismatched =>
+      // refuse to derive from it (an empty id must not skip the check — see M7).
+      assertTransactionIdMatches(tx.transaction_id, trxId);
+      // Confirm the transfer is irreversible before trusting it (re-org safety).
+      const lib = await this.lastIrreversibleBlock();
+      if (tx.block_num > lib) return null;
+      return this.depositFromOps(trxId, opIndex, tx.block_num, tx.operations);
+    }
 
-    // Defense-in-depth: a correct node echoes the id we asked for. Missing OR mismatched =>
-    // refuse to derive from it (an empty id must not skip the check — see M7).
-    assertTransactionIdMatches(tx.transaction_id, trxId);
+    // FALLBACK: the history index can't serve this parent (pruned — the block aged past
+    // every node's operation_history retention). The raw block LOG survives that pruning,
+    // so re-read the deposit from get_block(blockNumHint) and recompute the trx id to bind
+    // it trustlessly. The hint is UNTRUSTED (coordinator/file out-of-band): security rests
+    // on reading the block from the operator's OWN node and matching the recomputed id, so a
+    // lying hint just fails the lookup. Only taken when a hint is present (no hint => today's
+    // fail-closed null).
+    if (blockNumHint !== undefined && Number.isInteger(blockNumHint) && blockNumHint > 0) {
+      return this.getDepositViaBlock(trxId, opIndex, blockNumHint);
+    }
+    return null;
+  }
 
-    // Confirm the transfer is irreversible before trusting it (re-org safety).
-    const lib = await this.lastIrreversibleBlock();
-    if (tx.block_num > lib) return null;
+  /**
+   * Block-log fallback for getDeposit. Rotates across ALL configured nodes: an empty block,
+   * a get_block error, or a block whose recomputed tx ids don't include `trxId` means THIS
+   * node can't confirm (its block log is pruned/lagging) — NOT an authoritative not-found —
+   * so try the next node (same lesson as the recon empty-backing false-pause). Returns null
+   * only when EVERY node fails to confirm (fail-closed preserved). Throws on a structural
+   * violation (the matched tx has no transfer op at opIndex / not a backing account), which
+   * the source validator normalizes to SourceMismatchError.
+   */
+  private async getDepositViaBlock(trxId: string, opIndex: number, blockNum: number): Promise<VizDeposit | null> {
+    for (let i = 0; i < this.nodeUrls.length; i++) {
+      const nodeIdx = (this.idx + i) % this.nodeUrls.length;
+      const nodeUrl = this.nodeUrls[nodeIdx]!;
+      viz.config.set("websocket", nodeUrl);
+      let block: VizBlock | null;
+      try {
+        block = await callOnce<VizBlock | null>((cb) => viz.api.getBlock(blockNum, cb));
+      } catch (err) {
+        console.warn(`[viz-chain] getDeposit(${trxId}): get_block(${blockNum}) on ${nodeUrl} failed: ${String(err)} — trying next node`);
+        continue;
+      }
+      const txs = block?.transactions ?? [];
+      // Recompute each tx id (get_block carries no transaction_ids) and find the match.
+      // A malformed tx that fails to serialize is skipped, never fatal to the scan.
+      const match = txs.find((t) => {
+        try {
+          return computeTrxId(t) === trxId;
+        } catch {
+          return false;
+        }
+      });
+      if (!match) continue; // this node's block log can't confirm — try next
 
-    const op = tx.operations[opIndex];
+      // Irreversibility gate (re-org safety), read from the SAME node that served the block.
+      let lib: number;
+      try {
+        const gp = await callOnce<DynamicGlobalProperties>((cb) => viz.api.getDynamicGlobalProperties(cb));
+        lib = gp.last_irreversible_block_num;
+      } catch (err) {
+        console.warn(`[viz-chain] getDeposit(${trxId}): LIB read on ${nodeUrl} failed: ${String(err)} — trying next node`);
+        continue;
+      }
+      if (blockNum > lib) {
+        console.warn(`[viz-chain] getDeposit(${trxId}): block ${blockNum} > LIB ${lib} on ${nodeUrl} — not yet irreversible`);
+        continue; // another node may be further along; else exhausted -> null (fail-closed)
+      }
+
+      this.idx = nodeIdx; // pin the node that could serve the archive read
+      return this.depositFromOps(trxId, opIndex, blockNum, match.operations);
+    }
+    console.warn(`[viz-chain] getDeposit(${trxId}): no configured node could confirm block ${blockNum} (fail-closed)`);
+    return null;
+  }
+
+  /**
+   * Reconstruct a VizDeposit from a transfer op — the shared tail of BOTH the
+   * operation_history path and the block-log fallback, so the two cannot drift on memo
+   * resolution / destinationValid. Decrypts an encrypted memo with this account's memo key
+   * (deterministic — all signers holding the key reproduce the identical destination, hence
+   * the identical digest; a signer without it resolves "" and refuses, a liveness stall not
+   * a wrong mint). The destination SHAPE does not throw here: a no-memo deposit is
+   * reconstructed with destinationValid=false + the "" sentinel so the auto-refund path can
+   * return it; the mint-validation layer (signer/validatePegIn) re-instates the never-mint
+   * guarantee. Structural violations (no op / not a transfer / not a backing account) throw.
+   */
+  private depositFromOps(
+    trxId: string,
+    opIndex: number,
+    blockNum: number,
+    ops: Array<[string, Record<string, unknown>]>,
+  ): VizDeposit {
+    const op = ops[opIndex];
     if (!op) {
       throw new Error(`getDeposit(${trxId}:${opIndex}): no op at index ${opIndex}`);
     }
@@ -328,21 +441,12 @@ export class VizJsChain implements VizChain {
     }
     const chain = this.accounts.chainFor(to);
     const rawMemo = String(payload["memo"] ?? "").trim();
-    // Decrypt an encrypted memo with this account's memo key (deterministic — all signers
-    // holding the key reproduce the identical destination, and therefore the identical
-    // digest; a signer without the key resolves "" and refuses, a liveness stall not a
-    // wrong mint). The destination SHAPE no longer throws here (it used to, which blocked
-    // even a manual refund of a no-memo deposit — see plan): reconstruct the deposit with
-    // destinationValid and the "" sentinel. The mint-validation layer (signer/validatePegIn)
-    // re-instates the never-mint guarantee by asserting destinationValid, so the security
-    // control is relocated, not removed. Structural violations above (no op / not a transfer /
-    // not a backing account) still throw — only the destination shape stops being fatal.
     const rawDestination = this.resolveDestination(to, rawMemo);
     const destinationValid = isValidRemoteAddress(chain, rawDestination);
     return {
       trxId,
       opIndex,
-      blockNum: tx.block_num,
+      blockNum,
       from: String(payload["from"] ?? ""),
       to,
       amountMilliViz: vizToMilli(String(payload["amount"] ?? "0.000 VIZ")),

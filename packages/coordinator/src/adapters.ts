@@ -8,6 +8,7 @@ import {
   type GatewayStore,
   type PegInFeePolicy,
   type SolanaMintProposal,
+  type SourceHint,
   type GramMintProposal,
   type VizReleaseProposal,
   GatewayAccounts,
@@ -33,12 +34,14 @@ export class HttpSignerClient implements SignerClient {
     private readonly timeoutMs: { pegIn: number; pegOut: number } = { pegIn: 180000, pegOut: 30000 },
   ) {}
 
-  async approve(action: CanonicalAction, proposal: Proposal): Promise<Approval> {
+  async approve(action: CanonicalAction, proposal: Proposal, hint?: SourceHint): Promise<Approval> {
     const timeoutMs = action.direction === "PEG_IN" ? this.timeoutMs.pegIn : this.timeoutMs.pegOut;
+    // `sourceBlockNum` rides OUTSIDE the wire action (never in the digest): a pure
+    // out-of-band hint the signer uses only for the block-log fallback read.
     const res = await fetch(`${this.endpoint.replace(/\/$/, "")}/approve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: actionToWire(action), proposal }),
+      body: JSON.stringify({ action: actionToWire(action), proposal, sourceBlockNum: hint?.sourceBlockNum }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.status === 423) throw new Error(`signer ${this.endpoint} is paused`);

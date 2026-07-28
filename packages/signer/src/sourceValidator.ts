@@ -8,6 +8,7 @@ import {
   type GatewayFeeConfig,
   type GatewayStore,
   type RemoteBurn,
+  type SourceHint,
   type VizChain,
   type VizDeposit,
 } from "@gateway/common";
@@ -102,9 +103,13 @@ function looksLikeTonTxHash(id: string): boolean {
  * every failure to SourceMismatchError here so callers (and the spike) can rely on a
  * single fail-closed error type — a generic throw can never be mistaken for "validated".
  */
-export async function validateAction(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+export async function validateAction(
+  action: CanonicalAction,
+  deps: SourceValidatorDeps,
+  hint?: SourceHint,
+): Promise<void> {
   try {
-    await validateActionInner(action, deps);
+    await validateActionInner(action, deps, hint);
   } catch (err) {
     if (err instanceof SourceMismatchError) throw err;
     throw new SourceMismatchError(
@@ -113,9 +118,9 @@ export async function validateAction(action: CanonicalAction, deps: SourceValida
   }
 }
 
-async function validateActionInner(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+async function validateActionInner(action: CanonicalAction, deps: SourceValidatorDeps, hint?: SourceHint): Promise<void> {
   if (action.direction === "PEG_IN") {
-    await validatePegIn(action, deps);
+    await validatePegIn(action, deps, hint);
     return;
   }
   // Gateway-INTERNAL VIZ releases spawned off a PEG_IN (FEE_SWEEP / REFUND) have no
@@ -125,11 +130,11 @@ async function validateActionInner(action: CanonicalAction, deps: SourceValidato
   // (base58, no ':') and a TON tx hash (64 hex, no ':') can never end this way. Dispatch
   // on the honest id suffix, never on the coordinator-supplied direction/remoteChain.
   if (action.id.endsWith(FEE_SWEEP_SUFFIX)) {
-    await validateFeeSweep(action, deps);
+    await validateFeeSweep(action, deps, hint);
     return;
   }
   if (action.id.endsWith(REFUND_SUFFIX)) {
-    await validateRefund(action, deps);
+    await validateRefund(action, deps, hint);
     return;
   }
   if (action.id.endsWith(RETURN_SUFFIX)) {
@@ -166,6 +171,7 @@ async function reReadParentPegIn(
   action: CanonicalAction,
   suffix: string,
   deps: SourceValidatorDeps,
+  hint?: SourceHint,
 ): Promise<{ deposit: VizDeposit; parent: CanonicalAction }> {
   const parentId = action.id.slice(0, -suffix.length);
   const sep = parentId.indexOf(":");
@@ -180,7 +186,9 @@ async function reReadParentPegIn(
     );
   }
   const opIndex = Number.parseInt(opStr, 10);
-  const deposit = await deps.vizChain.getDeposit(trxId, opIndex);
+  // The block-log hint is UNTRUSTED (out-of-band from the coordinator): getDeposit reads the
+  // block from THIS operator's own node and recomputes the trx id, so a wrong hint fails closed.
+  const deposit = await deps.vizChain.getDeposit(trxId, opIndex, hint?.sourceBlockNum);
   if (!deposit) {
     throw new SourceMismatchError(
       `parent PEG_IN ${parentId} for ${action.id} not found or not yet irreversible on VIZ`,
@@ -222,8 +230,8 @@ async function reReadParentPegIn(
  *     signer (this check) derive it from `gross` alone, so the coordinator has no discretion;
  *   - the child digest MUST be bound to the re-derived parent digest ("<parentDigest>:fee").
  */
-async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
-  const { deposit, parent } = await reReadParentPegIn(action, FEE_SWEEP_SUFFIX, deps);
+async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDeps, hint?: SourceHint): Promise<void> {
+  const { deposit, parent } = await reReadParentPegIn(action, FEE_SWEEP_SUFFIX, deps, hint);
   if (action.remoteChain !== deposit.remoteChain) {
     throw new SourceMismatchError(
       `FEE_SWEEP remoteChain ${String(action.remoteChain)} != parent deposit chain ${deposit.remoteChain} (${action.id})`,
@@ -256,8 +264,8 @@ async function validateFeeSweep(action: CanonicalAction, deps: SourceValidatorDe
  * spawns a child for, so refuse it outright. The child digest MUST be bound to the parent
  * ("<parentDigest>:refund").
  */
-async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
-  const { deposit, parent } = await reReadParentPegIn(action, REFUND_SUFFIX, deps);
+async function validateRefund(action: CanonicalAction, deps: SourceValidatorDeps, hint?: SourceHint): Promise<void> {
+  const { deposit, parent } = await reReadParentPegIn(action, REFUND_SUFFIX, deps, hint);
   if (action.remoteChain !== deposit.remoteChain) {
     throw new SourceMismatchError(
       `REFUND remoteChain ${String(action.remoteChain)} != parent deposit chain ${deposit.remoteChain} (${action.id})`,
@@ -341,7 +349,7 @@ async function validateGramReturn(action: CanonicalAction, deps: SourceValidator
   }
 }
 
-async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
+async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps, hint?: SourceHint): Promise<void> {
   const sep = action.id.indexOf(":");
   const trxId = sep > 0 ? action.id.slice(0, sep) : "";
   // Strict opIndex (see reReadParentPegIn): reject any non-integer suffix so a
@@ -351,7 +359,8 @@ async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps)
     throw new SourceMismatchError(`malformed PEG_IN source id "${action.id}" (expected "<trxId>:<opIndex>")`);
   }
   const opIndex = Number.parseInt(opStr, 10);
-  const deposit = await deps.vizChain.getDeposit(trxId, opIndex);
+  // UNTRUSTED block-log hint (see reReadParentPegIn): own-node get_block + recomputed id.
+  const deposit = await deps.vizChain.getDeposit(trxId, opIndex, hint?.sourceBlockNum);
   if (!deposit) {
     throw new SourceMismatchError(`PEG_IN source ${action.id} not found or not yet irreversible on VIZ`);
   }

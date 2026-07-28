@@ -7,6 +7,7 @@ import {
   loadConfig,
   readLimitedBody,
   type SolanaMintProposal,
+  type SourceHint,
   type GramMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
@@ -25,6 +26,19 @@ import { resolveOperatorId } from "./resolveOperatorId";
 interface ApproveRequest {
   action: Record<string, unknown>;
   proposal: VizReleaseProposal | GramMintProposal | SolanaMintProposal;
+  /**
+   * UNTRUSTED out-of-band hint from the coordinator: the parent PEG_IN's VIZ source block
+   * number, used as the getDeposit block-log fallback when operation_history has pruned the
+   * deposit. NEVER part of `action` / the signed digest. A wrong value fails the own-node
+   * get_block + recomputed-trxId match (fail-closed), so it cannot redirect funds.
+   */
+  sourceBlockNum?: number;
+}
+
+/** Parse the untrusted block-log hint from an /approve request into a SourceHint (or undefined). */
+function hintFromRequest(req: ApproveRequest): SourceHint | undefined {
+  const n = req.sourceBlockNum;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 ? { sourceBlockNum: n } : undefined;
 }
 
 /**
@@ -180,7 +194,7 @@ async function main(): Promise<void> {
     cfg.gram.signerMnemonic,
     cfg.fees,
     cfg.solana.signerSecret,
-    (action) => validateAction(action, validatorDeps),
+    (action, hint) => validateAction(action, validatorDeps, hint),
     solanaPins,
     gramApprover,
     accounts,
@@ -217,7 +231,7 @@ async function main(): Promise<void> {
         }
         const req = JSON.parse(body) as ApproveRequest;
         const action = actionFromWire(req.action);
-        const approval = await routeApproval(signer, action, req.proposal);
+        const approval = await routeApproval(signer, action, req.proposal, hintFromRequest(req));
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify(approval));
       } catch (err) {

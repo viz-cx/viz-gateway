@@ -3,6 +3,7 @@ import type {
   CanonicalAction,
   Signer,
   SolanaMintProposal,
+  SourceHint,
   GramMintProposal,
   VizReleaseProposal,
 } from "@gateway/common";
@@ -35,27 +36,28 @@ export async function routeApproval(
   signer: Signer,
   action: CanonicalAction,
   proposal: AnyProposal,
+  hint?: SourceHint,
 ): Promise<Approval> {
   if (action.direction === "GRAM_RETURN") {
     if (!isGramMintProposal(proposal)) {
       throw new Error(`GRAM_RETURN proposal shape not recognized for ${action.id}`);
     }
-    return signer.approveGramReturn(action, proposal as GramMintProposal);
+    return signer.approveGramReturn(action, proposal as GramMintProposal, hint);
   }
   if (action.direction === "PEG_OUT") {
-    return signer.signVizRelease(action, proposal as VizReleaseProposal);
+    return signer.signVizRelease(action, proposal as VizReleaseProposal, hint);
   }
   if (isSolanaMintProposal(proposal)) {
     if (action.remoteChain && action.remoteChain !== "SOLANA") {
       throw new Error(`Solana proposal for a ${action.remoteChain} action (${action.id})`);
     }
-    return signer.approveSolanaMint(action, proposal);
+    return signer.approveSolanaMint(action, proposal, hint);
   }
   if (isGramMintProposal(proposal)) {
     if (action.remoteChain && action.remoteChain !== "GRAM") {
       throw new Error(`GRAM proposal for a ${action.remoteChain} action (${action.id})`);
     }
-    return signer.approveGramMint(action, proposal);
+    return signer.approveGramMint(action, proposal, hint);
   }
   throw new Error(`PEG_IN proposal shape not recognized (neither GRAM nor Solana) for ${action.id}`);
 }

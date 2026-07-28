@@ -20,6 +20,7 @@ const baseRec: OutboxRecord = {
   updatedAt: 0,
   nextAttemptAt: 0,
   parentId: null,
+  blockNum: null,
 };
 
 test("FEE_SWEEP child inherits parent remoteChain", () => {

@@ -172,6 +172,7 @@ function rowToRecord(r: Row): OutboxRecord {
     updatedAt: Number(r["updated_at"]),
     nextAttemptAt: Number(r["next_attempt_at"]),
     parentId: (r["parent_id"] as string | null) ?? null,
+    blockNum: r["block_num"] != null ? Number(r["block_num"]) : null,
   };
 }
 
@@ -204,7 +205,8 @@ export class SqliteGatewayStore implements GatewayStore {
          created_at       INTEGER NOT NULL,
          updated_at       INTEGER NOT NULL,
          next_attempt_at  INTEGER NOT NULL DEFAULT 0,
-         parent_id        TEXT
+         parent_id        TEXT,
+         block_num        INTEGER
        );
        CREATE INDEX IF NOT EXISTS idx_outbox_status ON action_outbox(status, next_attempt_at);
        CREATE TABLE IF NOT EXISTS cap_window(
@@ -234,10 +236,13 @@ export class SqliteGatewayStore implements GatewayStore {
          updated_at INTEGER NOT NULL
        );`,
     );
-    // Migration: add parent_id if the table predates this column.
+    // Migration: add columns the table may predate (each nullable for back-compat).
     const cols = this.db.prepare("PRAGMA table_info(action_outbox)").all() as Row[];
     if (!cols.some((c) => c["name"] === "parent_id")) {
       this.db.exec("ALTER TABLE action_outbox ADD COLUMN parent_id TEXT");
+    }
+    if (!cols.some((c) => c["name"] === "block_num")) {
+      this.db.exec("ALTER TABLE action_outbox ADD COLUMN block_num INTEGER");
     }
   }
 
@@ -289,8 +294,8 @@ export class SqliteGatewayStore implements GatewayStore {
       .prepare(
         `INSERT OR IGNORE INTO action_outbox(
            id, direction, remote_chain, recipient, sender, amount_milli_viz, fee_milli_viz,
-           digest, status, attempts, last_error, txid, created_at, updated_at, next_attempt_at, parent_id
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, ?, ?, 0, ?)`,
+           digest, status, attempts, last_error, txid, created_at, updated_at, next_attempt_at, parent_id, block_num
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, ?, ?, 0, ?, ?)`,
       )
       .run(
         input.id,
@@ -306,6 +311,7 @@ export class SqliteGatewayStore implements GatewayStore {
         now,
         now,
         input.parentId ?? null,
+        input.blockNum ?? null,
       );
     const inserted = Number(res.changes) === 1;
     if (!inserted) {
@@ -583,6 +589,7 @@ export class InMemoryGatewayStore implements GatewayStore {
       updatedAt: now,
       nextAttemptAt: 0,
       parentId: input.parentId ?? null,
+      blockNum: input.blockNum ?? null,
     });
     return true;
   }
