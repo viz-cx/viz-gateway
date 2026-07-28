@@ -2,7 +2,15 @@ import { readFileSync, existsSync, openSync, readSync, closeSync } from "node:fs
 import { execFileSync } from "node:child_process";
 import type { CapPolicy } from "./caps";
 import { deriveFloorMilliViz, type PegInFeePolicy } from "./fees";
-import type { FederationManifest, ManifestFees, OperatorRef, RemoteChainId } from "./types";
+import type {
+  FederationManifest,
+  ManifestAccounts,
+  ManifestFees,
+  ManifestGram,
+  ManifestRpc,
+  OperatorRef,
+  RemoteChainId,
+} from "./types";
 import { GatewayAccounts } from "./gatewayAccounts";
 import { openKeystore } from "./keystore";
 
@@ -353,7 +361,35 @@ export function parseManifest(raw: unknown): FederationManifest {
       refundFeeMilliViz: f["refundFeeMilliViz"] === undefined ? 5000n : BigInt(f["refundFeeMilliViz"] as number),
     };
   }
-  return { n, threshold, operators, fees };
+  // Optional pinned constants (all default-absent → env/hardcoded fallback in loadConfig).
+  const optStr = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : String(v));
+  // A JSON array OR a comma/whitespace string both normalize to a comma-string here.
+  const optList = (v: unknown): string | undefined =>
+    v === undefined || v === null ? undefined : Array.isArray(v) ? v.map(String).join(",") : String(v);
+  let gram: ManifestGram | undefined;
+  if (o["gram"] !== undefined) {
+    const g = o["gram"] as Record<string, unknown>;
+    gram = {
+      jettonMinterAddress: optStr(g["jettonMinterAddress"]),
+      multisigAddress: optStr(g["multisigAddress"]),
+      gatewayJettonWallet: optStr(g["gatewayJettonWallet"]),
+    };
+  }
+  let accounts: ManifestAccounts | undefined;
+  if (o["accounts"] !== undefined) {
+    const a = o["accounts"] as Record<string, unknown>;
+    accounts = { gram: optStr(a["gram"]), solana: optStr(a["solana"]), fees: optStr(a["fees"]) };
+  }
+  let rpc: ManifestRpc | undefined;
+  if (o["rpc"] !== undefined) {
+    const r = o["rpc"] as Record<string, unknown>;
+    rpc = {
+      vizNodeUrls: optList(r["vizNodeUrls"]),
+      gramEndpoints: optList(r["gramEndpoints"]),
+      gramOrbsFallback: r["gramOrbsFallback"] === undefined ? undefined : Boolean(r["gramOrbsFallback"]),
+    };
+  }
+  return { n, threshold, operators, fees, gram, accounts, rpc };
 }
 
 /** Load and validate config from environment. Throws on invalid federation. */
@@ -421,19 +457,26 @@ export function loadConfig(): GatewayConfig {
   // Memo WIFs are configured per chain (VIZ_MEMO_WIF_<CHAIN>) but consumed per gate
   // account (the reader keys off the transfer's `to`), so re-key them onto the account
   // name here. Empty/absent keys are skipped — no key => encrypted memos auto-refund.
-  const gramGateAccount = opt("VIZ_GATEWAY_ACCOUNT_GRAM", "");
-  const solanaGateAccount = opt("VIZ_GATEWAY_ACCOUNT_SOLANA", "");
+  // Consensus-critical accounts: the manifest WINS over env (pin once, every operator agrees).
+  const gramGateAccount = federation.accounts?.gram ?? opt("VIZ_GATEWAY_ACCOUNT_GRAM", "");
+  const solanaGateAccount = federation.accounts?.solana ?? opt("VIZ_GATEWAY_ACCOUNT_SOLANA", "");
   const memoWifs: Record<string, string> = {};
   const gramMemoWif = opt("VIZ_MEMO_WIF_GRAM", "");
   const solanaMemoWif = opt("VIZ_MEMO_WIF_SOLANA", "");
   if (gramGateAccount && gramMemoWif) memoWifs[gramGateAccount] = gramMemoWif;
   if (solanaGateAccount && solanaMemoWif) memoWifs[solanaGateAccount] = solanaMemoWif;
 
-  // VIZ node + TON endpoint failover lists. A single URL parses to a singleton list, so the
-  // scalar `nodeUrl`/`endpoint` (= list[0]) and the default single-endpoint behaviour are
-  // unchanged until an operator populates the list.
-  const nodeUrls = splitList(opt("VIZ_NODE_URL", opt("VIZ_NODE_WS", "https://node.viz.cx")));
-  const gramEndpoints = splitList(opt("GRAM_ENDPOINT", "https://toncenter.com/api/v2/jsonRPC"));
+  // VIZ node + TON endpoint failover lists. Precedence is env-FIRST (F2: operator-chosen
+  // endpoints), then the manifest's shared default (so a bare deploy works on mainnet), then a
+  // hardcoded single-node fallback. `opt(env, fallback)` returns env when set, else the fallback.
+  // A single URL parses to a singleton list, so the scalar `nodeUrl`/`endpoint` (= list[0]) and
+  // the default single-endpoint behaviour are unchanged until an operator or the manifest populates it.
+  const nodeUrls = splitList(
+    opt("VIZ_NODE_URL", opt("VIZ_NODE_WS", federation.rpc?.vizNodeUrls ?? "https://node.viz.cx")),
+  );
+  const gramEndpoints = splitList(
+    opt("GRAM_ENDPOINT", federation.rpc?.gramEndpoints ?? "https://toncenter.com/api/v2/jsonRPC"),
+  );
 
   return {
     service: opt("SERVICE", "signer"),
@@ -454,11 +497,13 @@ export function loadConfig(): GatewayConfig {
     gram: {
       endpoint: gramEndpoints[0]!,
       endpoints: gramEndpoints,
-      orbsFallback: bool("GRAM_ORBS_FALLBACK", false),
+      // env-first (operator-chosen), manifest default second.
+      orbsFallback: bool("GRAM_ORBS_FALLBACK", federation.rpc?.gramOrbsFallback ?? false),
       apiKey: opt("GRAM_API_KEY", ""),
-      multisigAddress: opt("GRAM_MULTISIG_ADDRESS", ""),
-      jettonMinterAddress: opt("GRAM_JETTON_MINTER_ADDRESS", ""),
-      gatewayJettonWallet: opt("GRAM_GATEWAY_JETTON_WALLET", ""),
+      // Consensus-critical GRAM contract addresses: manifest WINS over env (all operators agree).
+      multisigAddress: federation.gram?.multisigAddress ?? opt("GRAM_MULTISIG_ADDRESS", ""),
+      jettonMinterAddress: federation.gram?.jettonMinterAddress ?? opt("GRAM_JETTON_MINTER_ADDRESS", ""),
+      gatewayJettonWallet: federation.gram?.gatewayJettonWallet ?? opt("GRAM_GATEWAY_JETTON_WALLET", ""),
       signerMnemonic: opt("GRAM_SIGNER_MNEMONIC", ""),
       finalityConfirmations: int("GRAM_FINALITY_CONFIRMATIONS", 1),
       scanMaxTransactions: int("GRAM_MAX_TRANSACTIONS", 20),
@@ -553,7 +598,7 @@ export function loadConfig(): GatewayConfig {
       // outlives it is requeued by the same clock rather than re-run gratuitously.
       submitTimeoutMs: int("DISPATCHER_SUBMIT_TIMEOUT_MS", int("DISPATCHER_SIGNING_TIMEOUT_MS", pegInOrchestrationBudgetMs)),
     },
-    feesGateAccount: opt("FEES_GATE_ACCOUNT", "fees.gate"),
+    feesGateAccount: federation.accounts?.fees ?? opt("FEES_GATE_ACCOUNT", "fees.gate"),
     signerAdvertiseUrl: opt("SIGNER_ADVERTISE_URL", ""),
     registration: {
       leaseMs: int("REGISTRATION_LEASE_MS", 60000),
