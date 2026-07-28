@@ -3,6 +3,7 @@ import type {
   CanonicalAction,
   RemoteBurn,
   SolanaMintProposal,
+  SourceHint,
   GramMintProposal,
   VizDeposit,
   VizReleaseProposal,
@@ -29,8 +30,14 @@ export interface VizChain {
    * transaction does not exist or is not yet irreversible (fail-closed: the signer
    * refuses rather than trusts the coordinator's wire action). Throws if the op at
    * `opIndex` is structurally not a transfer to the gateway account.
+   *
+   * `blockNumHint` is an UNTRUSTED, out-of-band hint (never part of the signed digest).
+   * When the operation_history index can no longer serve the parent (its block aged past
+   * the node's retention — pruned), getDeposit re-reads the deposit from the raw block LOG
+   * (get_block(blockNumHint)) and recomputes the trx id to bind it trustlessly, so a lying
+   * hint just fails the lookup. Omitted => today's fail-closed behaviour (null on pruned).
    */
-  getDeposit(trxId: string, opIndex: number): Promise<VizDeposit | null>;
+  getDeposit(trxId: string, opIndex: number, blockNumHint?: number): Promise<VizDeposit | null>;
   /** Current backing account VIZ balance, in milli-VIZ (for reconciliation). */
   gatewayBalanceMilliViz(account: string): Promise<bigint>;
   /**
@@ -97,12 +104,15 @@ export type TonChain = RemoteChain<GramMintProposal>;
 
 export interface Signer {
   readonly operatorId: string;
+  // `hint` is the UNTRUSTED out-of-band SourceHint (block-log fallback); never part of the
+  // signed digest. Threaded to the F2 source re-read so a pruned-history parent can still be
+  // confirmed from the block log. Optional — omitted paths behave exactly as before.
   /** Validate the proposal against the action, then secp256k1-sign the VIZ release. */
-  signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal): Promise<Approval>;
+  signVizRelease(action: CanonicalAction, proposal: VizReleaseProposal, hint?: SourceHint): Promise<Approval>;
   /** Validate the proposal against the action, then approve the remote mint. */
-  approveGramMint(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval>;
+  approveGramMint(action: CanonicalAction, proposal: GramMintProposal, hint?: SourceHint): Promise<Approval>;
   /** Validate the proposal against the action, then approve the remote Solana mint. */
-  approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal): Promise<Approval>;
+  approveSolanaMint(action: CanonicalAction, proposal: SolanaMintProposal, hint?: SourceHint): Promise<Approval>;
   /** Validate the proposal against the action, then approve the GRAM_RETURN jetton transfer. */
-  approveGramReturn(action: CanonicalAction, proposal: GramMintProposal): Promise<Approval>;
+  approveGramReturn(action: CanonicalAction, proposal: GramMintProposal, hint?: SourceHint): Promise<Approval>;
 }

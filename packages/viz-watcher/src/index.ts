@@ -100,6 +100,7 @@ async function main(): Promise<void> {
               digest: action.digest,
               status: "HELD",
               lastError: "INVALID_DESTINATION",
+              blockNum: dep.blockNum, // getDeposit block-log hint (survives history pruning)
             });
             if (first)
               notifyStaff("deposits", `peg-in ${action.id} HELD: invalid/empty destination -> auto-refund to ${dep.from}`, {
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
               digest: action.digest,
               status: "HELD",
               lastError: "RATE_LIMITED",
+              blockNum: dep.blockNum, // getDeposit block-log hint (survives history pruning)
             });
             if (first)
               notifyStaff("deposits", `peg-in ${action.id} HELD: source ${dep.from} over rate limit`, { id: action.id, sender: dep.from });
@@ -136,6 +138,7 @@ async function main(): Promise<void> {
             amountMilliViz: action.amountMilliViz, // GROSS; fee/net finalized at proposal build
             digest: action.digest,
             status: "SEEN",
+            blockNum: dep.blockNum, // getDeposit block-log hint (survives history pruning)
           });
           if (!first) continue; // already handled
           // Atomic check+record: the 24h window slot is reserved in the same transaction as the

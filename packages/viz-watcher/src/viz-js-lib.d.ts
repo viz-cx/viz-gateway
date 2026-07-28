@@ -41,6 +41,23 @@ declare module "viz-js-lib" {
     signatures?: string[];
   }
 
+  /**
+   * A raw block from database_api.get_block. Reads the block LOG (a different store
+   * from the operation_history index): it survives even when the by-txid/by-block
+   * history index is pruned. `transactions` are full signed transactions; CAVEAT:
+   * `transaction_ids` is null/absent, so the caller MUST recompute each transaction's
+   * graphene id (computeTrxId) to bind it to a requested trxId. Verified live 2026-07-28
+   * against api.viz.world (block 81976371 returned the full tx while get_transaction 404'd).
+   */
+  export interface VizBlock {
+    previous: string;
+    timestamp: string;
+    transaction_merkle_root: string;
+    block_id: string;
+    transactions: VizTransaction[];
+    transaction_ids?: string[] | null;
+  }
+
   export interface OpWrapper {
     trx_id: string;
     block: number;
@@ -69,6 +86,8 @@ declare module "viz-js-lib" {
     getDynamicGlobalProperties(cb: Cb<DynamicGlobalProperties>): void;
     getOpsInBlock(blockNum: number, onlyVirtual: boolean, cb: Cb<OpWrapper[]>): void;
     getTransaction(trxId: string, cb: Cb<AnnotatedTransaction | null>): void;
+    /** database_api.get_block — reads the raw block log (survives operation_history pruning). */
+    getBlock(blockNum: number, cb: Cb<VizBlock | null>): void;
     getAccounts(names: string[], cb: Cb<Account[]>): void;
     /** Accepts a signed trx into the pending pool and returns WITHOUT waiting for block
      * inclusion. The public RPC proxy 504s on the synchronous variant's wait, so the

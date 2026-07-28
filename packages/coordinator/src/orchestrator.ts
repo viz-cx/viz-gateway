@@ -3,6 +3,7 @@ import {
   type Approval,
   type CanonicalAction,
   type SolanaMintProposal,
+  type SourceHint,
   type GramMintProposal,
   type VizReleaseProposal,
 } from "@gateway/common";
@@ -12,7 +13,8 @@ export type Proposal = VizReleaseProposal | GramMintProposal | SolanaMintProposa
 /** Asks one operator's signer to validate + sign a proposal. */
 export interface SignerClient {
   readonly operatorId: string;
-  approve(action: CanonicalAction, proposal: Proposal): Promise<Approval>;
+  // `hint` is the UNTRUSTED out-of-band SourceHint (block-log fallback), never in the digest.
+  approve(action: CanonicalAction, proposal: Proposal, hint?: SourceHint): Promise<Approval>;
 }
 
 /** A built proposal plus the fee withheld (0 unless it is a PEG_IN mint). */
@@ -79,7 +81,7 @@ export class Orchestrator {
     }
   }
 
-  async process(action: CanonicalAction): Promise<OrchestrationResult> {
+  async process(action: CanonicalAction, hint?: SourceHint): Promise<OrchestrationResult> {
     // Idempotency: if the action already landed on-chain (e.g. the process crashed
     // after broadcast but before CONFIRMED), short-circuit to avoid a double-mint or
     // double-release. buildProposal is still called for the fee amount (PEG_IN).
@@ -117,7 +119,9 @@ export class Orchestrator {
 
     for (const signer of this.signers) {
       try {
-        set.add(await signer.approve(action, proposal));
+        // Relay the UNTRUSTED block-log hint so a signer whose operation_history has pruned
+        // the parent can still confirm it from its own node's block log (F2 preserved).
+        set.add(await signer.approve(action, proposal, hint));
       } catch (err) {
         // One signer failing/refusing is expected (offline, or rejects a bad
         // proposal). Keep collecting from the others.

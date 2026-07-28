@@ -84,6 +84,20 @@ export interface CanonicalAction {
   digest: string;
 }
 
+/**
+ * An UNTRUSTED, out-of-band hint the coordinator relays to signers alongside an action —
+ * NEVER part of the CanonicalAction or its signed digest, so it cannot alter what gets
+ * signed. Today it carries only the parent PEG_IN's source block number, used as the
+ * getDeposit block-log fallback hint when operation_history has pruned the deposit's block
+ * (see VizChain.getDeposit / docs/plan-refund-pruned-history-getblock.md). F2 independence
+ * is preserved: each signer reads the block from its OWN node and recomputes the trx id, so
+ * a wrong hint just fails the lookup (fail-closed).
+ */
+export interface SourceHint {
+  /** Parent PEG_IN's VIZ source block number (untrusted); the getDeposit block-log hint. */
+  sourceBlockNum?: number;
+}
+
 /** A single operator's signature/approval over a CanonicalAction.digest. */
 export interface Approval {
   actionId: string;

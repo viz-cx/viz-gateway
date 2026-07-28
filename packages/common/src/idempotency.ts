@@ -41,6 +41,13 @@ export interface OutboxRecord {
   nextAttemptAt: number;
   /** Parent action id for child rows (REFUND / FEE_SWEEP). Stable across id-scheme changes. */
   parentId: string | null;
+  /**
+   * VIZ block number this PEG_IN's source transfer landed in (from VizDeposit.blockNum).
+   * Null for pre-column rows and non-PEG_IN rows. Relayed by the coordinator as the
+   * UNTRUSTED out-of-band getDeposit block-log hint so an F2 re-read can survive
+   * operation_history pruning (see VizChain.getDeposit / plan-refund-pruned-history-getblock).
+   */
+  blockNum: number | null;
 }
 
 /** Fields needed to first-claim + persist an action. */
@@ -64,6 +71,8 @@ export interface EnqueueInput {
   lastError?: string;
   /** Parent action id for child rows (REFUND / FEE_SWEEP). */
   parentId?: string;
+  /** VIZ block number of a PEG_IN's source transfer (VizDeposit.blockNum); the getDeposit hint. */
+  blockNum?: number;
 }
 
 /** Optional fields to update alongside a status transition. */

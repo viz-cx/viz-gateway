@@ -9,6 +9,7 @@ import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { Orchestrator } from "./orchestrator";
 import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, GramReturnBroadcaster, VizReleaseBroadcaster } from "./adapters";
 import { SignerRegistry } from "./registry";
+import { loadSourceHints, applySourceHintResolutions, resolveSourceHint } from "./sourceHints";
 
 /**
  * coordinator: UNTRUSTED. On POST /submit { action } it builds the one shared
@@ -111,7 +112,15 @@ async function main(): Promise<void> {
     throw new Error(`PEG_IN ${action.id} has unknown/absent remoteChain`);
   };
 
-  const orchestrate = (action: CanonicalAction) => {
+  // Operator resolution-directive file: supplies the block-log hint when the DB block_num is NULL
+  // (pre-column rows) and drives the run-once mint redirect for a stuck refund. Coordinator-only.
+  const sourceHints = loadSourceHints(
+    process.env.SOURCE_HINTS_FILE ?? resolve(process.cwd(), "config/source-hints.json"),
+  );
+  // Apply any `resolution:"mint"` redirects once, at boot, while paused (see applySourceHintResolutions).
+  await applySourceHintResolutions(store, sourceHints);
+
+  const orchestrate = async (action: CanonicalAction) => {
     const broadcaster =
       action.direction === "GRAM_RETURN"
         ? (() => {
@@ -121,13 +130,16 @@ async function main(): Promise<void> {
         : action.direction === "PEG_OUT"
           ? vizBroadcaster
           : pegInBroadcaster(action);
+    // UNTRUSTED out-of-band hint relayed to signers so a pruned-history parent can still be
+    // confirmed from the block log (F2 preserved: each signer verifies against its own node).
+    const hint = await resolveSourceHint(action, store, sourceHints);
     return new Orchestrator(
       cfg.federation.threshold,
       cfg.federation.operators.map((o) => o.id),
       currentSigners(),
       broadcaster,
       (id, feeMilliViz) => store.setFee(id, feeMilliViz),
-    ).process(action);
+    ).process(action, hint);
   };
 
   const [host, portStr] = cfg.coordinator.listen.split(":");
