@@ -7,6 +7,18 @@
     { "id": "op-2", "vizPubkey": "VIZ8KDgP7NqqSJDag78tGco7f5vrM4EFwqSoA2qoeX4CkwNkM5U5G", "tonPubkey": "<ed25519-hex-or-wallet-address>" },
     { "id": "op-3", "vizPubkey": "VIZ7UADKgSGMedvKCGPzkquaJd7AP7w3EPXmqLVdvRQV58T45cmjK", "tonPubkey": "<ed25519-hex-or-wallet-address>" }
   ],
+  "_accounts": "Pin federation VIZ accounts + GRAM contract addresses here so operators need no per-box address/account env (manifest WINS over env). rpc.* is only a default — per-operator env OVERRIDES it (F2 operator-chosen endpoints). vizNodeUrls/gramEndpoints accept a JSON array or a comma-string.",
+  "accounts": { "gram": "gram.gate", "solana": "solana.gate", "fees": "fees.gate" },
+  "gram": {
+    "jettonMinterAddress": "<wVIZ-jetton-minter-address>",
+    "multisigAddress": "<gateway-multisig-address>",
+    "gatewayJettonWallet": "<gateway-jetton-wallet-address>"
+  },
+  "rpc": {
+    "vizNodeUrls": ["https://node.viz.cx", "https://api.viz.world", "https://mirror.viz.world"],
+    "gramEndpoints": ["https://toncenter.com/api/v2/jsonRPC"],
+    "gramOrbsFallback": true
+  },
   "fees": {
     "floorMilliViz": 10000,
     "bps": 20,

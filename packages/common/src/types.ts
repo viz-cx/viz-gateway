@@ -221,6 +221,46 @@ export interface ManifestFees {
   refundFeeMilliViz: bigint;
 }
 
+/**
+ * Fixed GRAM (TON) contract addresses pinned in the manifest so every operator validates
+ * against the identical minter / multisig / gateway-wallet. Consensus-critical: like fees,
+ * the manifest value WINS over per-box env, so a mis-set env can't point one signer at a
+ * different contract. Values are normalized to strings at parse time.
+ */
+export interface ManifestGram {
+  jettonMinterAddress?: string;
+  multisigAddress?: string;
+  gatewayJettonWallet?: string;
+}
+
+/**
+ * Federation VIZ backing/fee accounts, pinned so all operators agree on which VIZ accounts
+ * back each remote chain. Manifest WINS over env.
+ */
+export interface ManifestAccounts {
+  /** VIZ backing account for GRAM peg-ins (else VIZ_GATEWAY_ACCOUNT_GRAM). */
+  gram?: string;
+  /** VIZ backing account for Solana peg-ins (else VIZ_GATEWAY_ACCOUNT_SOLANA). */
+  solana?: string;
+  /** VIZ account collecting swept peg-in fees (else FEES_GATE_ACCOUNT). */
+  fees?: string;
+}
+
+/**
+ * Default RPC endpoints so a bare deploy works on mainnet out of the box. Unlike the
+ * consensus-critical fields above, per-operator env OVERRIDES these (F2: operator-chosen
+ * endpoints — a shared public-node list must never be forced on every operator). A JSON
+ * array or a comma/whitespace string is accepted; both normalize to a comma-string at parse.
+ */
+export interface ManifestRpc {
+  /** VIZ node failover list (else VIZ_NODE_URL / VIZ_NODE_WS). */
+  vizNodeUrls?: string;
+  /** GRAM/TON endpoint failover list (else GRAM_ENDPOINT). */
+  gramEndpoints?: string;
+  /** Append the Orbs ton-access fallback to the GRAM read path (else GRAM_ORBS_FALLBACK). */
+  gramOrbsFallback?: boolean;
+}
+
 export interface FederationManifest {
   /** Total signers N. */
   n: number;
@@ -230,4 +270,10 @@ export interface FederationManifest {
   operators: OperatorRef[];
   /** Fee constants. When present, takes precedence over env vars. */
   fees?: ManifestFees;
+  /** GRAM contract addresses. When present, take precedence over env vars. */
+  gram?: ManifestGram;
+  /** Federation VIZ accounts. When present, take precedence over env vars. */
+  accounts?: ManifestAccounts;
+  /** Default RPC endpoints. A convenience default — per-operator env OVERRIDES these. */
+  rpc?: ManifestRpc;
 }

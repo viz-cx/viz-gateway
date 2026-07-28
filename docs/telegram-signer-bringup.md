@@ -41,16 +41,13 @@ FEDERATION_MANIFEST=./federation.json
 FED_KEYSTORE=./keystore.mainnet.json
 # FED_KEYSTORE_PASSPHRASE=             # leave unset → prompts on start
 
-VIZ_NODE_URL=<YOUR OWN VIZ node>       # F2: must be yours, never mine (comma-list OK)
-GRAM_ENDPOINT=<YOUR OWN toncenter URL> # F2: must be yours, never mine (comma-list OK)
+VIZ_NODE_URL=<YOUR OWN VIZ node>       # F2: set YOURS, never mine (comma-list OK)
+GRAM_ENDPOINT=<YOUR OWN toncenter URL> # F2: set YOURS, never mine (comma-list OK)
 GRAM_API_KEY=<your toncenter key>
 # GRAM_ORBS_FALLBACK=true              # optional: append Orbs ton-access read fallback
-
-# public, fixed — copy verbatim:
-GRAM_JETTON_MINTER_ADDRESS=EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
-GRAM_MULTISIG_ADDRESS=EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
-GRAM_GATEWAY_JETTON_WALLET=EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
 ```
+
+That's the whole file. The GRAM contract addresses and the VIZ gate accounts are now **pinned in the committed `federation.json`** (its `gram` / `accounts` sections) — you no longer copy them into env, and a mis-set env can't override them (the manifest wins, so every operator validates against the identical contracts).
 
 ⚠️ *F2 independence:* `VIZ_NODE_URL` and `GRAM_ENDPOINT` MUST be your own nodes. Your signer re-reads every peg-in/peg-out from these before signing — if they point at mine, your independent check is gone. Both accept a comma/whitespace-separated list of *your* endpoints for read failover (the signer rotates to the next on a transient error) — every entry must still be one you control.
 

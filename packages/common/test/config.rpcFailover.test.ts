@@ -5,11 +5,17 @@ import { loadConfig } from "../src/config";
 // Isolate each case from env pollution: RPC failover reads VIZ_NODE_URL / VIZ_NODE_WS /
 // GRAM_ENDPOINT / GRAM_ORBS_FALLBACK. Save+restore so the shared node:test process (all
 // suites in one run) can't leak a list from one case into another.
-const KEYS = ["VIZ_NODE_URL", "VIZ_NODE_WS", "GRAM_ENDPOINT", "GRAM_ORBS_FALLBACK"];
+// FEDERATION_MANIFEST is isolated too: the repo's ./federation.json now pins rpc.* defaults, so
+// these "env default" cases must NOT read it (the manifest 3-node list / orbs=true would leak in).
+// Default to a nonexistent path (→ count-only synthesized federation, no rpc) unless a case
+// overrides it to exercise the manifest layer explicitly. Manifest precedence is covered in
+// config.manifestDefaults.test.ts.
+const KEYS = ["VIZ_NODE_URL", "VIZ_NODE_WS", "GRAM_ENDPOINT", "GRAM_ORBS_FALLBACK", "FEDERATION_MANIFEST"];
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
   const saved: Record<string, string | undefined> = {};
   for (const k of KEYS) saved[k] = process.env[k];
   for (const k of KEYS) delete process.env[k];
+  process.env.FEDERATION_MANIFEST = "./test-no-such-manifest.json";
   for (const [k, v] of Object.entries(overrides)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;

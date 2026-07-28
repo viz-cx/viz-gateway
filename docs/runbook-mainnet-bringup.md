@@ -95,9 +95,15 @@ every signer box:
 
 - `VIZ_NODE_URL` MUST be that operator's own VIZ node — never the coordinator's. May be a
   comma/whitespace-separated list of that operator's own nodes for read failover.
-- `GRAM_ENDPOINT` / `GRAM_GATEWAY_JETTON_WALLET` MUST point at that operator's own TON
-  node (used to re-read peg-out burns). `GRAM_ENDPOINT` also accepts a comma-list; set
-  `GRAM_ORBS_FALLBACK=true` to append an Orbs ton-access read fallback.
+- `GRAM_ENDPOINT` MUST point at that operator's own TON node (used to re-read peg-out
+  burns). It also accepts a comma-list; set `GRAM_ORBS_FALLBACK=true` to append an Orbs
+  ton-access read fallback.
+
+Only these RPC *endpoints* are operator-chosen. The federation-critical **addresses and
+accounts** — `GRAM_JETTON_MINTER_ADDRESS`, `GRAM_MULTISIG_ADDRESS`,
+`GRAM_GATEWAY_JETTON_WALLET`, and the VIZ gate accounts — are **pinned in the committed
+`federation.json`** (`gram` / `accounts` sections) and the manifest WINS over env, so every
+operator validates against identical contracts without setting them per box.
 
 If a signer points these at the coordinator's RPC, F2 silently degrades to trusting the
 coordinator. Nothing in the code can prove independence — **verify it per box**, and
