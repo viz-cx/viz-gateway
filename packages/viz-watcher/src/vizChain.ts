@@ -355,7 +355,13 @@ export class VizJsChain implements VizChain {
   async gatewayBalanceMilliViz(account: string): Promise<bigint> {
     const accounts = await this.call<Account[]>((cb) => viz.api.getAccounts([account], cb));
     const acct = accounts?.[0];
-    if (!acct) return 0n;
+    // A backing account always exists on-chain, so a MISSING row here is an anomalous read
+    // (an empty getAccounts result — a partial/lagging node reply that isn't a transport error,
+    // so `call` never rotated), NOT a real zero balance. Returning 0n let recon read phantom
+    // under-backing and false-pause the gateway (2026-07-28 incident: locked=0 while gram.gate
+    // held 43.5k VIZ). Throw so recon treats it as INDETERMINATE (check() returns null → no
+    // pause, consecutive-failure counter tracks it) rather than as a fatal zero.
+    if (!acct) throw new Error(`gatewayBalanceMilliViz: backing account ${account} not found (empty getAccounts read)`);
     return vizToMilli(acct.balance);
   }
 
