@@ -27,4 +27,13 @@ export const CONFIG = {
     viz: "https://node.viz.cx",
     coordinator: "https://gateway.viz.cx", // base; /health and /fees derived from it
   },
+  dex: {
+    // STON.fi asset endpoint — CORS `*`, browser-fetchable. Append the minter address.
+    stonfiAssetUrl: "https://api.ston.fi/v1/assets/",
+    // Trade deep-links (both valid today; wVIZ is a standard Jetton). Append minter address.
+    stonfiSwapUrl: "https://app.ston.fi/swap?ft=TON&tt=",
+    dedustSwapUrl: "https://dedust.io/swap/TON/",
+    // Explorer. Append minter address.
+    explorerUrl: "https://tonviewer.com/",
+  },
 };

@@ -1,5 +1,7 @@
 import { CONFIG } from "./config.js";
 import { buildPegoutBody, wvizToBaseUnits, isValidVizAccount, computePegInFee } from "./pegout.mjs";
+import { fetchCirculatingSupply, fetchVizLocked, fetchWvizPriceUsd } from "./token-stats.js";
+import { formatPriceUsd, baseUnitsToNumber } from "./token-format.mjs";
 import { TonConnectUI } from "https://esm.sh/@tonconnect/ui@2";
 import { TonClient, JettonMaster, beginCell, Address, toNano } from "https://esm.sh/@ton/ton@15";
 
@@ -313,36 +315,25 @@ function setItem(id, label, value) {
 function hideItem(id) { $(id).classList.add("hidden"); }
 
 async function loadSupply() {
-  try {
-    const res = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.minter), "get_jetton_data", []));
-    const totalSupply = res.stack.readBigNumber(); // base units
-    // wVIZ returned for peg-out is held in the gateway's own jetton wallet, not burned —
-    // so the raw minter supply overstates what's actually in users' hands. Always subtract
-    // the gateway-held balance to report true circulating supply. If that balance can't be
-    // read, let it throw to the outer catch (hide the line) rather than fall back to the raw
-    // total — showing an inflated figure that includes gateway-held wVIZ would contradict
-    // "VIZ locked" and defeat the point of the reconciliation display.
-    const gw = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.gatewayJettonWallet), "get_wallet_data", []));
-    const held = gw.stack.readBigNumber();
-    const circulating = totalSupply > held ? totalSupply - held : 0n;
-    setItem("st-supply", "wVIZ circulating", (Number(circulating) / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 }) + " wVIZ");
-    return Number(circulating) / 1000;
-  } catch (_) { hideItem("st-supply"); return null; }
+  const circulating = await fetchCirculatingSupply(); // BigInt | null
+  if (circulating === null) { hideItem("st-supply"); return null; }
+  const whole = baseUnitsToNumber(circulating, CONFIG.wviz.decimals);
+  setItem("st-supply", "wVIZ circulating", whole.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " wVIZ");
+  return whole;
 }
 
 async function loadVizLocked() {
-  try {
-    const r = await fetch(CONFIG.rpc.viz, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "call", params: ["database_api", "get_accounts", [[CONFIG.pegIn.vizAccount]]] }),
-    });
-    const j = await r.json();
-    const acct = j?.result?.[0] ?? j?.result?.accounts?.[0];
-    const bal = parseFloat(String(acct?.balance ?? "").replace(/[^\d.]/g, ""));
-    if (!isFinite(bal)) throw new Error("no balance");
-    setItem("st-reserve", "VIZ locked", bal.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " VIZ");
-    return bal;
-  } catch (_) { hideItem("st-reserve"); return null; }
+  const bal = await fetchVizLocked(); // number | null
+  if (bal === null) { hideItem("st-reserve"); return null; }
+  setItem("st-reserve", "VIZ locked", bal.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " VIZ");
+  return bal;
+}
+
+async function loadPrice() {
+  const label = formatPriceUsd(await fetchWvizPriceUsd()); // string | null
+  if (label === null) { hideItem("st-price"); return; }
+  setItem("st-price", "wVIZ price", label);
+  $("st-price").classList.remove("hidden");
 }
 
 async function loadHealth() {
@@ -374,4 +365,4 @@ async function loadHealth() {
 
 selectTab(location.hash === "#peg-in" ? "in" : "out", false);
 validatePegout();
-loadSupply(); loadVizLocked(); loadHealth(); loadFees();
+loadSupply(); loadVizLocked(); loadHealth(); loadFees(); loadPrice();
