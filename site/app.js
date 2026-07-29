@@ -325,7 +325,7 @@ async function loadSupply() {
     const gw = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.gatewayJettonWallet), "get_wallet_data", []));
     const held = gw.stack.readBigNumber();
     const circulating = totalSupply > held ? totalSupply - held : 0n;
-    setItem("st-supply", "wVIZ circulating", (Number(circulating) / 1000).toLocaleString() + " wVIZ");
+    setItem("st-supply", "wVIZ circulating", (Number(circulating) / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 }) + " wVIZ");
     return Number(circulating) / 1000;
   } catch (_) { hideItem("st-supply"); return null; }
 }
@@ -340,7 +340,7 @@ async function loadVizLocked() {
     const acct = j?.result?.[0] ?? j?.result?.accounts?.[0];
     const bal = parseFloat(String(acct?.balance ?? "").replace(/[^\d.]/g, ""));
     if (!isFinite(bal)) throw new Error("no balance");
-    setItem("st-reserve", "VIZ locked", bal.toLocaleString() + " VIZ");
+    setItem("st-reserve", "VIZ locked", bal.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " VIZ");
     return bal;
   } catch (_) { hideItem("st-reserve"); return null; }
 }
