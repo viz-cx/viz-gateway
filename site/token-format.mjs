@@ -8,7 +8,7 @@
 export function formatPriceUsd(n) {
   if (n == null || !isFinite(n) || n <= 0) return null;
   let s = Number(n).toPrecision(4);
-  if (s.includes("e")) s = Number(n).toFixed(20); // avoid sci-notation for tiny values
+  if (s.includes("e")) s = Number(s).toFixed(20); // avoid sci-notation for tiny values
   if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
   return "$" + s;
 }
@@ -17,7 +17,7 @@ export function formatPriceUsd(n) {
 // null if either input is missing/invalid.
 export function formatMarketCapUsd(priceUsd, circulatingViz) {
   if (priceUsd == null || !isFinite(priceUsd) || priceUsd <= 0) return null;
-  if (circulatingViz == null || !isFinite(circulatingViz) || circulatingViz < 0) return null;
+  if (circulatingViz == null || !isFinite(circulatingViz) || circulatingViz <= 0) return null;
   return "$" + Math.round(priceUsd * circulatingViz).toLocaleString("en-US");
 }
 
