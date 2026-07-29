@@ -317,13 +317,13 @@ async function loadSupply() {
     const res = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.minter), "get_jetton_data", []));
     const totalSupply = res.stack.readBigNumber(); // base units
     // wVIZ returned for peg-out is held in the gateway's own jetton wallet, not burned —
-    // so total minter supply overstates what's actually in users' hands. Subtract the
-    // gateway-held balance to report true circulating supply.
-    let held = 0n;
-    try {
-      const gw = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.gatewayJettonWallet), "get_wallet_data", []));
-      held = gw.stack.readBigNumber();
-    } catch (_) { /* gateway wallet unreadable — fall back to raw supply */ }
+    // so the raw minter supply overstates what's actually in users' hands. Always subtract
+    // the gateway-held balance to report true circulating supply. If that balance can't be
+    // read, let it throw to the outer catch (hide the line) rather than fall back to the raw
+    // total — showing an inflated figure that includes gateway-held wVIZ would contradict
+    // "VIZ locked" and defeat the point of the reconciliation display.
+    const gw = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.gatewayJettonWallet), "get_wallet_data", []));
+    const held = gw.stack.readBigNumber();
     const circulating = totalSupply > held ? totalSupply - held : 0n;
     setItem("st-supply", "wVIZ circulating", (Number(circulating) / 1000).toLocaleString() + " wVIZ");
     return Number(circulating) / 1000;
