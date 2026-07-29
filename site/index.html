@@ -53,6 +53,7 @@
       <a href="#how">How it works</a>
       <a href="#security">Security</a>
       <a href="#fees">Fees</a>
+      <a href="#token">Token</a>
       <a href="#faq">FAQ</a>
       <a href="https://github.com/viz-cx/viz-gateway" target="_blank" rel="noopener">GitHub</a>
     </nav>
@@ -274,6 +275,46 @@
             <span>The whole system halts automatically the moment the two sides don't match.</span>
           </div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TOKEN -->
+  <section class="section" id="token">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Token</span>
+        <h2>wVIZ at a glance.</h2>
+      </div>
+      <div class="grid-3">
+        <article class="card">
+          <h3>Wrapped VIZ (wVIZ)</h3>
+          <p>Standard Jetton on GRAM · 3 decimals · 1 wVIZ = 1 VIZ.</p>
+          <div class="addr">
+            <code>EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ</code>
+            <button class="copy-btn" type="button" data-copy="EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ" aria-label="Copy wVIZ token address">
+              <svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg>
+              <svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
+            </button>
+          </div>
+          <a class="src-link" id="tok-explorer" href="#" target="_blank" rel="noopener">View on Tonviewer</a>
+        </article>
+
+        <article class="card">
+          <h3>Market</h3>
+          <div class="tok-row hidden" id="tok-price-row"><span>Price</span> <b id="tok-price">—</b></div>
+          <div class="tok-row hidden" id="tok-mcap-row"><span>Market cap</span> <b id="tok-mcap">—</b></div>
+          <div class="tok-row hidden" id="tok-supply-row"><span>Circulating</span> <b id="tok-supply">—</b></div>
+          <div class="tok-row hidden" id="tok-locked-row"><span>VIZ locked</span> <b id="tok-locked">—</b></div>
+          <p class="tok-empty" id="tok-empty">Live figures load from chain and the DEX. Price shows once a pool is live.</p>
+        </article>
+
+        <article class="card">
+          <h3>Trade</h3>
+          <p>wVIZ trades as a standard Jetton on TON DEXes.</p>
+          <a class="btn btn-primary" id="tok-stonfi" href="#" target="_blank" rel="noopener">Trade on STON.fi</a>
+          <a class="btn btn-ghost" id="tok-dedust" href="#" target="_blank" rel="noopener" style="margin-top:10px;">Trade on DeDust</a>
+        </article>
       </div>
     </div>
   </section>
@@ -551,5 +592,6 @@
   })();
 </script>
 
+<script type="module" src="./token.js"></script>
 
 </body></html>

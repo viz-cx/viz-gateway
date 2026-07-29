@@ -877,3 +877,16 @@
 .bal-link { background: none; border: none; color: var(--ton-2); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; }
 .bal-link:hover { color: var(--ton); }
 .warn-msg { color: #ffb454; font-size: 13px; min-height: 16px; }
+
+/* --- Token section rows --- */
+#token .card h3 { margin-bottom: 12px; }
+#token .card .addr { margin: 14px 0; }
+#token .card .btn { width: 100%; justify-content: center; }
+#token .tok-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+}
+#token .tok-row b { color: var(--text, #fff); }
+#token .tok-empty { color: var(--muted, #8b97a8); font-size: 0.9rem; margin-top: 10px; }
