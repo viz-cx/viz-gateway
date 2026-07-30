@@ -24,7 +24,10 @@ export const CONFIG = {
   },
   rpc: {
     toncenter: "https://toncenter.com/api/v2/jsonRPC", // NO api key in the static site
-    viz: "https://node.viz.cx",
+    // VIZ node failover list (mirrors federation.json vizNodeUrls). Any single node
+    // can silently return empty account reads while degraded/out-of-sync, so the
+    // site tries them in order — never trust the first one alone.
+    viz: ["https://node.viz.cx", "https://api.viz.world", "https://mirror.viz.world"],
     coordinator: "https://gateway.viz.cx", // base; /health and /fees derived from it
   },
   dex: {
