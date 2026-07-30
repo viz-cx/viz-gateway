@@ -33,17 +33,24 @@ export async function fetchCirculatingSupply() {
 }
 
 // VIZ (float) locked in the gateway account, via the VIZ node. null on failure.
+// Tries each node in CONFIG.rpc.viz in order: a degraded node returns an empty
+// `result: []` (not an error) for every account, so an empty/missing account is
+// treated as a miss and we fall through to the next node — never surface it as 0.
 export async function fetchVizLocked() {
-  try {
-    const r = await fetch(CONFIG.rpc.viz, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "call", params: ["database_api", "get_accounts", [[CONFIG.pegIn.vizAccount]]] }),
-    });
-    const j = await r.json();
-    const acct = j?.result?.[0] ?? j?.result?.accounts?.[0];
-    const bal = parseFloat(String(acct?.balance ?? "").replace(/[^\d.]/g, ""));
-    return isFinite(bal) ? bal : null;
-  } catch (_) { return null; }
+  const nodes = Array.isArray(CONFIG.rpc.viz) ? CONFIG.rpc.viz : [CONFIG.rpc.viz];
+  for (const node of nodes) {
+    try {
+      const r = await fetch(node, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "call", params: ["database_api", "get_accounts", [[CONFIG.pegIn.vizAccount]]] }),
+      });
+      const j = await r.json();
+      const acct = j?.result?.[0] ?? j?.result?.accounts?.[0];
+      const bal = parseFloat(String(acct?.balance ?? "").replace(/[^\d.]/g, ""));
+      if (isFinite(bal)) return bal;
+    } catch (_) { /* try next node */ }
+  }
+  return null;
 }
 
 // wVIZ USD price from STON.fi. null while there is no pool (dex_price_usd absent).
