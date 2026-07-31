@@ -32,11 +32,11 @@ registry:
 
 builder:
   arch: amd64
-  remote: ssh://axveer-builder        # native amd64 remote builder (deploy@65.109.104.157:666)
+  remote: ssh://axveer-builder        # native amd64 remote builder on martin (via the axveer-builder alias)
   local: false
 
 # kamal-proxy owns :443 on axveer and terminates TLS for gateway.viz.cx (clean LE cert,
-# no cross-box hop — vpn-amnezia can't serve :443). Applies to the `web` role only; the
+# no cross-box hop — the coordinator serves plain HTTP on :8100). Applies to the `web` role only; the
 # worker roles set proxy: false below.
 proxy:
   ssl: true
