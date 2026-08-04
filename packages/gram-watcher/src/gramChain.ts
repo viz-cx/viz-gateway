@@ -369,11 +369,7 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
       // Subtract wVIZ held INERT in the gateway's OWN jetton wallet. A peg-out TRANSFERS
       // wVIZ into the gateway wallet (it is not burned), so that balance is non-circulating
       // reserve — counting it as circulating makes recon see phantom under-backing (mirrors
-      // the site display fix 497f835: circulating = totalSupply − gatewayHeld). If the wallet
-      // read fails, fall back to raw totalSupply, which OVER-counts circulating → recon is
-      // stricter/fail-closed, never masking a genuine shortfall. (A transient failure on the
-      // primary read is caught by tonCall and rotates to another endpoint BEFORE we reach this
-      // fallback, so the stricter path is only taken when the held read genuinely errors.)
+      // the site display fix 497f835: circulating = totalSupply − gatewayHeld).
       if (this.gatewayWallet) {
         try {
           const wallet = this.client.open(JettonWallet.create(this.gatewayWallet));
@@ -381,7 +377,18 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
           const circulating = data.totalSupply - held;
           return circulating > 0n ? circulating : 0n;
         } catch (err) {
-          console.warn(`[gram] gateway-held balance read failed; using raw totalSupply (stricter): ${String(err)}`);
+          // A TRANSIENT held read (toncenter 5xx/timeout/reset) must NOT silently fall back
+          // to raw totalSupply: when the gateway holds a non-trivial wVIZ reserve (a peg-out
+          // pending burn), that fallback OVER-counts circulating by the full held balance and
+          // trips a FALSE under-backing pause (2026-08-04: held=3960 VIZ → phantom −3912.5).
+          // Re-throw so tonCall rotates to another endpoint; if every endpoint is down the
+          // error propagates to recon, which treats an unavailable supply as INDETERMINATE
+          // (consecutive-failure counter, pauses only after N) rather than a shortfall —
+          // mirrors the empty-backing-read fix (PR #111). A NON-transient/contract error
+          // (e.g. "unable to execute get method" on an uninitialized wallet) means the getter
+          // genuinely can't run = zero reserve, so held=0 and raw totalSupply is correct.
+          if (isTransientTonError(err)) throw err;
+          console.warn(`[gram] gateway-held read non-transient (uninitialized wallet ⇒ held=0): ${String(err)}`);
         }
       }
       return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
