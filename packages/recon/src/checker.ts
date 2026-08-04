@@ -1,4 +1,4 @@
-import type { GatewayStore, RemoteChainId } from "@gateway/common";
+import { reconSnapshotKey, serializeReconSnapshot, type GatewayStore, type RemoteChainId, type ReconStatus } from "@gateway/common";
 import { notifyStaff } from "@gateway/log";
 
 /** True iff the TON balance is under the configured floor. */
@@ -145,7 +145,46 @@ export class Recon {
       console.error(`[recon] CRITICAL: UNDER-BACKING DETECTED -> gateway paused: ${reason}`);
       notifyStaff("drift", reason, { locked: String(locked), circulating: String(circulating) });
     }
+    // Publish the figures for GET /recon. Deliberately LAST: the pause above must never
+    // wait on (or be lost to) a KV write, and this must never change what check() returns
+    // — a snapshot is a display convenience, the invariant decision is the product.
+    // Only reached on a definitive result; the indeterminate returns above skip it, so a
+    // stale-but-true snapshot is served rather than a fresh-looking substituted one.
+    await this.publishSnapshot({
+      locked,
+      circulating,
+      unsweptFees,
+      drift,
+      status: ok ? "OK" : "UNDER_BACKED",
+    });
     return ok;
+  }
+
+  /** Best-effort snapshot write. Swallows store errors by design (see call site). */
+  private async publishSnapshot(f: {
+    locked: bigint;
+    circulating: bigint;
+    unsweptFees: bigint;
+    drift: bigint;
+    status: ReconStatus;
+  }): Promise<void> {
+    const chain = this.chain ?? "ALL";
+    try {
+      await this.store.setState(
+        reconSnapshotKey(chain),
+        serializeReconSnapshot({
+          chain,
+          lockedMilliViz: f.locked,
+          circulatingMilliViz: f.circulating,
+          unsweptFeesMilliViz: f.unsweptFees,
+          driftMilliViz: f.drift,
+          status: f.status,
+          checkedAt: Date.now(),
+        }),
+      );
+    } catch (err) {
+      console.warn(`[recon] snapshot write failed for ${chain} (check result stands):`, err);
+    }
   }
 
   /**

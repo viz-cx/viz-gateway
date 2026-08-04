@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { resolve } from "node:path";
-import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfig, readLimitedBody, pegInFeePolicyFor, type CanonicalAction, type PegInFeePolicy } from "@gateway/common";
-import { corsHeadersFor, serializeFees, loadAllowedOrigins, serveStatic } from "./http";
+import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfig, readLimitedBody, pegInFeePolicyFor, reconSnapshotKey, type CanonicalAction, type PegInFeePolicy } from "@gateway/common";
+import { corsHeadersFor, serializeFees, serializeReconSnapshots, loadAllowedOrigins, serveStatic } from "./http";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
@@ -167,7 +167,32 @@ async function main(): Promise<void> {
       });
       return;
     }
-    if (req.method === "OPTIONS" && (req.url === "/health" || req.url === "/fees")) {
+    if (req.method === "GET" && req.url === "/recon") {
+      const cors = corsHeadersFor(req.headers.origin, allowedOrigins);
+      // Only the chains this deployment actually configures (same derivation recon uses),
+      // so an unconfigured chain is never advertised with a stale or empty row.
+      const chains = [
+        ...(cfg.gram.jettonMinterAddress ? ["GRAM"] : []),
+        ...(cfg.solana.wvizMint ? ["SOLANA"] : []),
+      ];
+      void Promise.all([
+        store.isPaused(),
+        Promise.all(chains.map(async (c) => [c, await store.getState(reconSnapshotKey(c))] as const)),
+      ])
+        .then(([paused, entries]) => {
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "max-age=15", ...cors });
+          res.end(JSON.stringify({ ok: true, paused, chains: serializeReconSnapshots(entries) }));
+        })
+        .catch((err: unknown) => {
+          // Store unavailable: say so instead of emitting an empty `chains` map, which a
+          // consumer would read as "recon has no data" rather than "we could not look".
+          console.warn("[coordinator] /recon read failed:", err);
+          res.writeHead(503, { "content-type": "application/json", ...cors });
+          res.end(JSON.stringify({ ok: false, error: "recon snapshot unavailable" }));
+        });
+      return;
+    }
+    if (req.method === "OPTIONS" && (req.url === "/health" || req.url === "/fees" || req.url === "/recon")) {
       const cors = corsHeadersFor(req.headers.origin, allowedOrigins);
       res.writeHead(204, { ...cors, "access-control-allow-methods": "GET" });
       res.end();
