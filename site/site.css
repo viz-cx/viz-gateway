@@ -624,6 +624,16 @@
     50% { transform: scaleX(0.82); }
   }
   .eq { font-size: 22px; font-weight: 800; color: var(--muted); flex: 0 0 auto; }
+
+  /* Live figures from GET /recon (site/recon.js). `.val` replaces the static `.sub`
+     description only once a real number is in hand; `.live` swaps the illustrative
+     sweep animation for a real width. Absent data = none of these classes apply. */
+  .meter .lab .val { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .meter.live .fill { animation: none; transition: width 0.6s ease; }
+  .status.paused { color: #ffb454; background: rgba(255, 180, 84, 0.12); border-color: rgba(255, 180, 84, 0.34); }
+  .status.paused .dot { background: #ffb454; box-shadow: 0 0 8px 1px rgba(255, 180, 84, 0.7); animation: none; }
+  .status.warn { color: var(--muted); background: var(--code-bg); border-color: var(--stroke-2); }
+  .status.warn .dot { background: var(--muted-2); box-shadow: none; animation: none; }
   .recon-foot {
     margin-top: 22px;
     padding-top: 18px;
@@ -847,7 +857,7 @@
     .node::after,
     .hero-badge .dot,
     .status .dot,
-    .meter .fill { animation: none !important; }
+    .meter .fill { animation: none !important; transition: none !important; }
     .card:hover, .btn:hover, .btn:active { transform: none; }
   }
 

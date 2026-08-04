@@ -1,4 +1,4 @@
-import type { GatewayFeeConfig } from "@gateway/common";
+import { parseReconSnapshot, type GatewayFeeConfig, type ReconSnapshot } from "@gateway/common";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { normalize, join, extname, resolve, sep } from "node:path";
@@ -39,6 +39,38 @@ export function serializeFees(fees: GatewayFeeConfig): Record<string, unknown> {
     refundFeeMilliViz: Number(fees.refundFeeMilliViz),
     decimals: 3,
   };
+}
+
+/**
+ * Public /recon payload: the last DEFINITIVE peg-invariant check per chain, as published
+ * by recon into the gateway_state KV. Read-only mirror of figures that are already public
+ * on-chain (a VIZ account balance and a Jetton total supply), so nothing here is a leak.
+ *
+ * `chains` is a map, not an array, so wiring SOLANA later is additive rather than a shape
+ * break for the site. A chain with no snapshot yet (fresh boot, or recon has only ever
+ * been indeterminate) is simply ABSENT — the consumer must handle an empty map, and must
+ * treat freshness as a function of `checkedAt`, not of presence.
+ *
+ * milliViz values go out as JS numbers, matching serializeFees: VIZ's total supply in
+ * mVIZ is ~1e11, far inside the 2^53 exact-integer range.
+ */
+export function serializeReconSnapshots(
+  entries: readonly (readonly [chain: string, kvValue: string | null])[],
+): Record<string, unknown> {
+  const chains: Record<string, unknown> = {};
+  for (const [chain, kvValue] of entries) {
+    const snap: ReconSnapshot | null = parseReconSnapshot(kvValue);
+    if (!snap) continue; // absent or malformed → omit; never emit a zero-filled row
+    chains[chain] = {
+      lockedMilliViz: Number(snap.lockedMilliViz),
+      circulatingMilliViz: Number(snap.circulatingMilliViz),
+      unsweptFeesMilliViz: Number(snap.unsweptFeesMilliViz),
+      driftMilliViz: Number(snap.driftMilliViz),
+      status: snap.status,
+      checkedAt: snap.checkedAt,
+    };
+  }
+  return chains;
 }
 
 /** Committed, PR-extensible origin allowlist. Fail closed: bad file → []. */
