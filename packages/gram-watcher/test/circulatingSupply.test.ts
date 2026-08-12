@@ -8,8 +8,9 @@ import { GramHttpChain } from "../src/gramChain";
 // subtracted. The regression under test (2026-08-04): a TRANSIENT held-read failure must NOT fall
 // back to raw totalSupply — with a large held reserve that over-counts circulating and trips a
 // FALSE under-backing pause. It must re-throw so tonCall rotates endpoints, and if all fail, recon
-// treats the supply as INDETERMINATE. A NON-transient (contract) error = uninitialized wallet =
-// zero reserve = held 0 (raw totalSupply is then correct).
+// treats the supply as INDETERMINATE. A NON-transient (contract) error falls back to held=0 ONLY
+// when getContractState positively shows the wallet not active (2026-08-12: a sick node's
+// "exit_code: -13" on the deployed wallet must NOT be taken as proof of zero reserve).
 
 const MINTER = "EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ";
 const GATEWAY_JW = "EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy";
@@ -20,12 +21,13 @@ const MULTISIG = "EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0";
  * getJettonData() (on the master-opened contract) and getBalance() (on the wallet-opened one).
  * The single mock serves both; the production code only calls the relevant one on each.
  */
-function fakeClient(totalSupply: bigint, getBalance: () => Promise<bigint>): TonClient {
+function fakeClient(totalSupply: bigint, getBalance: () => Promise<bigint>, state = "active"): TonClient {
   return {
     open: (_c: unknown) => ({
       getJettonData: async () => ({ totalSupply }),
       getBalance,
     }),
+    getContractState: async () => ({ state }),
   } as unknown as TonClient;
 }
 
@@ -70,13 +72,30 @@ test("TRANSIENT held-read failure ROTATES to a healthy endpoint and succeeds", a
   assert.equal(await chain.circulatingSupplyMilliViz(), 246_835_248n);
 });
 
-test("NON-transient (contract) held-read error ⇒ held=0 ⇒ raw totalSupply", async () => {
+test("NON-transient held-read error + wallet NOT active ⇒ held=0 ⇒ raw totalSupply", async () => {
   // An uninitialized gateway wallet reverts the get-method — a genuine "zero reserve" state, not a
-  // transport blip. Fall back to raw totalSupply (held=0 is correct); do NOT churn the ring.
+  // transport blip. The state read POSITIVELY confirms it; only then is raw totalSupply correct.
   const chain = chainWith([
-    fakeClient(250_795_248n, async () => {
-      throw new Error("Unable to execute get method");
-    }),
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      "uninitialized",
+    ),
   ]);
   assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
+});
+
+test("NON-transient held-read error + wallet ACTIVE ⇒ PROPAGATES (sick node, no held=0 guess)", async () => {
+  // The 2026-08-12 false-pause: a node answered "exit_code: -13" for the DEPLOYED gateway wallet.
+  // The old code took any non-transient error as proof of an uninitialized wallet and fell back to
+  // raw totalSupply, over-counting circulating by the 3960 VIZ reserve. With the wallet provably
+  // active, the error must propagate so recon goes INDETERMINATE instead of pausing.
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => {
+      throw new Error("Unable to execute get method. Got exit_code: -13");
+    }),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /exit_code: -13/);
 });
