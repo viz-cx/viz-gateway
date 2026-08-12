@@ -384,11 +384,16 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
           // Re-throw so tonCall rotates to another endpoint; if every endpoint is down the
           // error propagates to recon, which treats an unavailable supply as INDETERMINATE
           // (consecutive-failure counter, pauses only after N) rather than a shortfall —
-          // mirrors the empty-backing-read fix (PR #111). A NON-transient/contract error
-          // (e.g. "unable to execute get method" on an uninitialized wallet) means the getter
-          // genuinely can't run = zero reserve, so held=0 and raw totalSupply is correct.
+          // mirrors the empty-backing-read fix (PR #111).
           if (isTransientTonError(err)) throw err;
-          console.warn(`[gram] gateway-held read non-transient (uninitialized wallet ⇒ held=0): ${String(err)}`);
+          // A NON-transient get-method failure is NOT proof the wallet is uninitialized:
+          // 2026-08-12 a sick node returned "exit_code: -13" for the DEPLOYED, funded gateway
+          // wallet (and the minter), and the held=0 guess re-created the same false pause.
+          // Only a positive state read may authorize the held=0 fallback; an ACTIVE wallet
+          // means the failure is the node's, so re-throw → recon INDETERMINATE.
+          const state = await this.client.getContractState(this.gatewayWallet);
+          if (state.state === "active") throw err;
+          console.warn(`[gram] gateway jetton wallet ${state.state} ⇒ held=0: ${String(err)}`);
         }
       }
       return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
