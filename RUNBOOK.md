@@ -549,6 +549,41 @@ burned amount.
 - Confirm a below-minimum deposit (< 2,000 VIZ) is logged "below minimum; flag
   for refund" and not minted.
 
+### Unpausing production (after verifying the pause is false)
+
+The pause is LATCHED: recon pauses on a definitive under-backing read but never
+auto-unpauses, so a healthy `GET /recon` snapshot with `paused: true` means a
+past tick tripped it. Before clearing, verify backing INDEPENDENTLY of the
+gateway (do not trust the numbers in the pause reason):
+
+- locked: `gram.gate` balance via any public VIZ node
+  (`database_api.get_accounts`).
+- circulating: minter `total_supply` MINUS the gateway jetton wallet's balance
+  (toncenter `getTokenData` on both; addresses in `federation.json` →
+  `gram`). A pause reason whose `circulating` equals raw totalSupply exactly
+  is the tell-tale of a held-read failure, not a real shortfall.
+- Healthy invariant: `locked − circulating − unsweptFees ≥ 0` (structural
+  over-backing is the safe direction).
+
+Only then clear the two KV rows (mirrors `store.unpause()`). All five
+coordinator roles share one sqlite file; write from the `-web-` container:
+
+```bash
+ssh -p 666 deploy@axveer.io
+docker exec -i $(docker ps --format '{{.Names}}' | grep viz-gateway-coordinator-web) node -e '
+const {DatabaseSync} = require("node:sqlite");
+const db = new DatabaseSync("/app/data/gateway.sqlite");
+const up = db.prepare("INSERT INTO gateway_state(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at");
+up.run("paused","0",Date.now()); up.run("pause_reason","",Date.now());
+console.log(db.prepare("SELECT key,value FROM gateway_state WHERE key = ? OR key = ?").all("paused","pause_reason"));'
+```
+
+Then confirm `GET /health` shows `paused: false` and watch recon log a few
+`status=OK` ticks — if the root cause is still live the pause re-latches
+within minutes, and the fix must deploy first. (node:sqlite gotcha: bind
+positional `?` params; `:name` placeholders with positional args throw
+"column index out of range".)
+
 ## Rotating the operator set
 
 Any current operator can rotate the VIZ `active`/`regular` authority to a new
