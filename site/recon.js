@@ -10,7 +10,7 @@
 // Pure math/formatting lives in recon-format.mjs (tested by tools/recon-meters-spike.cjs).
 import { CONFIG } from "./config.js";
 import {
-  parseReconPayload, expectedLockedMilliViz, backingPct, meterFills,
+  parseReconPayload, backingPct, meterFills,
   formatViz, formatDriftViz, formatAgo, isStale,
 } from "./recon-format.mjs";
 
@@ -54,7 +54,11 @@ async function load() {
   } catch (_) { return; }
   if (!payload) return; // no snapshot yet, or a partial one — say nothing
 
-  const owed = expectedLockedMilliViz(payload.circulating, payload.unswept);
+  // Circulating wVIZ as-is — the SAME figure the token panel and app.html show. Adding
+  // unsweptFees here made this card display a third number that looked like a rival
+  // supply figure. Unswept fees still count as backing owed in recon's own pause check
+  // (server side, checker.ts); this card just doesn't re-state them.
+  const owed = payload.circulating;
   const fills = meterFills(payload.locked, owed);
   const lockedLabel = formatViz(payload.locked);
   const owedLabel = formatViz(owed);
@@ -91,9 +95,10 @@ async function load() {
   }
 
   const foot = $("rc-foot-text");
-  const surplus = formatDriftViz(payload.drift);
+  const gap = payload.locked - payload.circulating; // matches the two bars above, not recon's structural drift
   if (foot && ago) {
-    foot.textContent = payload.drift > 0 && surplus
+    const surplus = formatDriftViz(gap);
+    foot.textContent = gap > 0 && surplus
       ? `Checked ${ago} — ${surplus} VIZ of surplus backing. The whole system halts automatically the moment the two sides don't match.`
       : `Checked ${ago}. The whole system halts automatically the moment the two sides don't match.`;
   }
