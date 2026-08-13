@@ -8,9 +8,9 @@ export const CONFIG = {
   },
   pegIn: {
     vizAccount: "gram.gate",
-    // WebVIZWallet deep-link: non-hash path, bare numeric amount (the hash-routed
-    // "N.NNN VIZ" form from DEEPLINKS.md does not resolve in the live wallet).
-    walletTransferUrl: "https://wallet.viz.world/assets/transfer/",
+    // WebVIZWallet deep-link: hash-routed path, bare numeric amount (the wallet is
+    // a hash router — the query rides inside the fragment).
+    walletTransferUrl: "https://wallet.viz.world/#/assets/transfer/",
   },
   fees: {
     floorMilliViz: 45000n,               // 45 VIZ (GRAM static floor)

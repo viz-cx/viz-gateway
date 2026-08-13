@@ -10,7 +10,7 @@
  * Run: node tools/deeplink-xss-proof.cjs
  */
 
-const WALLET_TRANSFER_URL = "https://wallet.viz.world/assets/transfer/";
+const WALLET_TRANSFER_URL = "https://wallet.viz.world/#/assets/transfer/";
 const GATEWAY_ACCOUNT = "gram.gate";
 
 // Faithful copy of site/app.js updatePegInDeeplink() URL construction.
@@ -58,7 +58,7 @@ function check(label, href, { amountShouldAppear } = {}) {
   if (href === null) { console.log(`  (button hidden — no wallet) ${label}`); return; }
 
   // 1. scheme must stay https
-  if (!href.startsWith("https://wallet.viz.world/assets/transfer/?")) {
+  if (!href.startsWith("https://wallet.viz.world/#/assets/transfer/?")) {
     problems.push("BASE/SCHEME ALTERED");
   }
   // 2. no raw dangerous chars anywhere in the href
