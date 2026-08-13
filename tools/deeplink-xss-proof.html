@@ -25,7 +25,7 @@ window.alert = function (msg) { ALERTS_FIRED++; _payloadsThatFired.push(String(m
 window.__xss = function (msg) { window.alert(msg); }; // used by the vulnerable control below
 
 // ---- EXACT copy of the production URL builder ----
-const WALLET_TRANSFER_URL = "https://wallet.viz.world/assets/transfer/";
+const WALLET_TRANSFER_URL = "https://wallet.viz.world/#/assets/transfer/";
 const GATEWAY_ACCOUNT = "gram.gate";
 function buildDeeplink(userAddress, amountRaw) {
   if (!userAddress) return null;
