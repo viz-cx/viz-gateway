@@ -128,7 +128,7 @@ export function parseJettonDeposit(
  */
 export function txComputeSucceeded(tx: Pick<Transaction, "description">): boolean {
   const d = tx.description;
-  return d.type === "generic" && d.computePhase.type === "vm" && d.computePhase.success;
+  return d?.type === "generic" && d.computePhase.type === "vm" && d.computePhase.success;
 }
 
 /**

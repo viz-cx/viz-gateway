@@ -61,6 +61,8 @@ function makeTx(hashHex, nowSec, body) {
     hash: () => Buffer.from(hashHex, "hex"),
     now: nowSec,
     inMessage: { body },
+    // A genuine credited transfer's compute phase committed; txComputeSucceeded gates on this.
+    description: { type: "generic", computePhase: { type: "vm", success: true } },
   };
 }
 
