@@ -585,6 +585,19 @@
   .sec-copy .lead-p { color: var(--text); font-size: 18.5px; margin-bottom: 18px; }
   .sec-copy .src-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 26px; font-weight: 600; }
 
+  .recon-cards { display: flex; flex-direction: column; gap: 16px; }
+  .recon-top .t .rc-chain {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ton-2);
+    background: var(--code-bg);
+    border: 1px solid var(--stroke);
+    border-radius: 100px;
+    padding: 2px 8px;
+    margin-left: 2px;
+  }
   .recon {
     background: var(--panel);
     border: 1px solid var(--stroke);

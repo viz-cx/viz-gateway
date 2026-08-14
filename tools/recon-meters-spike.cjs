@@ -11,7 +11,7 @@ const assert = require("node:assert");
 
 (async () => {
   const {
-    parseReconPayload, expectedLockedMilliViz, backingPct, meterFills,
+    parseReconPayload, reconChains, expectedLockedMilliViz, backingPct, meterFills,
     formatViz, formatDriftViz, formatAgo, isStale, STALE_AFTER_MS,
   } = await import("../site/recon-format.mjs");
 
@@ -56,6 +56,49 @@ const assert = require("node:assert");
   );
   assert.strictEqual(parseReconPayload({ ...body, paused: true }, "GRAM").paused, true);
   console.log("[recon-card] parseReconPayload OK");
+
+  // --- reconChains: every live chain, sorted, each fully normalized ---
+  // Single-chain body (production today) yields exactly one entry, tagged.
+  const one = reconChains(body);
+  assert.strictEqual(one.length, 1);
+  assert.strictEqual(one[0].chain, "GRAM");
+  assert.strictEqual(one[0].locked, 43_547_500);
+  assert.strictEqual(one[0].paused, false);
+
+  // Two live chains come back sorted by name (SOLANA before... no: GRAM < SOLANA),
+  // so the render order is deterministic regardless of object key order.
+  const twoBody = {
+    ok: true,
+    paused: false,
+    chains: {
+      SOLANA: {
+        lockedMilliViz: 10_000_000, circulatingMilliViz: 9_990_000,
+        unsweptFeesMilliViz: 5_000, driftMilliViz: 5_000, status: "OK", checkedAt: CHECKED_AT,
+      },
+      GRAM: body.chains.GRAM,
+    },
+  };
+  const two = reconChains(twoBody);
+  assert.deepStrictEqual(two.map((c) => c.chain), ["GRAM", "SOLANA"], "sorted by chain name");
+  assert.strictEqual(two[1].locked, 10_000_000);
+
+  // A partial/invalid row is dropped, not rendered — the healthy chain still shows.
+  const mixed = {
+    ok: true, paused: false,
+    chains: { GRAM: body.chains.GRAM, SOLANA: { lockedMilliViz: 1 /* rest missing */ } },
+  };
+  assert.deepStrictEqual(reconChains(mixed).map((c) => c.chain), ["GRAM"], "partial chain omitted");
+
+  // The top-level paused flag propagates to every card.
+  assert.ok(reconChains({ ...twoBody, paused: true }).every((c) => c.paused === true));
+
+  // Nothing usable -> [] so the caller keeps the static illustration.
+  assert.deepStrictEqual(reconChains({ ok: true, chains: {} }), []);
+  assert.deepStrictEqual(reconChains({ ok: false }), []);
+  assert.deepStrictEqual(reconChains(null), []);
+  assert.deepStrictEqual(reconChains("nope"), []);
+  assert.deepStrictEqual(reconChains({ ok: true }), [], "no chains map -> []");
+  console.log("[recon-card] reconChains OK");
 
   // --- expectedLockedMilliViz: unswept fees are backing OWED, not surplus ---
   assert.strictEqual(expectedLockedMilliViz(43_500_000, 0), 43_500_000);

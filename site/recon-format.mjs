@@ -45,6 +45,30 @@ export function parseReconPayload(json, chain) {
 }
 
 /**
+ * Every chain present in a GET /recon body, each normalized through
+ * parseReconPayload, sorted by chain name for a deterministic render order.
+ * Returns [] when the body carries no usable chain (bad body, empty map, or every
+ * row partial) so the caller leaves the static illustration standing rather than
+ * rendering an empty panel. Each element is the parsed snapshot plus its `chain`.
+ *
+ * This is the multi-chain generalization of parseReconPayload(json, chain): the
+ * card no longer hardcodes a single remote (GRAM) — it draws one meter card per
+ * chain the coordinator reconciles (GRAM today, SOLANA once it is live), and a
+ * chain that has no snapshot yet is simply absent from the list.
+ */
+export function reconChains(json) {
+  if (!json || typeof json !== "object") return [];
+  const map = json.chains && typeof json.chains === "object" ? json.chains : null;
+  if (!map) return [];
+  const out = [];
+  for (const chain of Object.keys(map).sort()) {
+    const parsed = parseReconPayload(json, chain);
+    if (parsed) out.push({ chain, ...parsed });
+  }
+  return out;
+}
+
+/**
  * Backing the peg owes: circulating wVIZ PLUS fees minted-but-not-yet-swept. The
  * unswept part is why `locked` legitimately exceeds `circulating` — the card compares
  * against this, not against circulating alone, or it would misreport the surplus.
