@@ -40,11 +40,16 @@ function recordToAction(rec: OutboxRecord): CanonicalAction {
   };
 }
 
-async function submit(url: string, rec: OutboxRecord, timeoutMs: number): Promise<DeliveryResult> {
+async function submit(url: string, rec: OutboxRecord, timeoutMs: number, submitToken: string): Promise<DeliveryResult> {
   try {
     const res = await fetch(`${url.replace(/\/$/, "")}/submit`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // Authenticate to the coordinator's /submit (shared COORDINATOR_SUBMIT_TOKEN). Omitted
+        // when unset so an un-provisioned deployment still delivers (coordinator warns + allows).
+        ...(submitToken ? { authorization: `Bearer ${submitToken}` } : {}),
+      },
       body: JSON.stringify({ action: actionToWire(recordToAction(rec)) }),
       // Bound the call so a blackhole coordinator (socket accepted, no response) can't
       // wedge the delivery loop forever — the timeout surfaces as a caught error and the
@@ -77,6 +82,7 @@ async function tick(
     feesGateAccount: string;
     fees: GatewayFeeConfig;
     refundFeeMilliViz: bigint;
+    submitToken: string;
   },
   state: { alertedWedged: Set<string> },
 ): Promise<void> {
@@ -186,7 +192,7 @@ async function tick(
     // CONFIRMED is recoverable: orphaned BROADCAST rows are requeued and the
     // coordinator's actionExecuted check prevents a double-mint/release.
     await store.setStatus(rec.id, "BROADCAST");
-    const result = await submit(url, rec, opts.submitTimeoutMs);
+    const result = await submit(url, rec, opts.submitTimeoutMs, opts.submitToken);
     const t = planTransition(rec, result, Date.now(), opts);
     await store.setStatus(rec.id, t.status, t.patch);
     if (t.status !== "QUEUED") state.alertedWedged.delete(rec.id); // recovered/advanced — re-arm
@@ -248,6 +254,7 @@ async function main(): Promise<void> {
     feesGateAccount: cfg.feesGateAccount,
     fees: cfg.fees,
     refundFeeMilliViz: cfg.fees.refundFeeMilliViz,
+    submitToken: cfg.coordinator.submitToken,
   };
   // Persists across ticks so a wedged row is alerted once, not every loop.
   const state = { alertedWedged: new Set<string>() };

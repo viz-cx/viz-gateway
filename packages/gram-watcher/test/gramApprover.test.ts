@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Address } from "@ton/ton";
-import { GramApprover, encodeReceipt, assertReturnOrderHash } from "../src/gramApprove";
-import { returnOrderCell } from "../src/gramChain";
+import { GramApprover, encodeReceipt, assertReturnOrderHash, assertDeployedOrderHash } from "../src/gramApprove";
+import { returnOrderCell, mintOrderCell } from "../src/gramChain";
 
 // The GramApprover send path is proven end-to-end by the sandbox spikes; here we lock its
 // pure surface and fail-closed constructor guards (the config-error boundary that must never
@@ -33,6 +33,27 @@ test("assertReturnOrderHash: matching hash passes, mismatch fails closed", () =>
   );
   // A different amount reshapes the order -> the pinned hash no longer matches.
   assert.throws(() => assertReturnOrderHash(gw, to, amount + 1n, hashHex), /return order hash mismatch/);
+});
+
+test("assertDeployedOrderHash: only the exact validated body may be approved (threshold-bypass guard)", () => {
+  const minter = Address.parse(ZERO);
+  const to = Address.parse(ONE);
+  const amount = 1_000n;
+  const { cell, hashHex } = mintOrderCell(minter, to, amount);
+
+  // The genuine deployed body hashes to what we validated -> approve.
+  assert.doesNotThrow(() => assertDeployedOrderHash(cell, hashHex, ZERO, "act-1"));
+
+  // A DIFFERENT body deployed at the same pinned address (e.g. a compromised operator's drain /
+  // update_multisig_params order) must fail closed even though the address matches.
+  const foreign = mintOrderCell(minter, to, amount + 1n).cell; // any body != the validated one
+  assert.throws(
+    () => assertDeployedOrderHash(foreign, hashHex, ZERO, "act-1"),
+    /on-chain order body .* does not match validated action/,
+  );
+
+  // No order cell present (absent/unreadable) is not a validated body -> fail closed.
+  assert.throws(() => assertDeployedOrderHash(null, hashHex, ZERO, "act-1"), /!= expected/);
 });
 
 test("constructor fails closed on missing minter / multisig / mnemonic", () => {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { corsHeadersFor, serializeFees, loadAllowedOrigins, resolveStaticPath, contentTypeFor } from "../src/http";
+import { corsHeadersFor, serializeFees, loadAllowedOrigins, resolveStaticPath, contentTypeFor, isSubmitAuthorized } from "../src/http";
 import type { GatewayFeeConfig } from "@gateway/common";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,6 +31,20 @@ test("corsHeadersFor returns no header for an unlisted origin", () => {
 
 test("corsHeadersFor returns no header when Origin is absent", () => {
   assert.deepEqual(corsHeadersFor(undefined, ["https://gateway.viz.cx"]), {});
+});
+
+test("isSubmitAuthorized: exact bearer token required when configured", () => {
+  const tok = "s3cret-submit-token";
+  assert.equal(isSubmitAuthorized(`Bearer ${tok}`, tok), true, "correct token passes");
+  assert.equal(isSubmitAuthorized(`Bearer wrong`, tok), false, "wrong token rejected");
+  assert.equal(isSubmitAuthorized(tok, tok), false, "missing Bearer scheme rejected");
+  assert.equal(isSubmitAuthorized(undefined, tok), false, "no header rejected");
+  assert.equal(isSubmitAuthorized(`Bearer ${tok} `, tok), false, "trailing junk rejected (length mismatch)");
+});
+
+test("isSubmitAuthorized: empty token = unauthenticated (allows, hole open until set)", () => {
+  assert.equal(isSubmitAuthorized(undefined, ""), true);
+  assert.equal(isSubmitAuthorized("Bearer anything", ""), true);
 });
 
 test("serializeFees emits only whitelisted fields as numbers", () => {

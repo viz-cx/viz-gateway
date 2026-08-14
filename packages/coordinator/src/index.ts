@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { actionFromWire, BodyError, buildGatewayAccounts, createStore, loadConfig, readLimitedBody, pegInFeePolicyFor, reconSnapshotKey, type CanonicalAction, type PegInFeePolicy } from "@gateway/common";
-import { corsHeadersFor, serializeFees, serializeReconSnapshots, loadAllowedOrigins, serveStatic } from "./http";
+import { corsHeadersFor, serializeFees, serializeReconSnapshots, loadAllowedOrigins, serveStatic, isSubmitAuthorized } from "./http";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
@@ -236,6 +236,14 @@ async function main(): Promise<void> {
       return;
     }
     if (req.method === "POST" && req.url === "/submit") {
+      // /submit drives the full sign+broadcast orchestration and is reachable on the public
+      // proxy. Only the dispatcher may call it; anyone else replaying a real on-chain event would
+      // otherwise be re-validated as genuine by the signers and paid out again. Reject before
+      // reading the body so an unauthorized caller learns nothing about the request shape.
+      if (!isSubmitAuthorized(req.headers.authorization, cfg.coordinator.submitToken)) {
+        json(401, { error: "unauthorized" });
+        return;
+      }
       void (async () => {
         let body: string;
         try {
@@ -267,6 +275,14 @@ async function main(): Promise<void> {
     }
     json(404, { error: "not found" });
   });
+
+  if (!cfg.coordinator.submitToken) {
+    console.warn(
+      "[coordinator] SECURITY: COORDINATOR_SUBMIT_TOKEN is unset — /submit is UNAUTHENTICATED. " +
+        "Anyone who can reach the proxy can replay a real on-chain event into repeated releases/mints. " +
+        "Set COORDINATOR_SUBMIT_TOKEN in the shared coordinator env (dispatcher reads the same value).",
+    );
+  }
 
   server.listen(port, host, () => {
     console.log(
