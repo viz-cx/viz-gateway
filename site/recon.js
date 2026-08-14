@@ -10,7 +10,9 @@
 // with no usable chain, the static illustration (equal full bars, "In sync") stays
 // and no number is invented. Same rule as the token panel: hide rather than show a
 // fallback. A card only replaces the static illustration once at least one chain
-// renders live; if a later refresh returns nothing usable, the last good cards stay.
+// renders live. Fail-quiet is PER CHAIN: each chain's last good snapshot is kept, so
+// one chain degrading on a refresh keeps its last good card (aging into "As of …"
+// via checkedAt) instead of vanishing while its neighbour stays live.
 //
 // Pure math/formatting lives in recon-format.mjs (tested by tools/recon-meters-spike.cjs).
 import { CONFIG } from "./config.js";
@@ -116,6 +118,11 @@ function renderCard(tpl, payload, now) {
   return card;
 }
 
+// Last good snapshot per chain. Rendering always goes through this cache: a chain
+// whose row turns partial/unusable on one refresh keeps its previous figures (and its
+// status honestly ages to "As of …" through checkedAt) rather than dropping out.
+const lastGood = new Map();
+
 async function load() {
   const container = $("rc-cards");
   const tpl = $("rc-tpl");
@@ -128,19 +135,19 @@ async function load() {
     json = await r.json();
   } catch (_) { return; }
 
-  const chains = reconChains(json); // sorted, each fully normalized; [] if none usable
-  if (chains.length === 0) return;  // no snapshot yet, or all partial — say nothing
+  for (const payload of reconChains(json)) lastGood.set(payload.chain, payload);
+  if (lastGood.size === 0) return; // never had a usable chain — keep the static illustration
 
   const now = Date.now();
   const cards = [];
-  for (const payload of chains) {
-    const card = renderCard(tpl, payload, now);
+  for (const chain of [...lastGood.keys()].sort()) {
+    const card = renderCard(tpl, lastGood.get(chain), now);
     if (card) cards.push(card);
   }
-  if (cards.length === 0) return; // every chain's figures were unusable — leave prior render
+  if (cards.length === 0) return; // nothing renderable even from cache — leave prior render
 
-  // Swap in the freshly-rendered live cards, replacing the static illustration (or
-  // the previous refresh's cards) in one shot so there is never a half-updated panel.
+  // Swap in the freshly-rendered cards, replacing the static illustration (or the
+  // previous refresh's cards) in one shot so there is never a half-updated panel.
   container.replaceChildren(...cards);
 }
 
