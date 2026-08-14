@@ -5,7 +5,10 @@ import { buildSignedMintTx, mintMessageB64 } from "./solanaSign";
 import { buildBurnDepositIx } from "./depositAddress";
 
 /**
- * Solana remote-chain adapter (read paths live; mint write-path deferred).
+ * Solana remote-chain adapter. Read paths (finalized slot, supply, burn scan)
+ * AND the write paths (peg-in SPL mint + peg-out program burn) are implemented
+ * and offline-verified via the solana-*-spike.cjs suite; the live cutover
+ * (deployed mint + funded submitter) is Phase 2 in docs/plan-mainnet-deploy.md.
  *
  * wVIZ on Solana is an SPL Token-2022 mint (3 decimals) whose mint authority is
  * an SPL M-of-N multisig (or Squads). Peg-out works like the TON side: a user

@@ -4,7 +4,7 @@ Guidance for AI agents (and humans) contributing to this repo. Keep it short and
 
 ## What this is
 
-A federated multisig gateway between **VIZ** and remote chains (TON live, Solana read-path prepped):
+A federated multisig gateway between **VIZ** and remote chains (TON live; Solana implemented, live cutover pending):
 lock VIZ → mint wrapped VIZ, and back. Secured by an **M-of-N operator federation** (default 5-of-7,
 bootstraps at 1-of-1). Operators are trusted key-pairs — **no VIZ validator status required** — and the
 active set governs itself via T-of-N rotation (see `setup-viz/src/rotate.ts` and
