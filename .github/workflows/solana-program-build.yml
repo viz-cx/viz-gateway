@@ -4,13 +4,21 @@ name: Solana program build
 # machines) and uploads it as an artifact. The program keypair NEVER touches CI:
 # pass the target program id as an input; declare_id! is patched to match before
 # the build so the deployed id passes Anchor's DeclaredProgramIdMismatch check.
+# push trigger: workflow_dispatch is only indexed once the file reaches the
+# default branch, so branch pushes build with the fallback id below.
 on:
+  push:
+    branches: [feat/solana-devnet-driver-ci-build]
   workflow_dispatch:
     inputs:
       program_id:
         description: "Program id (pubkey) the .so will be deployed at"
         required: false
         default: "MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1"
+
+env:
+  # inputs.* is empty on push events; fall back to the current devnet id
+  PROGRAM_ID: ${{ inputs.program_id || 'BjgxrYA4nsVrRcWH9XwDZpqmNFUAYfZ7AnN5KsbkCxJK' }}
 
 jobs:
   build:
@@ -31,8 +39,6 @@ jobs:
           avm use 1.1.2
 
       - name: Patch declare_id to the target program id
-        env:
-          PROGRAM_ID: ${{ inputs.program_id }}
         run: |
           sed -i "s/declare_id!(\"[^\"]*\")/declare_id!(\"$PROGRAM_ID\")/" \
             contracts/solana/programs/gateway-deposit/src/lib.rs
@@ -49,7 +55,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gateway_deposit-${{ inputs.program_id }}
+          name: gateway_deposit-${{ env.PROGRAM_ID }}
           path: |
             contracts/solana/target/deploy/gateway_deposit.so
             contracts/solana/target/idl/gateway_deposit.json
