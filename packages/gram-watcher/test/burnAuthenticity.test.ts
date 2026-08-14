@@ -29,3 +29,7 @@ test("skipped compute (no gas / frozen) is refused — nothing executed, nothing
 test("non-generic transaction (tick-tock / storage) is refused", () => {
   assert.equal(txComputeSucceeded(desc({ type: "storage" })), false);
 });
+
+test("missing/unparseable description is refused (fail closed, no throw)", () => {
+  assert.equal(txComputeSucceeded(desc(undefined)), false);
+});
