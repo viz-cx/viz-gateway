@@ -119,6 +119,19 @@ export function parseJettonDeposit(
 }
 
 /**
+ * Did this transaction's compute phase COMMIT? For a message received by the gateway's jetton
+ * wallet, a committed compute phase means the standard TEP-74 wallet accepted the inbound
+ * internal_transfer — which it only does after verifying on-chain that the sender is the genuine
+ * peer jetton wallet of this minter for the declared `from` owner. So `true` here authenticates
+ * the transfer's amount AND sender; a forged or rejected message aborts (`success: false` /
+ * skipped / non-generic) and must never be parsed as a burn.
+ */
+export function txComputeSucceeded(tx: Pick<Transaction, "description">): boolean {
+  const d = tx.description;
+  return d.type === "generic" && d.computePhase.type === "vm" && d.computePhase.success;
+}
+
+/**
  * The mint action an operator's multisig executes for a PEG_IN: a standard
  * governed-minter mint (OP=21) whose master_msg is the TEP-74 internal_transfer
  * that credits the recipient. PURE function of (minter, recipient, base-unit
@@ -459,6 +472,15 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
    */
   private burnFromTx(tx: Transaction, cutoff: number, height: number): RemoteBurn | null {
     if (tx.now > cutoff) return null; // not yet final per the time buffer
+    // Trust the jetton wallet's OWN on-chain check, not the message body. A real inbound wVIZ
+    // transfer only CREDITS the gateway wallet if its compute phase commits: the standard TEP-74
+    // wallet throws unless the internal_transfer arrives from the genuine peer jetton wallet of
+    // this minter. A hand-crafted internal_transfer / transfer_notification from any other address
+    // ABORTS in compute — yet the tx still lands on the account and is returned by getTransactions.
+    // Parsing amount/sender/comment out of such a rejected message (moving zero wVIZ) would let
+    // anyone forge a peg-out and drain the VIZ backing (both the release and the auto-return path
+    // inherit this guard, since getBurn re-reads through here too).
+    if (!txComputeSucceeded(tx)) return null;
     const inMsg = tx.inMessage;
     if (!inMsg || inMsg.body.bits.length === 0) return null;
     const parsed = parseJettonDeposit(inMsg.body.beginParse());

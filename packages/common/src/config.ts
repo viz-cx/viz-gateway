@@ -131,6 +131,12 @@ export interface GatewayConfig {
   coordinator: {
     url: string;
     listen: string;
+    /** Shared secret the dispatcher presents as `Authorization: Bearer <token>` on /submit.
+     * /submit runs the full sign+broadcast orchestration and is reachable on the public proxy,
+     * so without this ANY caller can replay a real on-chain event into repeated releases/mints
+     * (F2 re-validates it as genuine). Empty = unauthenticated (warned at boot); set it in the
+     * shared coordinator env to close the hole. The dispatcher reads the same value. */
+    submitToken: string;
     /** Per-signer /approve HTTP timeout, direction-aware. A blackhole signer (socket
      * accepted, no response) must become a caught error, not an unbounded await that
      * wedges the whole sequential approval loop — and thus every /submit behind it. But
@@ -565,6 +571,7 @@ export function loadConfig(): GatewayConfig {
     coordinator: {
       url: opt("COORDINATOR_URL", "http://coordinator:8100"),
       listen: opt("COORDINATOR_LISTEN", "0.0.0.0:8100"),
+      submitToken: opt("COORDINATOR_SUBMIT_TOKEN", ""),
       // Direction-aware per-signer /approve ceilings; see the hoisted definition above
       // (the dispatcher peg-in budget is derived from these).
       signerApproveTimeoutMs,

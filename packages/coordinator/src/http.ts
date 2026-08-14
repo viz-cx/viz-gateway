@@ -2,7 +2,27 @@ import { parseReconSnapshot, type GatewayFeeConfig, type ReconSnapshot } from "@
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { normalize, join, extname, resolve, sep } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+
+/**
+ * Is this /submit request authorized? /submit runs the full sign+broadcast orchestration and is
+ * reachable on the public proxy, so it MUST only be driven by the dispatcher. The dispatcher sends
+ * `Authorization: Bearer <token>` with the shared COORDINATOR_SUBMIT_TOKEN; here we require an exact
+ * (constant-time) match.
+ *
+ * Empty `token` => unauthenticated (the caller warns at boot): allow, so adding the code without
+ * yet provisioning the secret does not brick a live deployment. Set the token to actually close
+ * the replay/forgery hole. Constant-time compare avoids leaking the token via response timing.
+ */
+export function isSubmitAuthorized(authHeader: string | undefined, token: string): boolean {
+  if (!token) return true; // not configured yet — see the boot warning; hole is open until set
+  const presented = /^Bearer (.+)$/.exec(authHeader ?? "")?.[1];
+  if (!presented) return false;
+  const a = Buffer.from(presented);
+  const b = Buffer.from(token);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 /**
  * Strict allowlist echo (no wildcard): a listed Origin is reflected back so the

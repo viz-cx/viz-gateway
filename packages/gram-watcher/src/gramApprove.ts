@@ -1,4 +1,5 @@
 import { Address, TonClient, WalletContractV4, WalletContractV5R1, toNano } from "@ton/ton";
+import type { Cell } from "@ton/core";
 import { Multisig, Order } from "@gateway/contracts-ton";
 import type { TransferRequest } from "@gateway/contracts-ton";
 import type { GramMintProposal } from "@gateway/common";
@@ -46,6 +47,29 @@ export interface GramApprovalReceipt {
   orderAddr: string;
   myIdx: number;
   role: TonApprovalRole;
+}
+
+/**
+ * Assert the order body ACTUALLY DEPLOYED on-chain hashes to the mint/return this operator
+ * validated. The order address alone is only f(multisig, seqno) — a uniqueness key, not an
+ * integrity one — so any operator can deploy an arbitrary body at the pinned address (a drain
+ * transfer, or update_multisig_params → threshold 1) and let honest operators approve it. This
+ * is the gate that binds the on-chain approval to the validated body. `deployed` is
+ * Order.getOrderData().order (null when the order cell is absent → fail closed).
+ */
+export function assertDeployedOrderHash(
+  deployed: Cell | null,
+  expectedHex: string,
+  orderAddr: string,
+  actionId: string,
+): void {
+  const got = deployed?.hash().toString("hex");
+  if (got !== expectedHex) {
+    throw new Error(
+      `TON on-chain order body at ${orderAddr} does not match validated action ${actionId}: ` +
+        `deployed ${got ?? "<none>"} != expected ${expectedHex}`,
+    );
+  }
 }
 
 /** Rebuild the return order cell and assert its hash matches the proposal (binds recipient+amount). */
@@ -260,6 +284,16 @@ export class GramApprover implements GramApprovalClient {
     const od = await this.tonCall(() =>
       this.client.open(Order.createFromAddress(orderAddr)).getOrderData(),
     );
+    // SECURITY: the pinned order ADDRESS only guarantees uniqueness (= f(multisig, seqno)), NOT
+    // that the order it holds is the one we validated. Any operator may open the order at this
+    // seqno; a single compromised one can deploy an ARBITRARY body here — a drain transfer, or
+    // update_multisig_params dropping the threshold to 1 — with approve_on_init as approval #1,
+    // then let honest operators rubber-stamp it (they previously checked only executed/approvals).
+    // Bind our approval to the DEPLOYED body: it must hash to exactly the mint/return we rebuilt.
+    // approveMint/approveReturn already asserted proposal.orderHashHex == our locally-rebuilt cell,
+    // so this closes the one-compromised-key threshold bypass. Checked before any short-circuit so
+    // we never even report success on a foreign body.
+    assertDeployedOrderHash(od.order, proposal.orderHashHex, proposal.orderAddr, proposal.actionId);
     if (od.executed) return { orderAddr: proposal.orderAddr, myIdx, role: "executed" };
     if (od.approvals[myIdx]) return { orderAddr: proposal.orderAddr, myIdx, role: "already" };
 
