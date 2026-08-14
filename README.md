@@ -37,7 +37,7 @@ packages/gram-watcher   follows TON finality, detects wVIZ burns (peg-out)
 packages/signer        the only component with keys; validates + signs (one per operator)
 packages/coordinator   UNTRUSTED; collects approvals, broadcasts once threshold met
 packages/recon         enforces locked-VIZ == circulating-wVIZ; auto-pauses on drift
-packages/solana-watcher  Solana remote-chain adapter + watcher (read path live; mint deferred)
+packages/solana-watcher  Solana remote-chain adapter + watcher (read + mint/burn write-path implemented; live cutover pending)
 contracts/ton/         multisig-v2 + Jetton deploy scripts (dry-run by default) + setup
 contracts/solana/      Token-2022 wVIZ mint + SPL multisig deploy script (dry-run by default)
 setup-viz/             one-time VIZ gateway account setup (3-of-4 guardian master)
@@ -115,11 +115,17 @@ secrets stay in each operator's `.env`. The TON side is on-chain and asynchronou
 `update_multisig_params` order, each current signer runs `rotate:gram approve-gram`,
 and `rotate:gram status` confirms once the multisig signer set has changed.
 
-**Solana is prepped** (`packages/solana-watcher`, `contracts/solana`) as the
+**Solana is implemented** (`packages/solana-watcher`, `contracts/solana`) as the
 second remote chain via the shared `RemoteChain` interface: the read adapter
-(finalized slot, supply, burn detection) is verified against live RPC, and the
-Token-2022 + SPL-multisig deploy script dry-runs. Solana's mint write-path is
-deferred until the TON round-trip validates the interface.
+(finalized slot, supply, burn detection), the peg-out burn program
+(`gateway-deposit`, slot-paginated fail-closed scan), and the peg-in mint
+write-path (durable-nonce SPL mint proposal → per-operator ed25519 partials →
+merge + broadcast) are all built and offline-verified in `npm run verify`
+(`solana-*-spike.cjs`). The Token-2022 + SPL-multisig deploy script dry-runs.
+What remains is the **live cutover** (Phase 2 in `docs/plan-mainnet-deploy.md`):
+deploy the wVIZ mint + gateway-deposit program, fund the submitter, and run the
+live proofs (`tools/solana-devnet-proof.cjs`, `tools/solana-pegout-proof.cjs`).
+Mainnet soft-launched TON-only to halve the recon surface.
 
 What still needs live contracts (not stubbed logic — missing on-chain targets):
 the actual `broadcastRelease` (needs a funded gateway account on VIZ) and the
