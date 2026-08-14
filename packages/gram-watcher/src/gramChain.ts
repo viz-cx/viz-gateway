@@ -41,10 +41,18 @@ export const TON_RETRY_BASE_MS = 500;
  * 2026-07-27 (toncenter ETIMEDOUT). Deliberately does NOT match a contract-level result
  * (an "exit_code" / "unable to execute get method" is a genuine chain state), so a real
  * not-found / executed read stays fast and fail-closed rather than churning the ring.
+ *
+ * ONE exit code is excepted: -13 is TVM out-of-gas, i.e. the NODE's get-method gas limit,
+ * never an answer the contract chose to give. The read-only getters here (get_jetton_data,
+ * get_wallet_data) cannot legitimately exhaust it, and on 2026-08-13 a sick toncenter node
+ * returned it intermittently for the deployed minter + gateway wallet while a healthy Orbs
+ * endpoint sat unused in the ring — because -13 was classified fail-closed, tonCall never
+ * rotated, and 3 such ticks latched the "cannot verify backing" pause. Worst case if a -13
+ * were ever genuine: one extra pass through the ring, then the same throw → indeterminate.
  */
 export function isTransientTonError(err: unknown): boolean {
   const msg = String((err as { message?: unknown })?.message ?? err);
-  return /\b(429|50[0234])\b|too many requests|bad gateway|service unavailable|gateway time-?out|time-?d?\s?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|socket hang up|network error/i.test(
+  return /\b(429|50[0234])\b|exit_code:\s*-13\b|too many requests|bad gateway|service unavailable|gateway time-?out|time-?d?\s?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|socket hang up|network error/i.test(
     msg,
   );
 }
@@ -374,6 +382,8 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
         try {
           const wallet = this.client.open(JettonWallet.create(this.gatewayWallet));
           const held = await wallet.getBalance();
+          // A zero needs a second opinion before it may move the invariant: see confirmZeroHeld.
+          if (held === 0n) await this.confirmZeroHeld();
           const circulating = data.totalSupply - held;
           return circulating > 0n ? circulating : 0n;
         } catch (err) {
@@ -398,6 +408,36 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
       }
       return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
     });
+  }
+
+  /**
+   * Cross-check a held balance of ZERO against the other endpoints in the ring.
+   *
+   * A jetton wallet may legitimately hold 0 (wallets stay deployed after being emptied), so a
+   * zero is not an error and must not be rejected outright. But a sick node also returns a
+   * SUCCESSFUL 0 for a funded wallet, and that answer is the worst possible one: it is
+   * definitive, so it resets recon's consecutive-failure counter and over-counts circulating by
+   * the entire gateway reserve, pausing immediately. 2026-08-13: three false −3912500 mVIZ
+   * under-backing pauses, with no exception thrown and no "held=0" warning logged — the zero
+   * arrived through the SUCCESS path, which PR #124 (the throw path) never covered.
+   *
+   * A wrong zero is one node's opinion, so ask the others: any non-zero second opinion means the
+   * zero was the node's, and throwing hands recon an INDETERMINATE (retried next tick) instead of
+   * a phantom shortfall. Only reached when held is 0, so the extra reads cost nothing in the
+   * normal case. One endpoint = nobody to ask = today's behaviour.
+   */
+  private async confirmZeroHeld(): Promise<void> {
+    if (!this.gatewayWallet) return;
+    for (let i = 1; i < this.clients.length; i++) {
+      const other = this.clients[(this.idx + i) % this.clients.length]!;
+      const second = await other.open(JettonWallet.create(this.gatewayWallet)).getBalance();
+      if (second !== 0n) {
+        throw new Error(
+          `held-balance disagreement for ${this.gatewayWallet.toString()}: endpoint[${this.idx}] read 0, ` +
+            `another endpoint read ${second} — refusing to treat the zero as a real reserve drop`,
+        );
+      }
+    }
   }
 
   /** Is the recipient's jetton-wallet already deployed? (else minting deploys it, costing gas). */

@@ -88,14 +88,55 @@ test("NON-transient held-read error + wallet NOT active ⇒ held=0 ⇒ raw total
 });
 
 test("NON-transient held-read error + wallet ACTIVE ⇒ PROPAGATES (sick node, no held=0 guess)", async () => {
-  // The 2026-08-12 false-pause: a node answered "exit_code: -13" for the DEPLOYED gateway wallet.
+  // The 2026-08-12 false-pause: a node answered an exit_code for the DEPLOYED gateway wallet.
   // The old code took any non-transient error as proof of an uninitialized wallet and fell back to
   // raw totalSupply, over-counting circulating by the 3960 VIZ reserve. With the wallet provably
-  // active, the error must propagate so recon goes INDETERMINATE instead of pausing.
+  // active, the error must propagate so recon goes INDETERMINATE instead of pausing. (Uses -14,
+  // not -13: -13 is now classified transient and would rotate before reaching the state check.)
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => {
+      throw new Error("Unable to execute get method. Got exit_code: -14");
+    }),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /exit_code: -14/);
+});
+
+test("exit_code -13 held read ROTATES to a healthy endpoint (2026-08-13 recon-stalled pause)", async () => {
+  // The sick node returned "-13" intermittently for the deployed minter + gateway wallet while a
+  // verified Orbs endpoint sat unused in the ring. -13 is the node's get-method gas limit, not a
+  // contract answer, so it must rotate rather than fail closed — 3 such ticks latched the
+  // "recon cannot verify backing (3 consecutive failures)" pause.
   const chain = chainWith([
     fakeClient(250_795_248n, async () => {
       throw new Error("Unable to execute get method. Got exit_code: -13");
     }),
+    fakeClient(250_795_248n, async () => 3_960_000n),
   ]);
-  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /exit_code: -13/);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 246_835_248n);
+});
+
+test("held=0 contradicted by another endpoint ⇒ PROPAGATES (2026-08-13 false −3912500 pause)", async () => {
+  // The dangerous one: no exception, no warning — a sick node simply answers 0 for the funded
+  // gateway wallet. That zero is DEFINITIVE, so it resets recon's failure counter and pauses on a
+  // phantom shortfall of the whole 3960 VIZ reserve. A second opinion of 3960000 exposes it.
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => 0n),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /held-balance disagreement/);
+});
+
+test("held=0 confirmed by every endpoint ⇒ accepted (an emptied wallet really holds 0)", async () => {
+  // The guard must not turn a legitimately empty reserve into a permanent INDETERMINATE: with the
+  // ring in agreement, circulating is raw totalSupply and recon keeps reporting definitively.
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => 0n),
+    fakeClient(250_795_248n, async () => 0n),
+  ]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
+});
+
+test("held=0 with a single endpoint ⇒ accepted (nobody to ask; unchanged behaviour)", async () => {
+  const chain = chainWith([fakeClient(250_795_248n, async () => 0n)]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
 });

@@ -36,12 +36,26 @@ test("contract-level results fail closed (NOT transient)", () => {
   // get-method reverted) — rotating would only churn the ring and mask the real answer.
   for (const msg of [
     "Received error: unable to execute get method",
-    'Received an error: {"ok":false,"error":"exit_code: -13"}',
+    'Received an error: {"ok":false,"error":"exit_code: -14"}',
+    'Received an error: {"ok":false,"error":"exit_code: 13"}', // positive 13 is a contract answer
     "Malformed response: invalid address",
     "Invalid address",
     "Unable to parse",
   ]) {
     assert.equal(isTransientTonError(new Error(msg)), false, `must NOT be transient: ${msg}`);
+  }
+});
+
+test("exit_code -13 (TVM out-of-gas) IS transient — the node's gas limit, not a contract answer", () => {
+  // 2026-08-13: a sick toncenter node returned -13 intermittently for the deployed minter and
+  // gateway wallet. Classified fail-closed, tonCall never rotated onto the healthy Orbs endpoint
+  // already in the ring, and 3 such ticks latched the "cannot verify backing" pause.
+  for (const msg of [
+    'Received an error: {"ok":false,"error":"exit_code: -13"}',
+    "Unable to execute get method. Got exit_code: -13",
+    "exit_code:-13",
+  ]) {
+    assert.equal(isTransientTonError(new Error(msg)), true, `should be transient: ${msg}`);
   }
 });
 
