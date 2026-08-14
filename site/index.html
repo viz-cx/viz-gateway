@@ -246,46 +246,89 @@
           </a>
         </div>
 
-        <!-- Figures load from GET /recon (site/recon.js). Until then this is the static
-             illustration: equal full bars. Every live value is added, never substituted,
-             so a failed fetch simply leaves the illustration standing. -->
-        <div class="recon" id="rc-card">
-          <div class="recon-top">
-            <span class="t">
-              <svg class="scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"></path><path d="M3 12h18"></path></svg>
-              Live reconciliation
-            </span>
-            <span class="status" id="rc-status"><span class="dot" aria-hidden="true"></span> <span id="rc-status-text">In sync</span></span>
-          </div>
-
-          <div class="meter-row">
-            <div class="meter a">
-              <div class="lab">
-                <b>VIZ locked</b>
-                <span class="sub" id="rc-locked-sub">in the gateway</span>
-                <span class="val hidden" id="rc-locked"></span>
-              </div>
-              <div class="track" id="rc-track-a" role="progressbar" aria-label="VIZ locked in the gateway" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
+        <!-- Figures load from GET /recon (site/recon.js), one card per chain the
+             coordinator reconciles (GRAM today, SOLANA once live). Until then this is
+             the static illustration below: equal full bars. Every live value is added,
+             never substituted, so a failed fetch simply leaves the illustration standing. -->
+        <div class="recon-cards" id="rc-cards">
+          <div class="recon" id="rc-static">
+            <div class="recon-top">
+              <span class="t">
+                <svg class="scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"></path><path d="M3 12h18"></path></svg>
+                Live reconciliation
+              </span>
+              <span class="status"><span class="dot" aria-hidden="true"></span> <span>In sync</span></span>
             </div>
-            <span class="eq" id="rc-eq" aria-hidden="true">=</span>
-            <div class="meter b">
-              <div class="lab">
-                <b>wVIZ backed</b>
-                <span class="sub" id="rc-owed-sub">in circulation</span>
-                <span class="val hidden" id="rc-owed"></span>
-              </div>
-              <div class="track" id="rc-track-b" role="progressbar" aria-label="wVIZ in circulation plus unswept fees" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
-            </div>
-          </div>
 
-          <div class="recon-foot">
-            <span class="pausechip">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
-              Auto-pause
-            </span>
-            <span id="rc-foot-text">The whole system halts automatically the moment the two sides don't match.</span>
+            <div class="meter-row">
+              <div class="meter a">
+                <div class="lab">
+                  <b>VIZ locked</b>
+                  <span class="sub">in the gateway</span>
+                </div>
+                <div class="track" role="progressbar" aria-label="VIZ locked in the gateway" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
+              </div>
+              <span class="eq" aria-hidden="true">=</span>
+              <div class="meter b">
+                <div class="lab">
+                  <b>wVIZ backed</b>
+                  <span class="sub">in circulation</span>
+                </div>
+                <div class="track" role="progressbar" aria-label="wVIZ in circulation plus unswept fees" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
+              </div>
+            </div>
+
+            <div class="recon-foot">
+              <span class="pausechip">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
+                Auto-pause
+              </span>
+              <span>The whole system halts automatically the moment the two sides don't match.</span>
+            </div>
           </div>
         </div>
+
+        <!-- Per-chain card template, cloned by site/recon.js once /recon returns a live
+             snapshot. Class-based hooks only (no ids) so multiple clones coexist. -->
+        <template id="rc-tpl">
+          <div class="recon rc-card">
+            <div class="recon-top">
+              <span class="t">
+                <svg class="scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"></path><path d="M3 12h18"></path></svg>
+                Live reconciliation <span class="rc-chain"></span>
+              </span>
+              <span class="status rc-status"><span class="dot" aria-hidden="true"></span> <span class="rc-status-text">In sync</span></span>
+            </div>
+
+            <div class="meter-row">
+              <div class="meter a">
+                <div class="lab">
+                  <b>VIZ locked</b>
+                  <span class="sub rc-locked-sub">in the gateway</span>
+                  <span class="val hidden rc-locked"></span>
+                </div>
+                <div class="track rc-track-a" role="progressbar" aria-label="VIZ locked in the gateway" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
+              </div>
+              <span class="eq rc-eq" aria-hidden="true">=</span>
+              <div class="meter b">
+                <div class="lab">
+                  <b>wVIZ backed</b>
+                  <span class="sub rc-owed-sub">in circulation</span>
+                  <span class="val hidden rc-owed"></span>
+                </div>
+                <div class="track rc-track-b" role="progressbar" aria-label="wVIZ in circulation plus unswept fees" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
+              </div>
+            </div>
+
+            <div class="recon-foot">
+              <span class="pausechip">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
+                Auto-pause
+              </span>
+              <span class="rc-foot-text">The whole system halts automatically the moment the two sides don't match.</span>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </section>
