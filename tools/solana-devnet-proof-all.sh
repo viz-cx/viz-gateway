@@ -4,8 +4,8 @@
 #
 # It stitches together the two manual sequences already in RUNBOOK.md
 # ("How peg-in mint works on Solana" / "How peg-out burn works on Solana") plus
-# the one step that is otherwise undocumented: `anchor build` to produce the
-# gateway_deposit .so the peg-out proof deploys.
+# the one step neither sequence includes: `anchor build` (documented in
+# AGENTS.md) to produce the gateway_deposit .so the peg-out proof deploys.
 #
 #   tools/solana-devnet-proof-all.sh            # both proofs
 #   PROOF=pegin  tools/solana-devnet-proof-all.sh   # mint round-trip only
