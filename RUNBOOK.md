@@ -460,6 +460,12 @@ there: this proof targets the write path, not the F2 re-read).
 
 To re-run against a fresh local cluster:
 
+> **Turnkey:** `tools/solana-devnet-proof-all.sh` runs BOTH this mint proof and
+> the peg-out burn proof from zero (boots the validator, `anchor build`s the
+> program, tears down after). Toolchain install + mainnet cutover checklist:
+> [`docs/runbook-solana-devnet-cutover.md`](./docs/runbook-solana-devnet-cutover.md).
+> The manual sequence below is for debugging a single step.
+
 ```bash
 export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
 solana-test-validator --reset --quiet &            # local cluster
