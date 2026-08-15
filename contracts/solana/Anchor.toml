@@ -9,8 +9,10 @@ skip_local_validator = true
 resolution = true
 skip-lint = false
 
+# Redeployed 2026-08-15 (devnet purged the July deploy); CI-built .so with
+# declare_id patched to this id — see docs/runbook-solana-devnet-cutover.md §2b.
 [programs.devnet]
-gateway_deposit = "MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1"
+gateway_deposit = "BjgxrYA4nsVrRcWH9XwDZpqmNFUAYfZ7AnN5KsbkCxJK"
 
 [programs.localnet]
 gateway_deposit = "MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1"

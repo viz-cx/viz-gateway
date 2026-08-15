@@ -140,11 +140,20 @@ async function deployProgram(conn, payerKeypair) {
 
   const conn = new Connection(RPC_URL, "confirmed");
 
-  // Create a throwaway payer keypair and fund it
-  const payer = Keypair.generate();
+  // Payer: pre-funded keypair via PROOF_PAYER_FILE (devnet, where big airdrops
+  // rate-limit), else a throwaway funded by the local validator's faucet.
+  const payer = process.env.PROOF_PAYER_FILE
+    ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(process.env.PROOF_PAYER_FILE, "utf8"))))
+    : Keypair.generate();
   console.log(`[proof] payer: ${payer.publicKey.toBase58()}`);
-  await airdrop(conn, payer.publicKey, 10);
-  console.log("[proof] payer funded with 10 SOL");
+  const payerBal = await conn.getBalance(payer.publicKey);
+  if (payerBal < 0.05 * LAMPORTS_PER_SOL) {
+    const sol = process.env.PROOF_PAYER_FILE ? 1 : 10;
+    await airdrop(conn, payer.publicKey, sol);
+    console.log(`[proof] payer funded with ${sol} SOL`);
+  } else {
+    console.log(`[proof] payer balance ${payerBal / LAMPORTS_PER_SOL} SOL — no airdrop needed`);
+  }
 
   // Deploy the program (payer funds the deployment transaction)
   await deployProgram(conn, payer);

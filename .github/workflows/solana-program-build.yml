@@ -1,0 +1,61 @@
+name: Solana program build
+
+# Builds gateway_deposit.so in CI (Rust + Anchor are too heavy for some operator
+# machines) and uploads it as an artifact. The program keypair NEVER touches CI:
+# pass the target program id as an input; declare_id! is patched to match before
+# the build so the deployed id passes Anchor's DeclaredProgramIdMismatch check.
+# push trigger: workflow_dispatch is only indexed once the file reaches the
+# default branch, so branch pushes build with the fallback id below.
+on:
+  push:
+    branches: [feat/solana-devnet-driver-ci-build]
+  workflow_dispatch:
+    inputs:
+      program_id:
+        description: "Program id (pubkey) the .so will be deployed at"
+        required: false
+        default: "MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1"
+
+env:
+  # inputs.* is empty on push events; fall back to the current devnet id
+  PROGRAM_ID: ${{ inputs.program_id || 'BjgxrYA4nsVrRcWH9XwDZpqmNFUAYfZ7AnN5KsbkCxJK' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Solana CLI (agave)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install Anchor CLI (avm)
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked
+          avm install 1.1.2
+          avm use 1.1.2
+
+      - name: Patch declare_id to the target program id
+        run: |
+          sed -i "s/declare_id!(\"[^\"]*\")/declare_id!(\"$PROGRAM_ID\")/" \
+            contracts/solana/programs/gateway-deposit/src/lib.rs
+          grep -n declare_id contracts/solana/programs/gateway-deposit/src/lib.rs
+
+      - name: anchor build
+        working-directory: contracts/solana
+        run: anchor build
+
+      - name: Provenance
+        run: |
+          sha256sum contracts/solana/target/deploy/gateway_deposit.so
+          ls -la contracts/solana/target/deploy/gateway_deposit.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gateway_deposit-${{ env.PROGRAM_ID }}
+          path: |
+            contracts/solana/target/deploy/gateway_deposit.so
+            contracts/solana/target/idl/gateway_deposit.json
