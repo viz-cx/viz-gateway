@@ -108,6 +108,41 @@ under "How peg-in mint works on Solana" and "How peg-out burn works on Solana".
 
 ---
 
+## 2b. Run the proofs on public devnet (no local toolchain)
+
+`tools/solana-devnet-run.cjs` is the devnet counterpart of the local driver,
+pure Node — keygen, faucet funding, `deploy:solana`, and the durable nonce all
+go through `@solana/web3.js`, so **no solana CLI, Rust, or Anchor is needed**:
+
+```bash
+node tools/solana-devnet-run.cjs           # both proofs; PROOF=pegin|pegout for one
+```
+
+Keys and the deployed mint/multisig persist in `~/.viz-solana-devnet-proof/`,
+so reruns reuse faucet funds. When the RPC faucet is dry (usual), the script
+prints the payer/submitter pubkeys to fund at https://faucet.solana.com.
+
+The peg-out proof needs `gateway_deposit` **on devnet**. Devnet purges idle
+programs (the July deploy of `MCFeMZJY…` is gone), so to (re)deploy:
+1. Generate a program keypair locally; it never leaves your machine.
+2. Run the `Solana program build` workflow (`.github/workflows/
+   solana-program-build.yml`) with the keypair's pubkey as `program_id` — it
+   patches `declare_id!` to match (Anchor rejects a mismatched deploy at
+   runtime) and uploads the `.so` (~131 KB) as an artifact.
+3. Deploy with only the `solana` binary (25 MB, extractable alone from the
+   agave release tarball) and a payer holding ~2 SOL for peak rent:
+   `solana program deploy <so> --program-id <keypair> --keypair <payer> -u devnet`.
+4. `SOLANA_PROGRAM_ID=<pubkey> PROOF=pegout node tools/solana-devnet-run.cjs`.
+
+Verification record — 2026-08-15, both proofs PROVEN on devnet:
+peg-in mint tx `3peWbRthttf1Wo3MoTRvXcafNNQXMfy6HmC8WUGuuDLAWju6DcKDrKhK9dyAh8BK9qcKpspruB1iRcsdS7kDQxzc`
+(mint `3wWjWQwW9QzZpzLnoXGZnJjhP6yrXvWw2CvkQDsVxqaT`, 2-of-2 multisig
+`CpwvWZhw4CaqyjHEMx8GGiDPfD5PjB2hUCgCedxkN1PU`); peg-out burn tx
+`3SbhKJT3qV6cfEQCKMTd6Lhiz42UJ7m75Avf3q7mr9stN13nEN8b6qEpY1VQSE6oUhgMa21xa7Rv8uAH2scuya7e`
+(program `BjgxrYA4nsVrRcWH9XwDZpqmNFUAYfZ7AnN5KsbkCxJK`).
+
+---
+
 ## 3. Mainnet cutover checklist (Phase 2)
 
 Do this only after both proofs pass on a local validator AND a devnet run. This
