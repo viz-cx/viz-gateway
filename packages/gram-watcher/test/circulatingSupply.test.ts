@@ -21,13 +21,19 @@ const MULTISIG = "EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0";
  * getJettonData() (on the master-opened contract) and getBalance() (on the wallet-opened one).
  * The single mock serves both; the production code only calls the relevant one on each.
  */
-function fakeClient(totalSupply: bigint, getBalance: () => Promise<bigint>, state = "active"): TonClient {
+function fakeClient(
+  totalSupply: bigint | (() => Promise<bigint>),
+  getBalance: () => Promise<bigint>,
+  state: string | (() => Promise<string>) = "active",
+): TonClient {
   return {
     open: (_c: unknown) => ({
-      getJettonData: async () => ({ totalSupply }),
+      getJettonData: async () => ({
+        totalSupply: typeof totalSupply === "bigint" ? totalSupply : await totalSupply(),
+      }),
       getBalance,
     }),
-    getContractState: async () => ({ state }),
+    getContractState: async () => ({ state: typeof state === "string" ? state : await state() }),
   } as unknown as TonClient;
 }
 
@@ -183,4 +189,183 @@ test("held=0 confirmed by every endpoint ⇒ accepted (an emptied wallet really 
 test("held=0 with a single endpoint ⇒ accepted (nobody to ask; unchanged behaviour)", async () => {
   const chain = chainWith([fakeClient(250_795_248n, async () => 0n)]);
   assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
+});
+
+// ---------------------------------------------------------------------------
+// Remaining rows of the sick-node matrix: the SUPPLY read, ring exhaustion,
+// the second-opinion reads themselves failing, 3-ring positions, and config.
+// ---------------------------------------------------------------------------
+
+test("TRANSIENT totalSupply read ROTATES — the minter read is inside the same failover ring", async () => {
+  // 2026-08-13's sick node returned -13 for the MINTER's get_jetton_data too, not just the
+  // wallet. The whole read (supply + held) runs inside tonCall, so it must rotate as one unit.
+  const chain = chainWith([
+    fakeClient(async () => {
+      throw new Error("Unable to execute get method. Got exit_code: -13");
+    }, async () => 3_960_000n),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 246_835_248n);
+});
+
+test("NON-transient totalSupply read PROPAGATES immediately — no rotation, no fallback", async () => {
+  // There is no "supply=0" fallback anywhere: a failed minter read can only go INDETERMINATE.
+  const chain = chainWith([
+    fakeClient(async () => {
+      throw new Error("Unable to execute get method. Got exit_code: -14");
+    }, async () => 3_960_000n),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /exit_code: -14/);
+});
+
+test("TRANSIENT failure on EVERY endpoint exhausts the ring and propagates the last error", async () => {
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => {
+      throw new Error("timeout of 30000ms exceeded");
+    }),
+    fakeClient(250_795_248n, async () => {
+      throw new Error("Request failed with status code 503");
+    }),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /status code 503/);
+});
+
+test("held=0 zero-confirmation read fails TRANSIENT ⇒ rotates until a definitive answer", async () => {
+  // The guard's own read is not exempt from the sick-node problem. c0 answers 0, the c1 second
+  // opinion times out — that must rotate (not accept the unconfirmed zero), and the ring must
+  // land on c2's real balance.
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => 0n),
+    fakeClient(250_795_248n, async () => {
+      throw new Error("timeout of 30000ms exceeded");
+    }),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 246_835_248n);
+});
+
+test("held=0 zero-confirmation read fails NON-transient ⇒ PROPAGATES (zero stays unconfirmed)", async () => {
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => 0n),
+    fakeClient(250_795_248n, async () => {
+      throw new Error("Unable to execute get method. Got exit_code: -14");
+    }),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /exit_code: -14/);
+});
+
+test("held=0 in a 3-ring where only the LAST endpoint disagrees ⇒ still PROPAGATES", async () => {
+  // confirmZeroHeld must poll EVERY other endpoint, not just the neighbour — two sick nodes
+  // agreeing on 0 must not outvote the one endpoint that still sees the reserve.
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => 0n),
+    fakeClient(250_795_248n, async () => 0n),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /held-balance disagreement/);
+});
+
+test("NON-transient error + SAME-node state read throws TRANSIENT ⇒ rotates and recovers", async () => {
+  // The node fails the get-method AND can't answer getContractState (5xx). The state-read
+  // error is transient, so it bubbles into tonCall's rotation and the healthy endpoint's own
+  // balance read settles it — no held=0 was ever authorized.
+  const chain = chainWith([
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      async () => {
+        throw new Error("Request failed with status code 500");
+      },
+    ),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 246_835_248n);
+});
+
+test("NON-transient error + SAME-node state read throws NON-transient ⇒ PROPAGATES (no held=0)", async () => {
+  // If the node can't positively prove the wallet's state, there is no proof of anything —
+  // the held=0 fallback stays unauthorized and recon goes INDETERMINATE.
+  const chain = chainWith([
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      async () => {
+        throw new Error("Unable to execute get method. Got exit_code: -14");
+      },
+    ),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /exit_code: -14/);
+});
+
+test("NON-transient error + state second opinion throws TRANSIENT ⇒ rotates and recovers", async () => {
+  // c0's get-method fails and claims uninitialized; the c1 state check times out. The timeout
+  // must bubble into tonCall's rotation, after which c1's own balance read settles it.
+  const chain = chainWith([
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      "uninitialized",
+    ),
+    fakeClient(250_795_248n, async () => 3_960_000n, async () => {
+      throw new Error("timeout of 30000ms exceeded");
+    }),
+  ]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 246_835_248n);
+});
+
+test("NON-transient error + 3-ring state opinions [uninit, uninit, ACTIVE] ⇒ PROPAGATES", async () => {
+  // Any single endpoint seeing the wallet active vetoes the held=0 fallback — unanimity is
+  // required for zero, exactly like the balance-zero confirmation.
+  const chain = chainWith([
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      "uninitialized",
+    ),
+    fakeClient(250_795_248n, async () => 0n, "uninitialized"),
+    fakeClient(250_795_248n, async () => 3_960_000n, "active"),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /Unable to execute get method/);
+});
+
+test("state 'frozen' counts as not-active for the held=0 fallback (ring agreeing)", async () => {
+  // The guard requires state !== "active"; a frozen wallet has no readable balance either, and
+  // its reserve is not circulating. Documents that the check is active-vs-everything-else.
+  const chain = chainWith([
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      "frozen",
+    ),
+    fakeClient(250_795_248n, async () => 0n, "frozen"),
+  ]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
+});
+
+test("no gateway wallet configured ⇒ raw totalSupply, held path never runs", async () => {
+  const chain = new GramHttpChain(["https://e/y"], "", MINTER, "", MULTISIG, 1);
+  (chain as unknown as { clients: TonClient[] }).clients = [
+    fakeClient(250_795_248n, async () => {
+      throw new Error("getBalance must not be called without a gateway wallet");
+    }),
+  ];
+  (chain as unknown as { idx: number }).idx = 0;
+  assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
+});
+
+test("held exactly equals totalSupply ⇒ circulating 0 (boundary, not negative-clamp)", async () => {
+  const chain = chainWith([fakeClient(3_960_000n, async () => 3_960_000n)]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 0n);
 });
