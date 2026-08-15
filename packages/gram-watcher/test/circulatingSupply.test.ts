@@ -126,6 +126,50 @@ test("held=0 contradicted by another endpoint ⇒ PROPAGATES (2026-08-13 false �
   await assert.rejects(() => chain.circulatingSupplyMilliViz(), /held-balance disagreement/);
 });
 
+test("held=0 disagreement STILL propagates when the sick node also lies state=uninitialized (2026-08-15 pause)", async () => {
+  // The 2026-08-15 false pause: confirmZeroHeld correctly threw the disagreement, but the throw
+  // landed in the catch written for getBalance failures, whose state read asked the SAME sick
+  // node — which answered "uninitialized" for the deployed wallet, re-authorizing exactly the
+  // held=0 reading the guard had refused. The zero-confirmation must live OUTSIDE that catch.
+  const chain = chainWith([
+    fakeClient(250_795_248n, async () => 0n, "uninitialized"),
+    fakeClient(250_795_248n, async () => 3_960_000n),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /held-balance disagreement/);
+});
+
+test("NON-transient error + sick node says uninitialized but another endpoint says ACTIVE ⇒ PROPAGATES", async () => {
+  // The state read gets the same second opinion as the balance read: one node claiming the
+  // deployed wallet is uninitialized is that node's failure, not proof of zero reserve.
+  const chain = chainWith([
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      "uninitialized",
+    ),
+    fakeClient(250_795_248n, async () => 3_960_000n, "active"),
+  ]);
+  await assert.rejects(() => chain.circulatingSupplyMilliViz(), /Unable to execute get method/);
+});
+
+test("NON-transient error + ALL endpoints agree not-active ⇒ held=0 ⇒ raw totalSupply", async () => {
+  // The ring agreeing the wallet is uninitialized is the genuine zero-reserve case; the
+  // second-opinion hardening must not turn it into a permanent INDETERMINATE.
+  const chain = chainWith([
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      "uninitialized",
+    ),
+    fakeClient(250_795_248n, async () => 0n, "uninitialized"),
+  ]);
+  assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
+});
+
 test("held=0 confirmed by every endpoint ⇒ accepted (an emptied wallet really holds 0)", async () => {
   // The guard must not turn a legitimately empty reserve into a permanent INDETERMINATE: with the
   // ring in agreement, circulating is raw totalSupply and recon keeps reporting definitively.
