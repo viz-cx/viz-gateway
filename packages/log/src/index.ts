@@ -108,6 +108,36 @@ export interface StaffWebhookOpts {
 }
 
 /**
+ * Shape one webhook request for `url`. Generic endpoints get the documented JSON alert
+ * ({scope, message, meta, ts}). A Telegram Bot API sendMessage URL with a chat_id query
+ * (https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>) will not accept that shape,
+ * so it is reshaped to Telegram's {chat_id, text} — letting STAFF_WEBHOOK_URL point straight
+ * at the on-call Telegram chat with no relay in between. chat_id moves from the query into
+ * the body because the Bot API rejects parameters split across both; text is capped under
+ * Telegram's 4096-char limit (the full meta is always in the staff log line regardless).
+ */
+export function shapeStaffWebhookRequest(
+  url: string,
+  scope: string,
+  message: string,
+  meta: Record<string, unknown>,
+): { url: string; body: string } {
+  try {
+    const u = new URL(url);
+    const chatId = u.searchParams.get("chat_id");
+    if (u.hostname === "api.telegram.org" && u.pathname.endsWith("/sendMessage") && chatId) {
+      u.search = "";
+      const metaStr = Object.keys(meta).length ? "\n" + JSON.stringify(meta) : "";
+      const text = `⛔️ gateway [${scope}] ${message}${metaStr}`.slice(0, 4000);
+      return { url: u.toString(), body: JSON.stringify({ chat_id: chatId, text }) };
+    }
+  } catch {
+    /* not parseable as a URL — fall through; the generic POST will fail and retry/flag */
+  }
+  return { url, body: JSON.stringify({ scope, message, meta, ts: Math.floor(Date.now() / 1000) }) };
+}
+
+/**
  * POST a staff alert as JSON to `url`, retrying on network error / non-2xx up to `retries`
  * extra attempts. Each attempt is bounded by an AbortSignal timeout so a blackhole endpoint
  * cannot hang the caller. Returns true on the first delivered attempt, false if all fail.
@@ -123,11 +153,11 @@ export async function deliverStaffWebhook(
   const retries = opts.retries ?? envInt("STAFF_WEBHOOK_RETRIES", 3);
   const retryDelayMs = opts.retryDelayMs ?? envInt("STAFF_WEBHOOK_RETRY_DELAY_MS", 500);
   const doFetch = opts.fetchImpl ?? fetch;
-  const body = JSON.stringify({ scope, message, meta, ts: Math.floor(Date.now() / 1000) });
+  const { url: target, body } = shapeStaffWebhookRequest(url, scope, message, meta);
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await doFetch(url, {
+      const res = await doFetch(target, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body,
