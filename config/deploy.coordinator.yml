@@ -129,4 +129,4 @@ env:
     - GRAM_API_KEY                    # toncenter API key (rate limits) — SOPS app secret
     - VIZ_MEMO_WIF_GRAM               # gram.gate memo key — viz-watcher decrypts encrypted memos (non-fund; AUDIT.md §8)
     - COORDINATOR_SUBMIT_TOKEN        # /submit Bearer (PR #129) — web verifies, dispatcher sends; unset = fails OPEN
-    # STAFF_WEBHOOK_URL: add to .kamal/secrets + the SOPS file to wire fail-closed alerts.
+    - STAFF_WEBHOOK_URL               # fail-closed pause alerts → on-call Telegram (notifyStaff); secret: embeds the bot token
