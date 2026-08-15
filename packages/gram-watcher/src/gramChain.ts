@@ -392,13 +392,10 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
       // reserve — counting it as circulating makes recon see phantom under-backing (mirrors
       // the site display fix 497f835: circulating = totalSupply − gatewayHeld).
       if (this.gatewayWallet) {
+        let held: bigint;
         try {
           const wallet = this.client.open(JettonWallet.create(this.gatewayWallet));
-          const held = await wallet.getBalance();
-          // A zero needs a second opinion before it may move the invariant: see confirmZeroHeld.
-          if (held === 0n) await this.confirmZeroHeld();
-          const circulating = data.totalSupply - held;
-          return circulating > 0n ? circulating : 0n;
+          held = await wallet.getBalance();
         } catch (err) {
           // A TRANSIENT held read (toncenter 5xx/timeout/reset) must NOT silently fall back
           // to raw totalSupply: when the gateway holds a non-trivial wVIZ reserve (a peg-out
@@ -416,8 +413,25 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
           // means the failure is the node's, so re-throw → recon INDETERMINATE.
           const state = await this.client.getContractState(this.gatewayWallet);
           if (state.state === "active") throw err;
+          // The state read itself needs a second opinion (same rationale as confirmZeroHeld):
+          // 2026-08-15 a sick node answered "uninitialized" for the DEPLOYED, funded gateway
+          // wallet, "positively" authorizing the held=0 fallback and re-creating the false
+          // −3912500 pause. Any other endpoint seeing the wallet active means the failure is
+          // the node's ⇒ re-throw → recon INDETERMINATE.
+          for (let i = 1; i < this.clients.length; i++) {
+            const other = this.clients[(this.idx + i) % this.clients.length]!;
+            const second = await other.getContractState(this.gatewayWallet);
+            if (second.state === "active") throw err;
+          }
           console.warn(`[gram] gateway jetton wallet ${state.state} ⇒ held=0: ${String(err)}`);
+          return data.totalSupply;
         }
+        // OUTSIDE the try: confirmZeroHeld's disagreement throw must reach recon as
+        // INDETERMINATE. Inside it, the catch above re-interpreted the refusal as
+        // "uninitialized ⇒ held=0" — the exact reading it refused (2026-08-15 pause).
+        if (held === 0n) await this.confirmZeroHeld();
+        const circulating = data.totalSupply - held;
+        return circulating > 0n ? circulating : 0n;
       }
       return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
     });
