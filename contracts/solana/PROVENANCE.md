@@ -8,6 +8,7 @@
 | Program ID | id-agnostic — no `declare_id!`; the PDA is derived from the runtime program id, so one build deploys under any id (localnet used `MCFeMZJY…`, devnet ids in runbook) |
 | SDK | `pinocchio 0.11` (no_std; replaced Anchor 2026-08-20 — .so 134,120 → ~16 KB, deploy rent ~0.94 → ~0.12 SOL) |
 | Rust toolchain | `1.89.0` (pinned in `rust-toolchain.toml`), built with `cargo build-sbf` |
+| Reproducibility | the `.so` hash depends on the agave/platform-tools release (`cargo build-sbf` ships its own rustc): agave 3.1.10 → 16,184 B `ac07544d…`, CI `stable` 2026-08-20 → 15,920 B `f81d08ab…`. Record the agave version next to the hash at deploy time; reproduce with that same release. |
 | Source | `contracts/solana/programs/gateway-deposit/` |
 | IDL | `contracts/solana/target/idl/gateway_deposit.json` |
 | Binary | `contracts/solana/target/deploy/gateway_deposit.so` |
@@ -69,3 +70,8 @@ Verified locally via `tools/solana-pegout-proof.cjs` (see §5 of `RUNBOOK.md`).
 The proof deploys the program to a fresh `solana-test-validator`, mints wVIZ to the
 deposit PDA ATA, calls `burn_deposit`, and asserts the balance and supply dropped by
 the burned amount.
+
+Live devnet record (2026-08-20, pinocchio build at program
+`4WuuUFPA6f4RD2MMb6uFt44zSUSAMpn4EE93cEuujQ3y` — id burned for mainnet):
+peg-out burn `3FPpVA49ULnHqnGBA1PHWxH7odfYAbLVsnhws5WfW4YkR9RoP5tL1ymiP8KfZZXB9seCxwSz8Kwhh5ahmgqkY8k7`,
+peg-in mint `2txowUrxW1Uuo7carujF42VHmrZe4uR42x8rFfkyUoETUUW8wnVNonjAEsB8GEGvLphvQJaYJiD4aQADxp6h65uB`.
