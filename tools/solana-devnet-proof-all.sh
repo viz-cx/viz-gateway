@@ -4,7 +4,7 @@
 #
 # It stitches together the two manual sequences already in RUNBOOK.md
 # ("How peg-in mint works on Solana" / "How peg-out burn works on Solana") plus
-# the one step neither sequence includes: `anchor build` (documented in
+# the one step neither sequence includes: `cargo build-sbf` (documented in
 # AGENTS.md) to produce the gateway_deposit .so the peg-out proof deploys.
 #
 #   tools/solana-devnet-proof-all.sh            # both proofs
@@ -15,7 +15,7 @@
 # Prerequisites (see docs/runbook-solana-devnet-cutover.md for install commands):
 #   - Node 22+, `npm install` + `npm run build` done in the repo root.
 #   - Solana CLI (agave) on PATH: provides solana / solana-keygen / solana-test-validator.
-#   - Rust toolchain + Anchor CLI (`anchor`) — only needed for the peg-out proof
+#   - agave `cargo-build-sbf` (ships with the Solana CLI) — only for the peg-out proof
 #     (to build the gateway_deposit program). The peg-in proof does not need Anchor.
 #
 # This talks ONLY to a local validator (http://127.0.0.1:8899). It never touches
@@ -57,10 +57,10 @@ command -v node              >/dev/null || fail "node not on PATH"
 if [[ "$PROOF" == "both" || "$PROOF" == "pegout" ]]; then
   SO="$REPO_ROOT/contracts/solana/target/deploy/gateway_deposit.so"
   if [[ ! -f "$SO" ]]; then
-    command -v anchor >/dev/null || fail "gateway_deposit.so absent and 'anchor' not on PATH — install Anchor or run PROOF=pegin"
-    log "building gateway_deposit program (anchor build)..."
-    ( cd "$REPO_ROOT/contracts/solana" && anchor build ) || fail "anchor build failed"
-    [[ -f "$SO" ]] || fail "anchor build did not produce $SO"
+    command -v cargo-build-sbf >/dev/null || fail "gateway_deposit.so absent and 'cargo-build-sbf' not on PATH — install the agave toolchain or run PROOF=pegin"
+    log "building gateway_deposit program (cargo build-sbf)..."
+    ( cd "$REPO_ROOT/contracts/solana" && cargo-build-sbf ) || fail "cargo build-sbf failed"
+    [[ -f "$SO" ]] || fail "cargo build-sbf did not produce $SO"
   fi
   log "gateway_deposit .so present: $SO"
 fi
@@ -125,6 +125,12 @@ if [[ "$PROOF" == "both" || "$PROOF" == "pegin" ]]; then
   log "creating durable nonce account (authority = submitter)..."
   solana -u "$RPC" -k "$S/submitter.json" create-nonce-account "$S/nonce.json" 0.01 \
     --nonce-authority "$SUB_PUB" >/dev/null
+  # SolanaChain reads at "finalized"; wait until the fresh nonce account is
+  # finalized or buildMintProposal races it and sees "not found".
+  for _ in $(seq 1 60); do
+    solana -u "$RPC" account "$NONCE_PUB" --commitment finalized >/dev/null 2>&1 && break
+    sleep 1
+  done
 
   log "running the live mint round-trip..."
   SOLANA_RPC_URL="$RPC" PROOF_DIR="$S" \

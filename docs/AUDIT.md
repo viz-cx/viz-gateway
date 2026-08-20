@@ -110,7 +110,7 @@ Two independent custody gates:
 | `packages/solana-watcher` | read+sign | Solana adapter + PDA deposit-address derivation, lookup service, peg-out scanner, burn. |
 | `packages/dispatcher` | keyless | Drains QUEUED outbox rows to the coordinator with retry/backoff; spawns FEE_SWEEP/REFUND children. |
 | `packages/recon` | watchdog | Per-remote `locked(gate account) == circulating + unswept fees` (one `Recon` per chain, `checker.ts`); trips shared pause on under-backing. |
-| `contracts/solana` | on-chain | `gateway_deposit` burn-only Anchor program (§5.C). |
+| `contracts/solana` | on-chain | `gateway_deposit` burn-only pinocchio program (§5.C). |
 | `contracts/ton` | on-chain | Multisig-v2 + Jetton minter BOCs + rotation (§5.B). |
 | `setup-viz` | tooling | VIZ account setup + operator-rotation CLI. |
 
@@ -122,7 +122,7 @@ Two independent custody gates:
 
 - **Cryptographic / consensus-critical:** canonical action encoding & digest
   (`packages/common/src/canonical.ts`), threshold accumulation & rotation
-  (`rotation.ts`), the Solana `gateway_deposit` Anchor program, PDA derivation and F2
+  (`rotation.ts`), the Solana `gateway_deposit` pinocchio program, PDA derivation and F2
   re-derivation, VIZ `account_update` active-set rotation, TON multisig-v2 order/approve.
 - **Custody & authorization:** the two-gate model (§1), signer F2 source-validation for
   every action type (PEG_IN, Solana/TON PEG_OUT, FEE_SWEEP, REFUND), key custody and
@@ -210,7 +210,7 @@ finality buffer assumes stable block time.
 | PDA deposit address | `packages/solana-watcher/src/depositAddress.ts` | `depositPubkey/Address/Ata` derive `PDA(["deposit", vizAccount_utf8], programId)` — **no private key anywhere**; `buildBurnDepositIx` encodes `(viz_account, amount)`. |
 | F2 re-derivation | `packages/signer/src/sourceValidator.ts` (Solana PEG_OUT branch) | Re-reads burn on operator's own node; looks up `store.depositAddressBy(burn.from)`; **re-derives** the PDA from `vizAccount + SOLANA_DEPOSIT_PROGRAM_ID` and asserts it equals the burn source (a tampered registry cannot pass). |
 | Lookup issuance gate | `packages/solana-watcher/src/lookupValidate.ts`, `lookup.ts` | Issues a deposit address only if `VizChain.accountExists` (non-existent → 404; VIZ node outage → fail-closed 500). Note `VIZ_ACCOUNT_RE` is a **loose** pre-filter (§8). |
-| Mint / provenance | `contracts/solana/PROVENANCE.md`, `contracts/solana/src/deployMint.ts` | Program ID `MCFeMZJY…`; Anchor 1.1.2 / rustc 1.89.0 pinned. **Upgrade authority must be the M-of-N multisig** post-deploy — now **enforced in code** (`contracts/solana/src/enforceProgramAuthority.ts`, `programAuthority.ts`, #38), not just RUNBOOK prose; re-check the enforcement (does it fail closed if the on-chain upgrade authority isn't the expected multisig?), covered by `solana-upgrade-authority-spike.cjs`. |
+| Mint / provenance | `contracts/solana/PROVENANCE.md`, `contracts/solana/src/deployMint.ts` | id-agnostic program (no `declare_id!` — PDA derived from runtime program id); pinocchio 0.11 / rustc 1.89.0 pinned. **Upgrade authority must be the M-of-N multisig** post-deploy — now **enforced in code** (`contracts/solana/src/enforceProgramAuthority.ts`, `programAuthority.ts`, #38), not just RUNBOOK prose; re-check the enforcement (does it fail closed if the on-chain upgrade authority isn't the expected multisig?), covered by `solana-upgrade-authority-spike.cjs`. |
 | Operator rotation | `contracts/solana/src/rotateSolana.ts` | Two-phase SPL multisig handoff. |
 
 **Focus for auditor:** T5 — confirm there is genuinely no transfer/withdraw path
@@ -262,9 +262,9 @@ data-integrity failure.
   `contracts/ton/tools/verify-offline.cjs`). Deterministic, no network. Also a compiled
   unit-test target — `npm run test:unit` (65 tests) — run in CI (#38 BM1). Note the spikes
   are **pragmatic, give no coverage signal** — treat as behavior fixtures, not exhaustive.
-- **Anchor program:** `contracts/solana` — Anchor `1.1.2`, rustc `1.89.0`
-  (`rust-toolchain.toml`). Reproducible-build the `.so` and diff against the deployed
-  program at `MCFeMZJY…`.
+- **On-chain program:** `contracts/solana` — pinocchio `0.11` (no_std, zero-dep;
+  replaced Anchor 2026-08-20), rustc `1.89.0` (`rust-toolchain.toml`). Reproducible-build
+  the `.so` and diff against the deployed program id recorded in `contracts/solana/PROVENANCE.md`.
 - **On-chain proofs on record (internal, for context):** VIZ prod active-set rotation
   round-trip; TON testnet peg-in+peg-out incl. crash-window re-proof; Solana devnet
   mint + peg-out burn. See `RUNBOOK.md` (verification records, §5 deploy checklist).

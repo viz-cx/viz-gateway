@@ -232,7 +232,8 @@ node -e 'console.log(require("./packages/solana-watcher/dist/depositAddress.js")
 ```
 
 Set `SOLANA_DEPOSIT_PROGRAM_ID` to the deployed gateway-deposit program ID
-(`MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1` on devnet/mainnet after deploy).
+(the build is id-agnostic — no `declare_id!` — so this is whatever fresh keypair
+the deploy used; see `contracts/solana/PROVENANCE.md`).
 No seed, no `DEPOSIT_MASTER_PUB`. F2 source validation is a pure PDA re-derivation:
 `depositAddress(programId, vizAccount)` must equal the burn source address, deterministically.
 
@@ -246,7 +247,8 @@ This cutover is required when migrating from the old additive-ed25519 scheme to 
 Execute in order, with the gateway **paused** between steps 2 and 5.
 
 1. **Deploy** `gateway_deposit` to devnet then mainnet; verify the program ID matches
-   `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1`; set the upgrade authority to the federation's
+   the deploy keypair recorded in `contracts/solana/PROVENANCE.md` (the id-agnostic
+   build deploys under any id); set the upgrade authority to the federation's
    M-of-N multisig (a Squads-style authority PDA — an SPL Token multisig does NOT work for the BPF
    loader) and confirm it with `npm run authority:solana` (dry-run must print `SECURED`); record the
    program ID and provenance in `contracts/solana/PROVENANCE.md`.
@@ -461,7 +463,7 @@ there: this proof targets the write path, not the F2 re-read).
 To re-run against a fresh local cluster:
 
 > **Turnkey:** `tools/solana-devnet-proof-all.sh` runs BOTH this mint proof and
-> the peg-out burn proof from zero (boots the validator, `anchor build`s the
+> the peg-out burn proof from zero (boots the validator, `cargo build-sbf`s the
 > program, tears down after). Toolchain install + mainnet cutover checklist:
 > [`docs/runbook-solana-devnet-cutover.md`](./docs/runbook-solana-devnet-cutover.md).
 > The manual sequence below is for debugging a single step.

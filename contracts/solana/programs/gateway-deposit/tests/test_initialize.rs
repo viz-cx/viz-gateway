@@ -55,7 +55,7 @@ fn make_svm() -> LiteSVM {
 fn burns_exactly_amount_from_deposit_ata() {
     let mut svm = make_svm();
 
-    // Load our program .so (built by `anchor build`; path is relative to CARGO_MANIFEST_DIR).
+    // Load our program .so (built by `cargo build-sbf`; path is relative to CARGO_MANIFEST_DIR).
     let so_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent() // programs/gateway-deposit  → programs
         .unwrap()
@@ -281,6 +281,28 @@ fn rejects_viz_account_longer_than_16_bytes() {
         err_str.contains("6000"),
         "expected error code 6000 (AccountNameTooLong), got: {err_str}"
     );
+}
+
+// ──── test: hardcoded program-id constants match the SPL interface crates ─────
+
+#[test]
+fn program_id_constants_match_spl_crates() {
+    assert_eq!(
+        gateway_deposit::TOKEN_2022_ID.as_ref(),
+        TOKEN_2022_PROGRAM_ID.as_ref(),
+        "TOKEN_2022_ID byte constant drifted"
+    );
+    assert_eq!(
+        gateway_deposit::ATA_PROGRAM_ID.as_ref(),
+        spl_associated_token_account_interface::program::ID.as_ref(),
+        "ATA_PROGRAM_ID byte constant drifted"
+    );
+    assert_eq!(
+        gateway_deposit::SYSTEM_PROGRAM_ID.as_ref(),
+        [0u8; 32].as_ref(),
+        "SYSTEM_PROGRAM_ID must be all zeros"
+    );
+    assert_eq!(gateway_deposit::BURN_DEPOSIT_DISC, BURN_DEPOSIT_DISC);
 }
 
 // ──── test: IDL exposes exactly one instruction ───────────────────────────────

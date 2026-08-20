@@ -62,10 +62,20 @@ const BURN_AMOUNT = 3_000_000n; // 3,000 wVIZ burned
 
 const RPC_URL = process.env.SOLANA_RPC_URL || "http://127.0.0.1:8899";
 
-// Program ID from Anchor.toml (MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1)
-// override with SOLANA_PROGRAM_ID if needed
+// The program is id-agnostic (no declare_id) and deploys at whatever keypair
+// `cargo build-sbf` generated, so default to that keypair's pubkey when it
+// exists. Override with SOLANA_PROGRAM_ID (e.g. for an already-deployed id).
 const DEFAULT_PROGRAM_ID = "MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1";
-const PROGRAM_ID = process.env.SOLANA_PROGRAM_ID || DEFAULT_PROGRAM_ID;
+function localDeployKeypairPubkey() {
+  try {
+    const kpPath = path.resolve(__dirname, "../contracts/solana/target/deploy/gateway_deposit-keypair.json");
+    const secret = Uint8Array.from(JSON.parse(fs.readFileSync(kpPath, "utf8")));
+    return Keypair.fromSecretKey(secret).publicKey.toBase58();
+  } catch (_) {
+    return null;
+  }
+}
+const PROGRAM_ID = process.env.SOLANA_PROGRAM_ID || localDeployKeypairPubkey() || DEFAULT_PROGRAM_ID;
 
 // ---------------------------------------------------------------------------
 // Helpers

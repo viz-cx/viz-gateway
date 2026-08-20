@@ -49,21 +49,19 @@ export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
 solana --version   # e.g. agave 2.x / solana-cli 2.x
 ```
 
-### Rust + Anchor — needed ONLY for the peg-out proof
+### Rust — needed ONLY for the peg-out proof
 The peg-out proof deploys the `gateway_deposit` program, so it needs the
-compiled `.so`. The peg-in mint proof does **not** need Rust/Anchor.
+compiled `.so`, built by `cargo build-sbf` (ships with the agave install above;
+it needs a host `cargo` for metadata, hence rustup). No Anchor — the program is
+pinocchio (no_std) since 2026-08-20.
 ```bash
 # Rust (pinned by contracts/solana/rust-toolchain.toml -> 1.89.0)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
-
-# Anchor via avm (matches contracts/solana/Anchor.toml)
-cargo install --git https://github.com/coral-xyz/anchor avm --locked
-avm install latest && avm use latest
-anchor --version
+( cd contracts/solana && cargo build-sbf )   # target/deploy/gateway_deposit.so (~16 KB)
 ```
 
-If you skip Rust/Anchor, run `PROOF=pegin tools/solana-devnet-proof-all.sh`.
+If you skip Rust, run `PROOF=pegin tools/solana-devnet-proof-all.sh`.
 
 ---
 
@@ -125,21 +123,23 @@ prints the payer/submitter pubkeys to fund at https://faucet.solana.com.
 The peg-out proof needs `gateway_deposit` **on devnet**. Devnet purges idle
 programs (the July deploy of `MCFeMZJY…` is gone), so to (re)deploy:
 1. Generate a program keypair locally; it never leaves your machine.
-2. Run the `Solana program build` workflow (`.github/workflows/
-   solana-program-build.yml`) with the keypair's pubkey as `program_id` — it
-   patches `declare_id!` to match (Anchor rejects a mismatched deploy at
-   runtime) and uploads the `.so` (~131 KB) as an artifact.
+2. Get the `.so`: `cargo build-sbf` locally, or the `Solana program build`
+   workflow artifact. The pinocchio program has **no `declare_id!`** — one
+   id-agnostic build (~16 KB) deploys under any program id, no source patching.
 3. Deploy with only the `solana` binary (25 MB, extractable alone from the
-   agave release tarball) and a payer holding ~2 SOL for peak rent:
+   agave release tarball) and a payer holding ~0.25 SOL for peak rent:
    `solana program deploy <so> --program-id <keypair> --keypair <payer> -u devnet`.
 4. `SOLANA_PROGRAM_ID=<pubkey> PROOF=pegout node tools/solana-devnet-run.cjs`.
 
-Verification record — 2026-08-15, both proofs PROVEN on devnet:
-peg-in mint tx `3peWbRthttf1Wo3MoTRvXcafNNQXMfy6HmC8WUGuuDLAWju6DcKDrKhK9dyAh8BK9qcKpspruB1iRcsdS7kDQxzc`
+Verification record — 2026-08-20, both proofs PROVEN on devnet against the
+**pinocchio** build (16,184 B, deploy cost 0.115 SOL net):
+peg-in mint tx `2txowUrxW1Uuo7carujF42VHmrZe4uR42x8rFfkyUoETUUW8wnVNonjAEsB8GEGvLphvQJaYJiD4aQADxp6h65uB`
 (mint `3wWjWQwW9QzZpzLnoXGZnJjhP6yrXvWw2CvkQDsVxqaT`, 2-of-2 multisig
 `CpwvWZhw4CaqyjHEMx8GGiDPfD5PjB2hUCgCedxkN1PU`); peg-out burn tx
-`3SbhKJT3qV6cfEQCKMTd6Lhiz42UJ7m75Avf3q7mr9stN13nEN8b6qEpY1VQSE6oUhgMa21xa7Rv8uAH2scuya7e`
-(program `BjgxrYA4nsVrRcWH9XwDZpqmNFUAYfZ7AnN5KsbkCxJK`).
+`3FPpVA49ULnHqnGBA1PHWxH7odfYAbLVsnhws5WfW4YkR9RoP5tL1ymiP8KfZZXB9seCxwSz8Kwhh5ahmgqkY8k7`
+(program `4WuuUFPA6f4RD2MMb6uFt44zSUSAMpn4EE93cEuujQ3y`).
+Previous record (2026-08-15, Anchor build, program `BjgxrYA4…` — superseded):
+peg-in `3peWbRt…QxzC`, peg-out `3SbhKJT…ya7e`.
 
 ---
 
@@ -152,16 +152,16 @@ All env keys are in `.env.example` (the `# --- Solana chain` block).
 ### 3a. Deploy the contracts (mainnet-beta)
 - [ ] Generate a **fresh** program keypair locally (never one whose pubkey has
       already appeared in this repo or its CI — a pre-announced id can be squatted
-      on mainnet first; the devnet `BjgxrYA4…` is burned for this purpose). Then
-      build + deploy **back-to-back** via the §2b CI flow: running the workflow
-      publishes the pubkey in Actions, so don't trigger it until the payer is
-      funded and ready to deploy immediately. Log the id in
+      on mainnet first; the devnet `BjgxrYA4…` and `4WuuUFPA…` are burned for this purpose). The
+      pinocchio `.so` is id-agnostic (no `declare_id!`), so the pubkey never
+      needs to reach CI at all: build once, deploy under the fresh keypair
+      whenever the payer is ready. Log the id in
       `contracts/solana/PROVENANCE.md`.
-      **Cost:** rent is ~6,960 lamports/byte, so the ~131 KB `.so` locks ~0.94 SOL
-      in programdata plus a same-size buffer deposit **refunded when the deploy
-      finalizes** — peak float ~1.9 SOL, net ~0.95. Pass `--max-len` ≈ the actual
-      binary size so programdata doesn't default to 2× (`solana program extend`
-      can grow it later if ever needed).
+      **Cost:** rent is ~6,960 lamports/byte, so the ~16 KB pinocchio `.so`
+      locks ~0.12 SOL in programdata plus a same-size buffer deposit **refunded
+      when the deploy finalizes** — peak float ~0.24 SOL, net ~0.12. Pass
+      `--max-len` ≈ the actual binary size so programdata doesn't default to 2×
+      (`solana program extend` can grow it later if ever needed).
 - [ ] Deploy the wVIZ **Token-2022 mint** + **SPL M-of-N multisig** (mint+freeze
       authority) with the real operator pubkeys:
       `SOLANA_SIGNERS=<op1,op2,...> SOLANA_THRESHOLD=<M> DEPLOY_SEND=1
