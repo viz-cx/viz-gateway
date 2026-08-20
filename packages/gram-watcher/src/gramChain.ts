@@ -49,12 +49,28 @@ export const TON_RETRY_BASE_MS = 500;
  * endpoint sat unused in the ring — because -13 was classified fail-closed, tonCall never
  * rotated, and 3 such ticks latched the "cannot verify backing" pause. Worst case if a -13
  * were ever genuine: one extra pass through the ring, then the same throw → indeterminate.
+ *
+ * The match runs over message + code + cause chain + AggregateError sub-errors, not the
+ * message alone: 2026-08-20 the same pause latched again on two shapes whose messages carry
+ * no keyword — axios "Client network socket disconnected before secure TLS connection was
+ * established" (the ECONNRESET lives in err.code/err.cause.code) and AxiosError
+ * [AggregateError] (empty message; the ECONNREFUSED/ETIMEDOUT codes live in err.errors[]).
  */
 export function isTransientTonError(err: unknown): boolean {
-  const msg = String((err as { message?: unknown })?.message ?? err);
-  return /\b(429|50[0234])\b|exit_code:\s*-13\b|too many requests|bad gateway|service unavailable|gateway time-?out|time-?d?\s?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|socket hang up|network error/i.test(
-    msg,
+  return /\b(429|50[0234])\b|exit_code:\s*-13\b|too many requests|bad gateway|service unavailable|gateway time-?out|time-?d?\s?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|socket hang up|network error|disconnected before secure TLS/i.test(
+    errorHaystack(err, 4),
   );
+}
+
+/** Flatten message + code + cause chain + AggregateError sub-errors into one searchable string. */
+function errorHaystack(err: unknown, depth: number): string {
+  if (err == null || depth < 0) return "";
+  if (typeof err !== "object") return String(err);
+  const e = err as { message?: unknown; code?: unknown; cause?: unknown; errors?: unknown };
+  const parts = [String(e.message ?? ""), typeof e.code === "string" ? e.code : ""];
+  if (Array.isArray(e.errors)) for (const sub of e.errors) parts.push(errorHaystack(sub, depth - 1));
+  if (e.cause !== undefined) parts.push(errorHaystack(e.cause, depth - 1));
+  return parts.join(" ");
 }
 
 /**

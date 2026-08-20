@@ -59,6 +59,40 @@ test("exit_code -13 (TVM out-of-gas) IS transient — the node's gas limit, not 
   }
 });
 
+test("transport errors whose keyword is OUTSIDE .message rotate (2026-08-20 pause)", () => {
+  // 2026-08-20: three toncenter blips in 63s latched "cannot verify backing" because neither
+  // shape matched on message alone — the ring never rotated onto the healthy Orbs endpoint.
+  // Shape 1: axios TLS-handshake reset; ECONNRESET is in err.code / err.cause.code only.
+  const tlsReset = Object.assign(
+    new Error("Client network socket disconnected before secure TLS connection was established"),
+    { code: "ECONNRESET", cause: Object.assign(new Error(""), { code: "ECONNRESET" }) },
+  );
+  assert.equal(isTransientTonError(tlsReset), true, "TLS-handshake reset must rotate");
+  // Shape 2: AxiosError [AggregateError] — empty message, codes only in errors[] (happy-eyeballs
+  // connect failure across the resolved addresses).
+  const aggregate = Object.assign(new Error(""), {
+    errors: [
+      Object.assign(new Error("connect ECONNREFUSED 172.67.1.1:443"), { code: "ECONNREFUSED" }),
+      Object.assign(new Error("connect ETIMEDOUT 104.26.2.2:443"), { code: "ETIMEDOUT" }),
+    ],
+  });
+  assert.equal(isTransientTonError(aggregate), true, "aggregate connect failure must rotate");
+  // An axios wrapper whose only signal is a nested cause two levels down.
+  const wrapped = Object.assign(new Error("request failed"), {
+    cause: Object.assign(new Error("socket failure"), { cause: new Error("read ECONNRESET") }),
+  });
+  assert.equal(isTransientTonError(wrapped), true, "nested cause chain must rotate");
+  // Contract-level results stay fail-closed even when wrapped in a cause.
+  const contract = Object.assign(new Error("request failed"), {
+    cause: new Error('Received an error: {"ok":false,"error":"exit_code: -14"}'),
+  });
+  assert.equal(isTransientTonError(contract), false, "wrapped contract result must NOT rotate");
+  // A cycle in the cause chain must not hang the classifier (depth-bounded walk).
+  const cyclic: { message: string; cause?: unknown } = { message: "boom" };
+  cyclic.cause = cyclic;
+  assert.equal(isTransientTonError(cyclic), false);
+});
+
 test("HTTP 501 is NOT transient for TON (pattern is 50[0234])", () => {
   // GRAM treats 500/502/503/504 as transient but deliberately not 501/505.
   for (const code of ["501", "505", "400", "404"]) {
