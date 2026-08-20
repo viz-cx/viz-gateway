@@ -347,7 +347,12 @@ under-rated.
   network payloads, so it is not reachable via an untrusted input path. Accepted risk;
   the eventual fix is the `@solana/web3.js` v1 → v2 (`@solana/kit`) migration, which
   drops `bigint-buffer` entirely. `npm audit` surfaces this as 3 high entries that all
-  collapse to this one root.
+  collapse to this one root. Re-verified 2026-08-20 ahead of Solana go-live: the only call
+  sites are `buffer-layout-utils`' u64/u128/u192/u256 decoders, which pass layout-fixed
+  8/16/24/32-byte blobs — the oversized-buffer path is unreachable.
+- **`uuid < 11.1.1` bounds check (GHSA-w5hq-g745-h8pq, moderate, via `jayson`):** the
+  advisory needs a caller-provided `buf` in v3/v5/v6; `jayson` only calls `uuid.v4()` with
+  no arguments (JSON-RPC request ids). Not reachable. Accepted; same web3.js-v2 exit.
 - **Dependabot ws/form-data alerts were false positives** — the lockfile has held
   `ws@8.21.0` (≥5.2.5) and `form-data@4.0.6` (patched) since the viz-js-lib pin; both
   alerts were dismissed as not-present. `npm audit` is clean for both.
