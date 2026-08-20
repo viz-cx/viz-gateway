@@ -150,9 +150,18 @@ is the deferred part of `docs/plan-mainnet-deploy.md` §"Phase 2 — Solana main
 All env keys are in `.env.example` (the `# --- Solana chain` block).
 
 ### 3a. Deploy the contracts (mainnet-beta)
-- [ ] **Reproducible-build** `gateway_deposit` and deploy it. Verify the on-chain
-      program ID matches the pinned `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1`
-      (or record the new one). Log it in `contracts/solana/PROVENANCE.md`.
+- [ ] Generate a **fresh** program keypair locally (never one whose pubkey has
+      already appeared in this repo or its CI — a pre-announced id can be squatted
+      on mainnet first; the devnet `BjgxrYA4…` is burned for this purpose). Then
+      build + deploy **back-to-back** via the §2b CI flow: running the workflow
+      publishes the pubkey in Actions, so don't trigger it until the payer is
+      funded and ready to deploy immediately. Log the id in
+      `contracts/solana/PROVENANCE.md`.
+      **Cost:** rent is ~6,960 lamports/byte, so the ~131 KB `.so` locks ~0.94 SOL
+      in programdata plus a same-size buffer deposit **refunded when the deploy
+      finalizes** — peak float ~1.9 SOL, net ~0.95. Pass `--max-len` ≈ the actual
+      binary size so programdata doesn't default to 2× (`solana program extend`
+      can grow it later if ever needed).
 - [ ] Deploy the wVIZ **Token-2022 mint** + **SPL M-of-N multisig** (mint+freeze
       authority) with the real operator pubkeys:
       `SOLANA_SIGNERS=<op1,op2,...> SOLANA_THRESHOLD=<M> DEPLOY_SEND=1
