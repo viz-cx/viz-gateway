@@ -529,6 +529,18 @@ export class VizJsChain implements VizChain {
   }
 
   /**
+   * Head block time (epoch ms) from THIS operator's own node — the chain's clock, not the
+   * box's. The signer's replay ledger uses it to decide when a previously signed release
+   * proposal is past its expiration (a tx whose expiration < head time can never land).
+   */
+  async headBlockTimeMs(): Promise<number> {
+    const gp = await this.call<DynamicGlobalProperties>((cb) => viz.api.getDynamicGlobalProperties(cb));
+    const ms = Date.parse(`${gp.time}Z`); // graphene times are UTC without a suffix
+    if (Number.isNaN(ms)) throw new Error(`headBlockTimeMs: unparseable node time "${gp.time}"`);
+    return ms;
+  }
+
+  /**
    * Confirm a specific release landed on-chain by its EXACT transaction id — an O(1)
    * lookup with no scan window (replaces the old last-1000-ops memo scan, which could
    * miss an older release on a busy gateway and re-broadcast a second real transfer).

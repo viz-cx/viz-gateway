@@ -590,6 +590,30 @@ within minutes, and the fix must deploy first. (node:sqlite gotcha: bind
 positional `?` params; `:name` placeholders with positional args throw
 "column index out of range".)
 
+### Signer replay ledger (clearing a stuck row)
+
+Each signer records, in its OWN sqlite store (`signed_proposals` table), the one
+proposal key it has signed per action id, and refuses a second live proposal for
+the same action — a "ReplayRefusalError" in the coordinator's "signer … did not
+approve" log line. VIZ releases self-heal (a rebuilt proposal is accepted ~2 min
+after the prior one expires unlanded); a GRAM/Solana refusal means the
+coordinator presented a different orderAddr/nonce message than the one this
+operator first signed, which never happens on an honest re-drive.
+
+Before clearing, verify ON-CHAIN that the action's effect did NOT land (VIZ:
+`get_transaction` of the txid in the refusal message; GRAM: the old order at the
+recorded `gram-order:<addr>` key is not executed). A landed effect + a new
+proposal is a real replay attempt — investigate the coordinator, do not clear.
+Only then, on the SIGNER's box:
+
+```bash
+docker exec -i $(docker ps --format '{{.Names}}' | grep viz-gateway-signer) node -e '
+const {DatabaseSync} = require("node:sqlite");
+const db = new DatabaseSync("/app/data/gateway.sqlite");
+console.log(db.prepare("SELECT * FROM signed_proposals WHERE action_id = ?").all(process.argv[1]));
+db.prepare("DELETE FROM signed_proposals WHERE action_id = ?").run(process.argv[1]);' "<action-id>"
+```
+
 ## Rotating the operator set
 
 Any current operator can rotate the VIZ `active`/`regular` authority to a new
