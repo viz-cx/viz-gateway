@@ -18,6 +18,7 @@ import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { GramApprover } from "@gateway/gram-watcher/dist/gramApprove";
 import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { KeyedSigner } from "./keyedSigner";
+import { assertNotReplay, type ReplayLedgerDeps } from "./replayLedger";
 import { routeApproval } from "./routeApproval";
 import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
 import { startRegisterLoop } from "./register";
@@ -199,6 +200,15 @@ async function main(): Promise<void> {
     gramApprover,
     accounts,
   );
+  // Replay ledger (PR #129 deferred hardening): this operator's own record of the one
+  // proposal it has signed per action, so a compromised coordinator cannot harvest a
+  // second live signature for the same real source event. Own store + own node reads.
+  const replayDeps: ReplayLedgerDeps = {
+    store,
+    headBlockTimeMs: () => vizChain.headBlockTimeMs(),
+    releaseLanded: async (txid) => (await vizChain.confirmReleaseByTxId(txid)) !== null,
+  };
+
   // Default 8101 (not 8090): a gateway operator runs a VIZ node on the same or a nearby
   // box, and viz-cpp-node binds 8090/8091 (HTTP/WS RPC) + 8092/8093 (snapshot/wallet). The
   // 810x block stays clear of that range.
@@ -231,6 +241,9 @@ async function main(): Promise<void> {
         }
         const req = JSON.parse(body) as ApproveRequest;
         const action = actionFromWire(req.action);
+        // Replay gate BEFORE validation/signing: claims (actionId → proposal key) in this
+        // operator's own store, refusing a second live proposal for an already-signed action.
+        await assertNotReplay(action, req.proposal, replayDeps);
         const approval = await routeApproval(signer, action, req.proposal, hintFromRequest(req));
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify(approval));

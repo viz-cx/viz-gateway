@@ -132,6 +132,24 @@ export interface GatewayStore {
    * Returns false (without recording) when the limit is already reached.
    */
   tryReserveSenderRate(sender: string, maxPerWindow: number, windowMs: number, now: number): Promise<boolean>;
+
+  // --- signer replay ledger (one row per action THIS operator has signed) ---
+  /**
+   * The proposal key this store last claimed for `actionId`, or null if never claimed.
+   * Used by the signer's replay ledger: a signer must never hold two LIVE signed
+   * proposals for one action, or a compromised coordinator could broadcast both
+   * (double release/mint). Lives in the SIGNER's own store — the coordinator's
+   * outbox idempotency cannot be trusted against a compromised coordinator.
+   */
+  getSignedProposal(actionId: string): Promise<{ key: string; expiresAtMs: number } | null>;
+  /**
+   * Atomic claim/compare-and-swap of (actionId → proposal key). With
+   * `expectedPrevKey === null` this is a first-claim insert (false if a row already
+   * exists); otherwise the row is replaced only if it still carries `expectedPrevKey`
+   * (false on mismatch). The CAS closes the race where two concurrent /approve calls
+   * with DIFFERENT proposals for one action could both get signed.
+   */
+  putSignedProposal(actionId: string, key: string, expiresAtMs: number, expectedPrevKey: string | null): Promise<boolean>;
 }
 
 type Row = Record<string, unknown>;
@@ -234,6 +252,12 @@ export class SqliteGatewayStore implements GatewayStore {
          key TEXT PRIMARY KEY,
          value TEXT,
          updated_at INTEGER NOT NULL
+       );
+       CREATE TABLE IF NOT EXISTS signed_proposals(
+         action_id    TEXT PRIMARY KEY,
+         proposal_key TEXT NOT NULL,
+         expires_at   INTEGER NOT NULL DEFAULT 0,
+         created_at   INTEGER NOT NULL
        );`,
     );
     // Migration: add columns the table may predate (each nullable for back-compat).
@@ -500,6 +524,26 @@ export class SqliteGatewayStore implements GatewayStore {
     }
   }
 
+  async getSignedProposal(actionId: string): Promise<{ key: string; expiresAtMs: number } | null> {
+    const r = this.db
+      .prepare("SELECT proposal_key, expires_at FROM signed_proposals WHERE action_id = ?")
+      .get(actionId) as Row | undefined;
+    return r ? { key: String(r["proposal_key"]), expiresAtMs: Number(r["expires_at"]) } : null;
+  }
+
+  async putSignedProposal(actionId: string, key: string, expiresAtMs: number, expectedPrevKey: string | null): Promise<boolean> {
+    if (expectedPrevKey === null) {
+      const res = this.db
+        .prepare("INSERT OR IGNORE INTO signed_proposals(action_id, proposal_key, expires_at, created_at) VALUES(?, ?, ?, ?)")
+        .run(actionId, key, expiresAtMs, Date.now());
+      return Number(res.changes) === 1;
+    }
+    const res = this.db
+      .prepare("UPDATE signed_proposals SET proposal_key = ?, expires_at = ?, created_at = ? WHERE action_id = ? AND proposal_key = ?")
+      .run(key, expiresAtMs, Date.now(), actionId, expectedPrevKey);
+    return Number(res.changes) === 1;
+  }
+
   private setKey(key: string, value: string): void {
     this.db
       .prepare(
@@ -732,6 +776,17 @@ export class InMemoryGatewayStore implements GatewayStore {
   }
   async setState(key: string, value: string): Promise<void> {
     this.state.set(key, value);
+  }
+  private readonly signed = new Map<string, { key: string; expiresAtMs: number }>();
+  async getSignedProposal(actionId: string): Promise<{ key: string; expiresAtMs: number } | null> {
+    const r = this.signed.get(actionId);
+    return r ? { ...r } : null;
+  }
+  async putSignedProposal(actionId: string, key: string, expiresAtMs: number, expectedPrevKey: string | null): Promise<boolean> {
+    const prev = this.signed.get(actionId);
+    if ((expectedPrevKey === null && prev) || (expectedPrevKey !== null && prev?.key !== expectedPrevKey)) return false;
+    this.signed.set(actionId, { key, expiresAtMs });
+    return true;
   }
   async close(): Promise<void> {
     /* no-op */
