@@ -122,7 +122,7 @@ async function ataBalance(conn, mint, owner) {
   // at 'confirmed' but mintByActionId scans at 'finalized' (as the coordinator would,
   // later) — poll briefly to let finalization catch up.
   let found = null;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 60; i++) {
     found = await chain.mintByActionId(action.id);
     if (found && found.txid === sig) break;
     found = null;

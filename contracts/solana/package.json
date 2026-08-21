@@ -5,8 +5,7 @@
   "main": "dist/deployMint.js",
   "scripts": {
     "build": "tsc -b",
-    "anchor:build": "anchor build",
-    "anchor:test": "anchor test"
+    "sbf:build": "cargo build-sbf"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.15",

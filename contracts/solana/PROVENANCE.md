@@ -5,9 +5,10 @@
 | Field | Value |
 |---|---|
 | Program name | `gateway_deposit` |
-| Program ID | `MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1` |
-| Anchor version | `1.1.2` |
-| Rust toolchain | `1.89.0` (pinned in `rust-toolchain.toml`) |
+| Program ID | id-agnostic — no `declare_id!`; the PDA is derived from the runtime program id, so one build deploys under any id (localnet used `MCFeMZJY…`, devnet ids in runbook) |
+| SDK | `pinocchio 0.11` (no_std; replaced Anchor 2026-08-20 — .so 134,120 → ~16 KB, deploy rent ~0.94 → ~0.12 SOL) |
+| Rust toolchain | `1.89.0` (pinned in `rust-toolchain.toml`), built with `cargo build-sbf` |
+| Reproducibility | the `.so` hash depends on the agave/platform-tools release (`cargo build-sbf` ships its own rustc): agave 3.1.10 → 16,992 B `47743392…` (Anchor-error-parity build, 2026-08-21). Record the agave version next to the hash at deploy time; reproduce with that same release. |
 | Source | `contracts/solana/programs/gateway-deposit/` |
 | IDL | `contracts/solana/target/idl/gateway_deposit.json` |
 | Binary | `contracts/solana/target/deploy/gateway_deposit.so` |
@@ -18,6 +19,17 @@
 Burn-only on-chain program. Accepts a single instruction — `burn_deposit` — that:
 1. Re-derives the PDA `["deposit", viz_account]` from the calling program ID.
 2. Burns exactly `amount` tokens from the PDA's ATA via Token-2022 CPI.
+
+The wire ABI is frozen at the original Anchor layout (discriminator
+`sha256("global:burn_deposit")[..8]`, Borsh args, Anchor error codes AND check
+order) and pinned by `tests/test_initialize.rs` (litesvm) plus the committed
+IDL — the pinocchio rewrite changed the implementation, not the interface.
+Parity is verified **differentially**: the same 21-test suite passes unchanged
+against both this build and the last Anchor-built .so
+(`GATEWAY_DEPOSIT_SO=<anchor.so> GATEWAY_DEPOSIT_PROGRAM_ID=<its declare_id>
+cargo test`). Known deliberate divergence: a Borsh length prefix larger than
+the buffer makes Anchor OOM-panic (`ProgramFailedToComplete`) while this build
+returns error 102 cleanly — both reject the transaction.
 
 There is **no transfer instruction**. Funds at a PDA can only be burned; they cannot be
 moved to any other address. The PDA has no private key — it is a program-derived address
@@ -52,11 +64,12 @@ solana program set-upgrade-authority MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1
 solana program show MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 --url <RPC_URL>  # Authority == multisig
 ```
 
-> **Not tested on a live cluster.** No `solana-test-validator` is available in the dev
-> environment, so `enforceProgramAuthority.ts`'s on-chain read/hand-off path has NOT been run
-> against a cluster. Its ProgramData parsing, PDA derivation, fail-closed verdict, and the
-> `SetAuthority` instruction layout are covered offline by
-> `tools/solana-upgrade-authority-spike.cjs`; dry-run it on devnet before mainnet.
+> **Devnet-proven 2026-08-21** against program `4WuuUFPA…`: dry-run SECURED (exit 0) with
+> the matching authority, fail-closed UNSAFE (exit 2) with a mismatched one, and a full
+> `APPLY=1` hand-off round-trip (payer → throwaway key tx `2UKpunpk…`, back → payer tx
+> `4wmeZRwJ…`) with on-chain read-back after each write. Note: the keypair in
+> `SOLANA_PAYER_SECRET` also pays the SetAuthority fee — a freshly-created multisig-side
+> key needs a few lamports before it can hand authority back.
 
 ### Devnet proof
 
@@ -64,3 +77,10 @@ Verified locally via `tools/solana-pegout-proof.cjs` (see §5 of `RUNBOOK.md`).
 The proof deploys the program to a fresh `solana-test-validator`, mints wVIZ to the
 deposit PDA ATA, calls `burn_deposit`, and asserts the balance and supply dropped by
 the burned amount.
+
+Live devnet record (2026-08-21, Anchor-error-parity pinocchio build upgraded
+in place at program `4WuuUFPA6f4RD2MMb6uFt44zSUSAMpn4EE93cEuujQ3y` — id burned
+for mainnet): peg-out burn
+`L2PghaPBg4Q96unjdwJXKUCKuiLibvWzWDfZKopLoVYpD7YgxL6deK6qtJuuijMXKoiq4N8A33Hk1Htgvg1qEoh`,
+peg-in mint `3qYGtNeByjPSkYnEey8FoyjV6VzyvsPTUvfRef7bEuGKFZbQCnVM4XaHJKM1J7SxgoeFVwhGTW3E1NSrC7viTk6L`;
+both proofs include the watcher's `getBurn` F2 re-validation.
