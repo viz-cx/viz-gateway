@@ -5,9 +5,17 @@
 ///
 /// Every branch of `process_instruction` is exercised against the compiled .so:
 /// the happy path, both name-length boundaries, each data-parse rejection, each
-/// account-validation error (with its pinned Anchor-compatible code), CPI error
+/// account-validation error (with its pinned Anchor error code), CPI error
 /// propagation, and the Anchor compatibility quirks (trailing instruction data
 /// and extra accounts are tolerated).
+///
+/// The same suite doubles as a differential ABI test against the last
+/// Anchor-built .so — every expectation below matches observed Anchor behavior:
+///
+/// ```sh
+/// GATEWAY_DEPOSIT_SO=<anchor .so> \
+/// GATEWAY_DEPOSIT_PROGRAM_ID=<its declare_id> cargo test
+/// ```
 use litesvm::LiteSVM;
 use solana_account::Account;
 use solana_instruction::{account_meta::AccountMeta, Instruction};
@@ -21,15 +29,22 @@ use spl_associated_token_account_interface::{
     instruction::create_associated_token_account_idempotent,
 };
 use spl_token_2022_interface::{
-    instruction::{initialize_mint2, mint_to},
+    instruction::{initialize_account3, initialize_mint2, mint_to},
     state::Account as TokenAccount,
     ID as TOKEN_2022_PROGRAM_ID,
 };
 
 // ──── helpers ────────────────────────────────────────────────────────────────
 
-const GATEWAY_DEPOSIT_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1");
+/// Program id the .so is loaded at. `GATEWAY_DEPOSIT_PROGRAM_ID` overrides it so
+/// the suite can run differentially against the old Anchor build, which
+/// hard-checks its baked-in `declare_id` (the pinocchio build is id-agnostic).
+fn gateway_program_id() -> Pubkey {
+    match std::env::var("GATEWAY_DEPOSIT_PROGRAM_ID") {
+        Ok(s) => s.parse().expect("GATEWAY_DEPOSIT_PROGRAM_ID must be a pubkey"),
+        Err(_) => Pubkey::from_str_const("MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1"),
+    }
+}
 
 /// Discriminator = first 8 bytes of SHA-256("global:burn_deposit")
 const BURN_DEPOSIT_DISC: [u8; 8] = [34, 175, 58, 161, 153, 178, 166, 59];
@@ -63,26 +78,39 @@ impl Env {
     fn new() -> Self {
         let mut svm = LiteSVM::new();
 
-        // Load our program .so (built by `cargo build-sbf`; path is relative to CARGO_MANIFEST_DIR).
-        let so_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent() // programs/gateway-deposit  → programs
-            .unwrap()
-            .parent() // programs → contracts/solana
-            .unwrap()
-            .join("target/deploy/gateway_deposit.so");
+        // Load the program .so (built by `cargo build-sbf`; path is relative to
+        // CARGO_MANIFEST_DIR). `GATEWAY_DEPOSIT_SO` overrides it for differential
+        // runs against another build of the same ABI.
+        let so_path = match std::env::var("GATEWAY_DEPOSIT_SO") {
+            Ok(p) => std::path::PathBuf::from(p),
+            Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent() // programs/gateway-deposit  → programs
+                .unwrap()
+                .parent() // programs → contracts/solana
+                .unwrap()
+                .join("target/deploy/gateway_deposit.so"),
+        };
         let so_bytes = std::fs::read(&so_path)
             .unwrap_or_else(|e| panic!("cannot read {}: {}", so_path.display(), e));
-        svm.add_program(GATEWAY_DEPOSIT_PROGRAM_ID, &so_bytes).unwrap();
+        svm.add_program(gateway_program_id(), &so_bytes).unwrap();
 
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        // Create Token-2022 mint (mint authority = payer, no freeze authority, 3 decimals).
+        let mut env = Env { svm, payer, mint: Pubkey::default() };
+        env.mint = env.new_mint();
+        env
+    }
+
+    /// Create a fresh Token-2022 mint (mint authority = payer, no freeze
+    /// authority, 3 decimals) and return its address.
+    fn new_mint(&mut self) -> Pubkey {
         let mint_kp = Keypair::new();
-        let mint_rent =
-            svm.minimum_balance_for_rent_exemption(spl_token_2022_interface::state::Mint::LEN);
+        let mint_rent = self
+            .svm
+            .minimum_balance_for_rent_exemption(spl_token_2022_interface::state::Mint::LEN);
         let create_mint_acc_ix = solana_system_interface::instruction::create_account(
-            &payer.pubkey(),
+            &self.payer.pubkey(),
             &mint_kp.pubkey(),
             mint_rent,
             spl_token_2022_interface::state::Mint::LEN as u64,
@@ -91,21 +119,21 @@ impl Env {
         let init_mint_ix = initialize_mint2(
             &TOKEN_2022_PROGRAM_ID,
             &mint_kp.pubkey(),
-            &payer.pubkey(),
+            &self.payer.pubkey(),
             None,
             3,
         )
         .unwrap();
-        let bh = svm.latest_blockhash();
-        svm.send_transaction(Transaction::new_signed_with_payer(
-            &[create_mint_acc_ix, init_mint_ix],
-            Some(&payer.pubkey()),
-            &[&payer, &mint_kp],
-            bh,
-        ))
-        .expect("create + init mint");
-
-        Env { svm, payer, mint: mint_kp.pubkey() }
+        let bh = self.svm.latest_blockhash();
+        self.svm
+            .send_transaction(Transaction::new_signed_with_payer(
+                &[create_mint_acc_ix, init_mint_ix],
+                Some(&self.payer.pubkey()),
+                &[&self.payer, &mint_kp],
+                bh,
+            ))
+            .expect("create + init mint");
+        mint_kp.pubkey()
     }
 
     /// Send instructions signed by the payer only.
@@ -127,7 +155,7 @@ impl Env {
     fn deposit_addrs(&self, viz_account: &str) -> (Pubkey, Pubkey) {
         let (pda, _bump) = Pubkey::find_program_address(
             &[b"deposit", viz_account.as_bytes()],
-            &GATEWAY_DEPOSIT_PROGRAM_ID,
+            &gateway_program_id(),
         );
         let ata =
             get_associated_token_address_with_program_id(&pda, &self.mint, &TOKEN_2022_PROGRAM_ID);
@@ -166,7 +194,7 @@ impl Env {
 /// The canonical burn_deposit instruction: `[pda, mint (w), ata (w), token_program]`.
 fn burn_ix(pda: &Pubkey, mint: &Pubkey, ata: &Pubkey, data: Vec<u8>) -> Instruction {
     Instruction {
-        program_id: GATEWAY_DEPOSIT_PROGRAM_ID,
+        program_id: gateway_program_id(),
         accounts: vec![
             AccountMeta::new_readonly(*pda, false),                  // deposit_authority (PDA)
             AccountMeta::new(*mint, false),                          // mint (writable)
@@ -200,9 +228,17 @@ fn burns_exactly_amount_from_deposit_ata() {
     assert_eq!(env.balance(&ata), 1_000, "starting balance should be 1000");
 
     let ix = burn_ix(&pda, &env.mint.clone(), &ata, burn_deposit_data(viz_account, 400));
-    env.send(&[ix]).unwrap_or_else(|e| panic!("burn_deposit failed: {:?}", e));
+    let meta = env.send(&[ix]).unwrap_or_else(|e| panic!("burn_deposit failed: {:?}", e));
 
     assert_eq!(env.balance(&ata), 600, "balance after burn should be 600");
+    // Compute ceiling: the Anchor build sat well under this too, so a pass on
+    // both builds pins "no CU regression" (run with --nocapture to see the number).
+    println!("burn_deposit consumed {} CU", meta.compute_units_consumed);
+    assert!(
+        meta.compute_units_consumed < 50_000,
+        "burn_deposit CU regression: {}",
+        meta.compute_units_consumed
+    );
 }
 
 #[test]
@@ -245,7 +281,8 @@ fn rejects_unknown_discriminator() {
     data.extend_from_slice(&borsh_string("alice"));
     data.extend_from_slice(&1u64.to_le_bytes());
     let ix = burn_ix(&pda, &env.mint.clone(), &ata, data);
-    assert_fails_with(env.send(&[ix]), "InvalidInstructionData");
+    // Anchor InstructionFallbackNotFound.
+    assert_fails_with(env.send(&[ix]), "Custom(101)");
 }
 
 #[test]
@@ -275,9 +312,13 @@ fn rejects_truncated_instruction_data() {
     for (label, data) in cases {
         let ix = burn_ix(&pda, &mint, &ata, data);
         let result = env.send(&[ix]);
+        // Anchor InstructionDidNotDeserialize — except the absurd length prefix,
+        // where Anchor OOM-panics allocating the String (ProgramFailedToComplete);
+        // the pinocchio build fails cleanly with 102 instead. Both reject the tx.
+        let s = format!("{:?}", result.as_ref().expect_err(label));
         assert!(
-            format!("{:?}", result.as_ref().expect_err(label)).contains("InvalidInstructionData"),
-            "case {label:?}: expected InvalidInstructionData, got: {result:?}"
+            s.contains("Custom(102)") || s.contains("ProgramFailedToComplete"),
+            "case {label:?}: expected Custom(102) (or Anchor's alloc panic), got: {result:?}"
         );
     }
 }
@@ -293,7 +334,8 @@ fn rejects_invalid_utf8_viz_account() {
     data.extend_from_slice(&[0xFF, 0xFE]); // not valid UTF-8
     data.extend_from_slice(&1u64.to_le_bytes());
     let ix = burn_ix(&pda, &env.mint.clone(), &ata, data);
-    assert_fails_with(env.send(&[ix]), "InvalidInstructionData");
+    // Anchor InstructionDidNotDeserialize.
+    assert_fails_with(env.send(&[ix]), "Custom(102)");
 }
 
 // ──── account validation ─────────────────────────────────────────────────────
@@ -301,11 +343,15 @@ fn rejects_invalid_utf8_viz_account() {
 #[test]
 fn rejects_missing_accounts() {
     let mut env = Env::new();
-    let (pda, ata) = env.deposit_addrs("alice");
+    // Create the ATA so the missing account is the ONLY fault (Anchor type-checks
+    // the first three accounts before noticing token_program is absent).
+    let (pda, _) = env.deposit_addrs("alice");
+    let ata = env.create_ata(&pda);
 
     let mut ix = burn_ix(&pda, &env.mint.clone(), &ata, burn_deposit_data("alice", 1));
     ix.accounts.pop(); // drop token_program → only 3 of 4 accounts
-    assert_fails_with(env.send(&[ix]), "NotEnoughAccountKeys");
+    // Anchor AccountNotEnoughKeys.
+    assert_fails_with(env.send(&[ix]), "Custom(3005)");
 }
 
 #[test]
@@ -319,14 +365,18 @@ fn rejects_wrong_token_program() {
     // Legacy SPL Token in the token_program slot must be rejected.
     let mut ix = burn_ix(&pda, &env.mint.clone(), &ata, burn_deposit_data(viz_account, 1));
     ix.accounts[3] = AccountMeta::new_readonly(spl_token_interface::ID, false);
-    assert_fails_with(env.send(&[ix]), "IncorrectProgramId");
+    // Anchor InvalidProgramId.
+    assert_fails_with(env.send(&[ix]), "Custom(3008)");
 }
 
 #[test]
 fn rejects_non_canonical_deposit_authority() {
     let mut env = Env::new();
     let viz_account = "alice";
-    let (_, ata) = env.deposit_addrs(viz_account);
+    // Create alice's real ATA so the wrong PDA is the ONLY fault (account type
+    // checks run before the seeds constraint).
+    let (alice_pda, _) = env.deposit_addrs(viz_account);
+    let ata = env.create_ata(&alice_pda);
     // The PDA for a DIFFERENT viz_account: valid PDA, wrong seeds for "alice".
     let (bob_pda, _) = env.deposit_addrs("bob");
 
@@ -389,7 +439,65 @@ fn rejects_non_associated_token_account() {
     env.mint_to(&payer_ata, 100);
 
     let ix = burn_ix(&pda, &env.mint.clone(), &payer_ata, burn_deposit_data(viz_account, 1));
-    // Anchor ConstraintAssociated.
+    // Anchor ConstraintTokenOwner — the owner-field check fires before the
+    // associated-address check.
+    assert_fails_with(env.send(&[ix]), "Custom(2015)");
+}
+
+#[test]
+fn rejects_non_ata_token_account_owned_by_pda() {
+    let mut env = Env::new();
+    let viz_account = "alice";
+    let (pda, _) = env.deposit_addrs(viz_account);
+    // A plain (non-associated) Token-2022 account whose owner field IS the PDA —
+    // reachable on-chain via initialize_account3, which needs no owner signature.
+    let acc_kp = Keypair::new();
+    let rent = env.svm.minimum_balance_for_rent_exemption(TokenAccount::LEN);
+    let create_ix = solana_system_interface::instruction::create_account(
+        &env.payer.pubkey(),
+        &acc_kp.pubkey(),
+        rent,
+        TokenAccount::LEN as u64,
+        &TOKEN_2022_PROGRAM_ID,
+    );
+    let init_ix =
+        initialize_account3(&TOKEN_2022_PROGRAM_ID, &acc_kp.pubkey(), &env.mint.clone(), &pda)
+            .unwrap();
+    let bh = env.svm.latest_blockhash();
+    env.svm
+        .send_transaction(Transaction::new_signed_with_payer(
+            &[create_ix, init_ix],
+            Some(&env.payer.pubkey()),
+            &[&env.payer, &acc_kp],
+            bh,
+        ))
+        .expect("create + init token account");
+
+    let ix = burn_ix(&pda, &env.mint.clone(), &acc_kp.pubkey(), burn_deposit_data(viz_account, 1));
+    // Owner field matches, so this reaches the address check: Anchor ConstraintAssociated.
+    assert_fails_with(env.send(&[ix]), "Custom(2009)");
+}
+
+#[test]
+fn rejects_ata_of_wrong_mint() {
+    let mut env = Env::new();
+    let viz_account = "alice";
+    let (pda, _) = env.deposit_addrs(viz_account);
+    // The PDA's real ATA — but for a different mint. Owner field matches, so the
+    // fault is only visible in the associated-address derivation.
+    let other_mint = env.new_mint();
+    let ix = create_associated_token_account_idempotent(
+        &env.payer.pubkey(),
+        &pda,
+        &other_mint,
+        &TOKEN_2022_PROGRAM_ID,
+    );
+    env.send(&[ix]).expect("create other-mint ATA");
+    let other_ata =
+        get_associated_token_address_with_program_id(&pda, &other_mint, &TOKEN_2022_PROGRAM_ID);
+
+    let ix = burn_ix(&pda, &env.mint.clone(), &other_ata, burn_deposit_data(viz_account, 1));
+    // Anchor ConstraintAssociated (associated_token has no separate mint-field check).
     assert_fails_with(env.send(&[ix]), "Custom(2009)");
 }
 
@@ -397,9 +505,38 @@ fn rejects_non_associated_token_account() {
 fn rejects_uncreated_deposit_ata() {
     let mut env = Env::new();
     let viz_account = "alice";
-    // Correct ATA address, but the account was never created → owner is the
-    // system program, not Token-2022.
+    // Correct ATA address, but the account was never created → empty and
+    // system-owned.
     let (pda, ata) = env.deposit_addrs(viz_account);
+
+    let ix = burn_ix(&pda, &env.mint.clone(), &ata, burn_deposit_data(viz_account, 1));
+    // Anchor AccountNotInitialized.
+    assert_fails_with(env.send(&[ix]), "Custom(3012)");
+}
+
+#[test]
+fn rejects_uncreated_mint() {
+    let mut env = Env::new();
+    let viz_account = "alice";
+    let (pda, _) = env.deposit_addrs(viz_account);
+    let ata = env.create_ata(&pda);
+
+    // A nonexistent account (0 lamports, system-owned) in the mint slot.
+    let ix = burn_ix(&pda, &Pubkey::new_unique(), &ata, burn_deposit_data(viz_account, 1));
+    // Anchor AccountNotInitialized.
+    assert_fails_with(env.send(&[ix]), "Custom(3012)");
+}
+
+#[test]
+fn rejects_lamport_funded_uncreated_ata() {
+    let mut env = Env::new();
+    let viz_account = "alice";
+    let (pda, ata) = env.deposit_addrs(viz_account);
+    // Someone transferred lamports to the uncreated ATA address: still
+    // system-owned, but no longer "not initialized" in Anchor's book.
+    let payer_pub = env.payer.pubkey();
+    let fund_ix = solana_system_interface::instruction::transfer(&payer_pub, &ata, 1_000_000);
+    env.send(&[fund_ix]).expect("fund uncreated ATA address");
 
     let ix = burn_ix(&pda, &env.mint.clone(), &ata, burn_deposit_data(viz_account, 1));
     // Anchor AccountOwnedByWrongProgram.

@@ -131,13 +131,15 @@ programs (the July deploy of `MCFeMZJY…` is gone), so to (re)deploy:
    `solana program deploy <so> --program-id <keypair> --keypair <payer> -u devnet`.
 4. `SOLANA_PROGRAM_ID=<pubkey> PROOF=pegout node tools/solana-devnet-run.cjs`.
 
-Verification record — 2026-08-20, both proofs PROVEN on devnet against the
-**pinocchio** build (16,184 B, deploy cost 0.115 SOL net):
-peg-in mint tx `2txowUrxW1Uuo7carujF42VHmrZe4uR42x8rFfkyUoETUUW8wnVNonjAEsB8GEGvLphvQJaYJiD4aQADxp6h65uB`
+Verification record — 2026-08-21, both proofs PROVEN on devnet against the
+**pinocchio Anchor-error-parity** build (16,992 B, upgraded in place):
+peg-in mint tx `3qYGtNeByjPSkYnEey8FoyjV6VzyvsPTUvfRef7bEuGKFZbQCnVM4XaHJKM1J7SxgoeFVwhGTW3E1NSrC7viTk6L`
 (mint `3wWjWQwW9QzZpzLnoXGZnJjhP6yrXvWw2CvkQDsVxqaT`, 2-of-2 multisig
 `CpwvWZhw4CaqyjHEMx8GGiDPfD5PjB2hUCgCedxkN1PU`); peg-out burn tx
-`3FPpVA49ULnHqnGBA1PHWxH7odfYAbLVsnhws5WfW4YkR9RoP5tL1ymiP8KfZZXB9seCxwSz8Kwhh5ahmgqkY8k7`
-(program `4WuuUFPA6f4RD2MMb6uFt44zSUSAMpn4EE93cEuujQ3y`).
+`L2PghaPBg4Q96unjdwJXKUCKuiLibvWzWDfZKopLoVYpD7YgxL6deK6qtJuuijMXKoiq4N8A33Hk1Htgvg1qEoh`
+(program `4WuuUFPA6f4RD2MMb6uFt44zSUSAMpn4EE93cEuujQ3y`); the upgrade-authority
+tool was also proven live (dry-run SECURED + fail-closed + APPLY round-trip, see
+PROVENANCE.md). Initial deploy 2026-08-20 (16,184 B build) cost 0.115 SOL net.
 Previous record (2026-08-15, Anchor build, program `BjgxrYA4…` — superseded):
 peg-in `3peWbRt…QxzC`, peg-out `3SbhKJT…ya7e`.
 
@@ -160,8 +162,10 @@ All env keys are in `.env.example` (the `# --- Solana chain` block).
       **Cost:** rent is ~6,960 lamports/byte, so the ~16 KB pinocchio `.so`
       locks ~0.12 SOL in programdata plus a same-size buffer deposit **refunded
       when the deploy finalizes** — peak float ~0.24 SOL, net ~0.12. Pass
-      `--max-len` ≈ the actual binary size so programdata doesn't default to 2×
-      (`solana program extend` can grow it later if ever needed).
+      `--max-len` ≈ the actual binary size so programdata doesn't default to 2×.
+      `solana program extend` can grow it later, but agave enforces a 10,240-byte
+      **minimum** extension (~0.071 SOL extra rent), so a couple KB of `--max-len`
+      headroom up front is cheaper than the smallest possible extend.
 - [ ] Deploy the wVIZ **Token-2022 mint** + **SPL M-of-N multisig** (mint+freeze
       authority) with the real operator pubkeys:
       `SOLANA_SIGNERS=<op1,op2,...> SOLANA_THRESHOLD=<M> DEPLOY_SEND=1

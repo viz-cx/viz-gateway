@@ -8,8 +8,11 @@
 //! - instruction data: `sha256("global:burn_deposit")[..8]` discriminator,
 //!   then Borsh `viz_account: String` (u32 LE len + bytes) + `amount: u64` LE;
 //! - accounts: `[deposit_authority (PDA), mint (w), deposit_ata (w), token_program]`;
-//! - errors keep Anchor's numbering where tests/tooling could observe them
-//!   (`AccountNameTooLong` = custom 6000).
+//! - errors keep Anchor's numbering AND check order (parse → account type checks
+//!   in field order → constraints in field order → handler), verified by running
+//!   the litesvm suite differentially against the last Anchor-built .so
+//!   (`GATEWAY_DEPOSIT_SO=<anchor.so> GATEWAY_DEPOSIT_PROGRAM_ID=<its declare_id>
+//!   cargo test`).
 //!
 //! Unlike the Anchor build there is NO `declare_id!`: the PDA is re-derived from
 //! the *runtime* program id, so the same .so deploys under any program id and
@@ -40,14 +43,26 @@ pub const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0u8; 32]);
 // Error codes preserved from the Anchor build so observable behavior is identical.
 /// `viz_account` over 16 bytes (Anchor custom error base 6000, variant 0 — pinned by tests).
 pub const ERR_ACCOUNT_NAME_TOO_LONG: u32 = 6000;
+/// Anchor `InstructionFallbackNotFound` — unknown instruction discriminator.
+pub const ERR_INSTRUCTION_FALLBACK_NOT_FOUND: u32 = 101;
+/// Anchor `InstructionDidNotDeserialize` — malformed Borsh args.
+pub const ERR_INSTRUCTION_DID_NOT_DESERIALIZE: u32 = 102;
 /// Anchor `ConstraintSeeds` — deposit_authority is not the canonical PDA.
 pub const ERR_CONSTRAINT_SEEDS: u32 = 2006;
 /// Anchor `ConstraintAssociated` — deposit_ata is not the PDA's ATA.
 pub const ERR_CONSTRAINT_ASSOCIATED: u32 = 2009;
+/// Anchor `ConstraintTokenOwner` — deposit_ata's owner field is not the PDA.
+pub const ERR_CONSTRAINT_TOKEN_OWNER: u32 = 2015;
+/// Anchor `AccountNotEnoughKeys` — fewer accounts than the struct declares.
+pub const ERR_ACCOUNT_NOT_ENOUGH_KEYS: u32 = 3005;
 /// Anchor `AccountOwnedByWrongProgram` — mint/ATA not owned by Token-2022.
 pub const ERR_WRONG_OWNER: u32 = 3007;
+/// Anchor `InvalidProgramId` — token_program is not Token-2022.
+pub const ERR_INVALID_PROGRAM_ID: u32 = 3008;
 /// Anchor `AccountNotSystemOwned` — deposit_authority not system-owned.
 pub const ERR_NOT_SYSTEM_OWNED: u32 = 3011;
+/// Anchor `AccountNotInitialized` — mint/ATA is an empty system-owned account.
+pub const ERR_ACCOUNT_NOT_INITIALIZED: u32 = 3012;
 
 // The processor only compiles for the SBF target: `Address::find_program_address`
 // is syscall-backed there. Host builds (litesvm tests) load the compiled .so and
@@ -66,10 +81,27 @@ mod processor {
     nostd_panic_handler!();
     no_allocator!();
 
+    /// Anchor `InterfaceAccount` type check: an empty system-owned account is
+    /// "not initialized" (3012); any other owner than Token-2022 is "owned by
+    /// wrong program" (3007).
+    fn expect_token_owned(acc: &AccountView) -> Result<(), ProgramError> {
+        if acc.owner() == &SYSTEM_PROGRAM_ID && acc.lamports() == 0 {
+            return Err(ProgramError::Custom(ERR_ACCOUNT_NOT_INITIALIZED));
+        }
+        if acc.owner() != &TOKEN_2022_ID {
+            return Err(ProgramError::Custom(ERR_WRONG_OWNER));
+        }
+        Ok(())
+    }
+
     /// Burn `amount` wVIZ from the deposit ATA owned by the PDA derived from
     /// `viz_account`. This is the ONLY instruction: there is no path to transfer
     /// deposit tokens anywhere. Permissionless — burning cannot steal, and the
     /// value handoff (VIZ release) is M-of-N + F2-validated.
+    ///
+    /// Check order mirrors Anchor exactly (differentially tested): instruction
+    /// data → account type checks in `BurnDeposit` field order → constraints in
+    /// field order → handler body.
     pub fn process_instruction(
         program_id: &Address,
         accounts: &mut [AccountView],
@@ -78,46 +110,53 @@ mod processor {
         // ── instruction data: disc + Borsh (String, u64) ─────────────────────
         let args = data
             .strip_prefix(&BURN_DEPOSIT_DISC)
-            .ok_or(ProgramError::InvalidInstructionData)?;
+            .ok_or(ProgramError::Custom(ERR_INSTRUCTION_FALLBACK_NOT_FOUND))?;
         if args.len() < 4 {
-            return Err(ProgramError::InvalidInstructionData);
+            return Err(ProgramError::Custom(ERR_INSTRUCTION_DID_NOT_DESERIALIZE));
         }
         let name_len = u32::from_le_bytes([args[0], args[1], args[2], args[3]]) as usize;
         let args = &args[4..];
         if args.len() < name_len + 8 {
-            return Err(ProgramError::InvalidInstructionData);
+            return Err(ProgramError::Custom(ERR_INSTRUCTION_DID_NOT_DESERIALIZE));
         }
         let viz_account = &args[..name_len];
         // Anchor's Borsh String rejects invalid UTF-8; keep that behavior.
         if core::str::from_utf8(viz_account).is_err() {
-            return Err(ProgramError::InvalidInstructionData);
+            return Err(ProgramError::Custom(ERR_INSTRUCTION_DID_NOT_DESERIALIZE));
         }
         let amount = u64::from_le_bytes(args[name_len..name_len + 8].try_into().unwrap());
 
-        if viz_account.len() > 16 {
-            return Err(ProgramError::Custom(ERR_ACCOUNT_NAME_TOO_LONG));
-        }
-
-        // ── accounts ─────────────────────────────────────────────────────────
+        // ── account type checks, `BurnDeposit` field order ───────────────────
         let [deposit_authority, mint, deposit_ata, token_program, ..] = accounts else {
-            return Err(ProgramError::NotEnoughAccountKeys);
+            return Err(ProgramError::Custom(ERR_ACCOUNT_NOT_ENOUGH_KEYS));
         };
 
-        if token_program.address() != &TOKEN_2022_ID {
-            return Err(ProgramError::IncorrectProgramId);
+        // deposit_authority is a keyless PDA; it only ever holds lamports.
+        if deposit_authority.owner() != &SYSTEM_PROGRAM_ID {
+            return Err(ProgramError::Custom(ERR_NOT_SYSTEM_OWNED));
         }
-        // deposit_authority must be the canonical PDA ["deposit", viz_account]
-        // and system-owned (a keyless PDA; it only ever holds lamports).
+        expect_token_owned(mint)?;
+        expect_token_owned(deposit_ata)?;
+        if token_program.address() != &TOKEN_2022_ID {
+            return Err(ProgramError::Custom(ERR_INVALID_PROGRAM_ID));
+        }
+
+        // ── constraints, field order ─────────────────────────────────────────
+        // deposit_authority must be the canonical PDA ["deposit", viz_account].
         let (expected_authority, bump) =
             Address::find_program_address(&[b"deposit", viz_account], program_id);
         if deposit_authority.address() != &expected_authority {
             return Err(ProgramError::Custom(ERR_CONSTRAINT_SEEDS));
         }
-        if deposit_authority.owner() != &SYSTEM_PROGRAM_ID {
-            return Err(ProgramError::Custom(ERR_NOT_SYSTEM_OWNED));
-        }
-        if mint.owner() != &TOKEN_2022_ID {
-            return Err(ProgramError::Custom(ERR_WRONG_OWNER));
+        // associated_token::authority — the token account's owner field (bytes
+        // 32..64 of the SPL account layout) must be the PDA; Anchor checks this
+        // before the associated-address derivation.
+        {
+            let ata_data = deposit_ata.try_borrow()?;
+            match ata_data.get(32..64) {
+                Some(owner) if owner == deposit_authority.address().as_ref() => {}
+                _ => return Err(ProgramError::Custom(ERR_CONSTRAINT_TOKEN_OWNER)),
+            }
         }
         // deposit_ata must be exactly the PDA's Token-2022 ATA for this mint.
         let (expected_ata, _) = Address::find_program_address(
@@ -131,8 +170,10 @@ mod processor {
         if deposit_ata.address() != &expected_ata {
             return Err(ProgramError::Custom(ERR_CONSTRAINT_ASSOCIATED));
         }
-        if deposit_ata.owner() != &TOKEN_2022_ID {
-            return Err(ProgramError::Custom(ERR_WRONG_OWNER));
+
+        // ── handler body ─────────────────────────────────────────────────────
+        if viz_account.len() > 16 {
+            return Err(ProgramError::Custom(ERR_ACCOUNT_NAME_TOO_LONG));
         }
 
         // ── CPI: Token-2022 Burn { amount } — [ata (w), mint (w), authority (s)]
