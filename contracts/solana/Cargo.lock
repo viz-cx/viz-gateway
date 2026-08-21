@@ -1048,6 +1048,7 @@ dependencies = [
  "litesvm",
  "pinocchio",
  "serde_json",
+ "solana-account",
  "solana-instruction",
  "solana-keypair",
  "solana-message",
