@@ -177,6 +177,10 @@ export interface GatewayConfig {
     intervalMs: number;
     driftToleranceMilliViz: bigint;
     maxConsecutiveFailures: number;
+    // Consecutive all-OK ticks after which a "recon cannot verify backing" (stalled)
+    // pause auto-clears. ONLY that pause class — a stalled pause records a read outage,
+    // not an observed violation; every other pause stays latched for a human. 0 disables.
+    autoUnpauseOkTicks: number;
     // Chain names (e.g. ["GRAM","SOLANA"]) that MUST be present as recon remotes. If a
     // listed remote is missing from config, recon refuses to start — closes the gap where
     // dropping a remote's env var while it still has circulating wVIZ would silently stop
@@ -658,6 +662,7 @@ export function loadConfig(): GatewayConfig {
       intervalMs: int("RECON_INTERVAL_MS", 30000),
       driftToleranceMilliViz: big("RECON_DRIFT_TOLERANCE_MILLI_VIZ", "0"),
       maxConsecutiveFailures: int("RECON_MAX_CONSECUTIVE_FAILURES", 3),
+      autoUnpauseOkTicks: int("RECON_AUTO_UNPAUSE_OK_TICKS", 5),
       expectedRemotes: opt("RECON_EXPECTED_REMOTES", "")
         .split(",")
         .map((s) => s.trim().toUpperCase())

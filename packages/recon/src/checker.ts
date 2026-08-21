@@ -6,6 +6,14 @@ export function belowTonFloor(balanceNano: bigint, floorNano: number): boolean {
   return balanceNano < BigInt(floorNano);
 }
 
+/**
+ * The one pause class that is safe to clear automatically: recon COULDN'T READ, it never
+ * saw anything wrong. AutoUnpause matches the stored pause_reason against this prefix, so
+ * every other pause (under-backing, over-sweep, sanity floor, coverage, reserve, manual)
+ * stays latched for a human no matter how healthy later ticks look.
+ */
+export const RECON_STALLED_REASON_PREFIX = "recon cannot verify backing";
+
 export interface ReconCfg {
   driftToleranceMilliViz: bigint;
   maxConsecutiveFailures: number;
@@ -197,7 +205,7 @@ export class Recon {
       this.consecutiveFailures++;
       console.warn(`[recon] check indeterminate (${this.consecutiveFailures}/${this.cfg.maxConsecutiveFailures} consecutive)`);
       if (this.consecutiveFailures >= this.cfg.maxConsecutiveFailures) {
-        const reason = `recon cannot verify backing (${this.consecutiveFailures} consecutive failures)`;
+        const reason = `${RECON_STALLED_REASON_PREFIX} (${this.consecutiveFailures} consecutive failures)`;
         await this.store.pause(reason);
         console.error(`[recon] CRITICAL: ${reason} -> gateway paused`);
         notifyStaff("recon-stalled", reason, { consecutiveFailures: String(this.consecutiveFailures) });
@@ -205,5 +213,43 @@ export class Recon {
     } else {
       this.consecutiveFailures = 0;
     }
+  }
+}
+
+/**
+ * Self-repair for the recon-stalled pause (2026-08-21: sixth pause, all guards correct,
+ * a human still had to run RUNBOOK §10 by hand). The stalled pause means recon could not
+ * READ for N ticks — it never observed a violated invariant — so once recon can read
+ * again and the invariant definitively holds for okTicksRequired consecutive ticks
+ * (every covered chain OK, strictly more ticks than it took to pause), the latch is
+ * cleared automatically. Any pause whose reason is not the stalled class is never
+ * touched (see RECON_STALLED_REASON_PREFIX). A tick that is under-backed or
+ * indeterminate on ANY chain resets the streak. okTicksRequired <= 0 disables.
+ */
+export class AutoUnpause {
+  private okStreak = 0;
+
+  constructor(
+    private readonly store: GatewayStore,
+    private readonly okTicksRequired: number,
+  ) {}
+
+  /** Feed one loop iteration's verdict (true = every chain returned definitive OK). Returns true iff it unpaused. */
+  async onTick(allOk: boolean): Promise<boolean> {
+    if (!allOk) {
+      this.okStreak = 0;
+      return false;
+    }
+    this.okStreak++;
+    if (this.okTicksRequired <= 0 || this.okStreak < this.okTicksRequired) return false;
+    if (!(await this.store.isPaused())) return false;
+    const reason = (await this.store.pauseReason()) ?? "";
+    if (!reason.startsWith(RECON_STALLED_REASON_PREFIX)) return false;
+    await this.store.unpause();
+    console.log(`[recon] auto-unpaused: ${this.okStreak} consecutive OK ticks after stalled pause "${reason}"`);
+    notifyStaff("recon-recovered", `auto-unpaused after ${this.okStreak} consecutive OK ticks (was: ${reason})`, {
+      okTicks: String(this.okStreak),
+    });
+    return true;
   }
 }
