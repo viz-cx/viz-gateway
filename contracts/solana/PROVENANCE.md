@@ -71,6 +71,20 @@ solana program show MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 --url <RPC_URL> 
 > `SOLANA_PAYER_SECRET` also pays the SetAuthority fee — a freshly-created multisig-side
 > key needs a few lamports before it can hand authority back.
 
+### Mainnet deploy (2026-08-21)
+
+| Field | Value |
+|---|---|
+| Program ID | `3wp7eV7RCNoRaEie1MUvhf2qjbeBk13XZ6WpvGNihDtD` |
+| ProgramData | `ApzVXi9NY7x2E6MEXAYNufda1yXeJ38Cbvw3QhabefQy` (`--max-len 20480`) |
+| Deployed in slot | `440662083`, tx `4Dy6uMjhyeugPZZ4YPnc9iC73BQa9RMBp1RFFJjURHay2jCVMy2GHTEBQ5S4Uny5KaW2k7Fk4o9S73hpw7pfvAAr` |
+| `.so` | 16,992 B, sha256 `4774339224492df38aa57b0b867599a57cc304b22de17b44f5d9bf6b0f51c6fa` (byte-identical to the `Solana program build` CI artifact), built with agave **3.1.10** |
+| wVIZ mint | `APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD` (Token-2022, 3 decimals, on-mint metadata), tx `3hM6fzBdMEyETTHAymwvfh1Nvg2Y57cJprV7APJ6CrxZxyo9JzQFrbAFjGxHNKXHCkFa1m5g2NKEDzsMuKy9jud2` |
+| Mint+freeze authority | SPL multisig `Bkyv7EU75KKpfm1J3UpEXHHhxhchVQ25vVxVwJsjjS4A`, **2-of-2**: op-2 `BEC96NEfJi4DGgJN1cqP4xud4miXbv1U9BuiaqqxwN2H`, op-3 `3s1Senk3oZ1VrX2Cjh5QW2VV41sfg7Ta3EK1wMRKtSBW` |
+| Submitter | `9XfnroymZEZQJsbBenCMXQe5ZtFAFYc87QgFAzHwXyoz` (fee payer / nonce authority; NOT a multisig member) |
+| Nonce accounts | mint `67TMpJCdLHqbzoFJQV6ggBPmKjGCf2Fh8bJQZm2Ysi5d`, rotation `4KD2ozU91YocmVtpHnReV2SY5ArP2tNsiqgY3fY3QYMN` (authority = submitter) |
+| Upgrade authority | ⚠️ **INTERIM**: still the deploy payer `ENPmfoRoUSFSonrV5GjbEZ8fZgY5YGXwRsJx4ucPcSm` — §3b hand-off to a Squads v4 authority PDA is pending and MUST complete before the go-live flip (§3d) |
+
 ### Devnet proof
 
 Verified locally via `tools/solana-pegout-proof.cjs` (see §5 of `RUNBOOK.md`).
