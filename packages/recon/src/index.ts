@@ -6,9 +6,9 @@ import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { SolanaChain, pubkeyOf } from "@gateway/solana-watcher/dist/solanaChain";
-import { Recon, uncoveredActiveChains, belowTonFloor } from "./checker";
+import { AutoUnpause, Recon, uncoveredActiveChains, belowTonFloor } from "./checker";
 
-export { Recon, uncoveredActiveChains, belowTonFloor } from "./checker";
+export { AutoUnpause, Recon, RECON_STALLED_REASON_PREFIX, uncoveredActiveChains, belowTonFloor } from "./checker";
 
 /**
  * recon: continuously checks the peg invariant
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
 
   const once = process.env.RECON_ONCE === "1";
   console.log(
-    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ maxConsecFail=${cfg.recon.maxConsecutiveFailures} chains=[${[...coveredChains].join(",")}] once=${once}`,
+    `[recon] interval=${cfg.recon.intervalMs}ms tolerance=${cfg.recon.driftToleranceMilliViz} mVIZ maxConsecFail=${cfg.recon.maxConsecutiveFailures} autoUnpauseOkTicks=${cfg.recon.autoUnpauseOkTicks} chains=[${[...coveredChains].join(",")}] once=${once}`,
   );
 
   // M9: recon must cover EVERY chain that has minted (or committed to minting) wVIZ. Unlike
@@ -177,6 +177,7 @@ async function main(): Promise<void> {
     process.exit(results.every((r) => r === true) ? 0 : 2);
   }
 
+  const autoUnpause = new AutoUnpause(store, cfg.recon.autoUnpauseOkTicks);
   let running = true;
   const stop = () => {
     running = false;
@@ -189,11 +190,18 @@ async function main(): Promise<void> {
       // Re-check coverage each tick: a chain could go active at runtime (a peg-in mints on a chain
       // recon isn't wired for). Non-fatal here — pause+alert but keep checking the covered chains.
       await enforceActiveChainCoverage(false);
+      let allOk = true;
       for (const r of recons) {
-        await r.onCheckResult(await r.check());
+        const result = await r.check();
+        await r.onCheckResult(result);
+        if (result !== true) allOk = false;
       }
       await reserveCheck();
       await gramReserveCheck();
+      // Self-repair the recon-stalled latch (ONLY that pause class; see AutoUnpause).
+      // After the reserve checks so a reserve pause tripped this tick is seen, not raced —
+      // though reason-prefix matching alone already protects it.
+      await autoUnpause.onTick(allOk);
     } catch (err) {
       console.error("[recon] loop error:", err);
     }

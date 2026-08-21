@@ -559,7 +559,14 @@ burned amount.
 
 The pause is LATCHED: recon pauses on a definitive under-backing read but never
 auto-unpauses, so a healthy `GET /recon` snapshot with `paused: true` means a
-past tick tripped it. Before clearing, verify backing INDEPENDENTLY of the
+past tick tripped it.
+
+ONE exception self-repairs: a `recon cannot verify backing` (stalled) pause —
+a read outage, not an observed violation — auto-clears after
+`RECON_AUTO_UNPAUSE_OK_TICKS` (default 5) consecutive all-chain OK ticks, with
+a `recon-recovered` staff alert. Every other pause class (under-backing,
+over-sweep, sanity floor, coverage, reserve, manual) stays latched and needs
+this procedure. Before clearing, verify backing INDEPENDENTLY of the
 gateway (do not trust the numbers in the pause reason):
 
 - locked: `gram.gate` balance via any public VIZ node
