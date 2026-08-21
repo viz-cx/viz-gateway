@@ -10,7 +10,9 @@
 //   5. mintTo the deposit ATA (MINT_AMOUNT).
 //   6. Build + send burn_deposit via buildBurnDepositIx (BURN_AMOUNT <= MINT_AMOUNT).
 //   7. Assert ATA balance and mint supply dropped by BURN_AMOUNT.
-//   8. Print the burn signature.
+//   8. Watcher F2 path: SolanaChain.getBurn(sig) must recover the burn with
+//      authority == deposit PDA and the exact amount (signer-side re-validation).
+//   9. Print the burn signature.
 //
 // Env (all optional — defaults work against a fresh local validator):
 //   SOLANA_RPC_URL      defaults to http://127.0.0.1:8899
@@ -52,6 +54,7 @@ const {
   depositAta,
   buildBurnDepositIx,
 } = require("../packages/solana-watcher/dist/depositAddress");
+const { SolanaChain } = require("../packages/solana-watcher/dist/solanaChain");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -257,6 +260,31 @@ async function deployProgram(conn, payerKeypair) {
 
   assert.strictEqual(balanceDelta, BURN_AMOUNT, `expected ATA delta ${BURN_AMOUNT}, got ${balanceDelta}`);
   assert.strictEqual(supplyDelta, BURN_AMOUNT, `expected supply delta ${BURN_AMOUNT}, got ${supplyDelta}`);
+
+  // ── Watcher F2 path: the signer re-validates a peg-out by fetching the burn
+  // via SolanaChain.getBurn and comparing its authority against the PDA
+  // re-derived from (programId, vizAccount). Run that exact code against the
+  // burn we just made. getBurn reads at "finalized" — poll while the tx
+  // finalizes (same race class as the peg-in proof's mintByActionId).
+  console.log("[proof] watcher getBurn (F2 re-validation) ...");
+  const chain = new SolanaChain(RPC_URL, mintPubkey.toBase58(), "", 0);
+  let watcherBurn = null;
+  for (let i = 0; i < 60 && !watcherBurn; i++) {
+    watcherBurn = await chain.getBurn(burnSig);
+    if (!watcherBurn) await new Promise((r) => setTimeout(r, 1000));
+  }
+  assert.ok(watcherBurn, "watcher getBurn must locate the finalized burn tx");
+  assert.strictEqual(
+    watcherBurn.from,
+    depositPda,
+    "getBurn authority must equal depositAddress(programId, vizAccount) — F2 binding",
+  );
+  assert.strictEqual(
+    watcherBurn.amountMilliViz,
+    BURN_AMOUNT,
+    `getBurn amount must be ${BURN_AMOUNT}, got ${watcherBurn.amountMilliViz}`,
+  );
+  console.log(`[proof] watcher getBurn OK: authority=${watcherBurn.from} amount=${watcherBurn.amountMilliViz}`);
 
   console.log(`
 RESULT: Solana peg-out burn_deposit PROVEN.
