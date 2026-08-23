@@ -24,11 +24,18 @@ SPL multisig). Neither the BPF Loader nor the token-metadata interface understan
 
 ## Steps (in order)
 
-### 0. Devnet dry-run (required before mainnet)
-Neither enforce script has **been APPLY-tested on a live cluster** yet. Run both on devnet: fresh
-deploy → `npm run authority:solana` / `npm run metadata:authority` (expect `UNSAFE` + canHandoff,
-and a clean hand-off simulation from the metadata dry-run) → `APPLY=1` → re-run dry-runs →
-`SECURED`. Only then mainnet.
+### 0. Devnet dry-run (required before mainnet) — ✅ DONE for both scripts
+- `enforceProgramAuthority.ts`: devnet-proven 2026-08-21 (PROVENANCE.md — SECURED/UNSAFE verdicts
+  + full `APPLY=1` round-trip against program `4WuuUFPA…`).
+- `enforceMetadataAuthority.ts`: devnet-proven 2026-08-23 against a fresh `deploy:solana` mint
+  `2eeY2XuSt69r3V7zHh6QhaMRsHmYx3bZfC5g62W97DhD` (throwaway keys, exact mainnet shape — metadata
+  authorities on the payer, mint/freeze on an SPL multisig):
+  1. SPL-multisig target → guard refused, exit 1;
+  2. dry-run → `UNSAFE` + canHandoff + clean 2-ix simulation, exit 2;
+  3. `APPLY=1` → both authorities handed off, tx
+     `4oW2baUqZVUWj8VkY51Prfa8SEgK6HXr7nQZ6APt5cPPAm3XoSYwp7iJCvh6d9iSvrHj8TZCyH5utMn943ULC2zn`,
+     on-chain read-back verified;
+  4. re-run dry-run → `SECURED`, exit 0.
 
 ### 1. Squads v4 multisig 2-of-3 (mainnet)
 - Create a Squads v4 multisig: members = [op-1 `6WMGd1g3mRx7rKn469km6ghp7h1DRmaPQfPWQ4icGP5s`,
