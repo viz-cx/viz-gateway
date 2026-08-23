@@ -1,151 +1,132 @@
-/**
- * Hand off the Token-2022 on-mint metadata authorities from the deploy payer to the
- * SPL multisig that already gates mint/freeze (Bkyv7EU75…).
- *
- * Two authorities move (both currently the deploy payer, per deployMint.ts):
- *   1. MetadataPointer authority  -> target multisig  (SetAuthority, AuthorityType::MetadataPointer)
- *   2. Metadata updateAuthority   -> target multisig  (UpdateMetadata with newUpdateAuthority)
- *
- * Fail-closed dry-run by default. APPLY=1 + SOLANA_PAYER_SECRET (the current authority) to broadcast.
- * Reads the mint via jsonParsed and verifies after the hand-off (never trust the send alone).
- */
-import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { loadSolanaMetadataAuthorityConfig } from "./config";
 import {
-  AuthorityType,
-  TOKEN_2022_PROGRAM_ID,
-  createSetAuthorityInstruction,
-} from '@solana/spl-token';
-import { createUpdateAuthorityInstruction } from '@solana/spl-token-metadata';
+  MetadataAuthorityState,
+  buildMetadataHandoffIxs,
+  evaluateMetadataAuthority,
+  isSplTokenMultisigAccount,
+} from "./metadataAuthority";
 
-type Cfg = {
-  rpcUrl: string;
-  mint: PublicKey;
-  target: PublicKey; // multisig to receive metadataPointer + updateAuthority
-  payer: Keypair | undefined;
-  apply: boolean;
-};
-
-type MintInfo = {
-  updateAuthority: string | null;
-  pointerAuthority: string | null;
-  name: string;
-  symbol: string;
-};
-
-function loadCfg(): Cfg {
-  const rpcUrl = process.env.SOLANA_RPC_URL;
-  if (!rpcUrl) throw new Error('SOLANA_RPC_URL required');
-  const mint = process.env.SOLANA_WVIZ_MINT;
-  if (!mint) throw new Error('SOLANA_WVIZ_MINT required (the wVIZ mint)');
-  const target = process.env.SOLANA_METADATA_AUTHORITY;
-  if (!target) throw new Error('SOLANA_METADATA_AUTHORITY required (target SPL multisig)');
-  const apply = process.env.APPLY === '1';
-  let payer: Keypair | undefined;
-  if (apply) {
-    if (!process.env.SOLANA_PAYER_SECRET) throw new Error('SOLANA_PAYER_SECRET required to APPLY');
-    payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(process.env.SOLANA_PAYER_SECRET)));
-  }
-  return { rpcUrl, mint: new PublicKey(mint), target: new PublicKey(target), payer, apply };
-}
-
-async function readMint(conn: Connection, mint: PublicKey): Promise<MintInfo> {
-  const r = await conn.getParsedAccountInfo(mint, 'confirmed');
+/**
+ * Verify (and optionally hand off) the wVIZ mint's Token-2022 metadata authorities — the
+ * MetadataPointer authority and the token-metadata updateAuthority, both left on the deploy payer
+ * by deployMint.ts. Companion to enforceProgramAuthority.ts, same contract:
+ *
+ * Dry-run by default: reads on-chain, prints the verdict, SIMULATES the exact hand-off transaction
+ * against the live cluster (unsigned, so no secret is needed — this is the differential proof that
+ * the write path executes before anyone signs it), and exits 2 if the authorities are UNSAFE or
+ * MISCONFIGURED so CI/operators notice. Set APPLY=1 + SOLANA_PAYER_SECRET (the CURRENT authority)
+ * to reassign both to SOLANA_METADATA_AUTHORITY.
+ *
+ * SOLANA_METADATA_AUTHORITY must be a key or PDA that can actually SIGN token-metadata instructions
+ * (e.g. the Squads v4 vault PDA, which signs via CPI) — NOT the SPL token multisig that gates
+ * mint/freeze; see metadataAuthority.ts. A fail-closed guard refuses such a target outright.
+ *
+ * Offline coverage: tools/solana-metadata-authority-spike.cjs (verdict, multisig-target guard,
+ * instruction layouts). The send path must be dry-run on devnet before mainnet.
+ */
+async function readMint(conn: Connection, mint: PublicKey): Promise<MetadataAuthorityState & { name: string; symbol: string }> {
+  const r = await conn.getParsedAccountInfo(mint, "confirmed");
   const data = r.value?.data;
-  const info = data && 'parsed' in data
+  const info = data && "parsed" in data
     ? (data.parsed as { info?: { extensions?: Array<{ extension: string; state: Record<string, unknown> }> } }).info
     : undefined;
   if (!info) throw new Error(`mint ${mint.toBase58()} not found or not jsonParsed`);
-  let updateAuthority: string | null = null;
-  let pointerAuthority: string | null = null;
-  let name = '';
-  let symbol = '';
+  const out: MetadataAuthorityState & { name: string; symbol: string } = { updateAuthority: null, pointerAuthority: null, name: "", symbol: "" };
   for (const ext of info.extensions ?? []) {
-    if (ext.extension === 'tokenMetadata') {
+    if (ext.extension === "tokenMetadata") {
       const s = ext.state as { updateAuthority?: string; name?: string; symbol?: string };
-      updateAuthority = s.updateAuthority ?? null;
-      name = s.name ?? '';
-      symbol = s.symbol ?? '';
-    } else if (ext.extension === 'metadataPointer') {
-      const s = ext.state as { authority?: string };
-      pointerAuthority = s.authority ?? null;
+      out.updateAuthority = s.updateAuthority ?? null;
+      out.name = s.name ?? "";
+      out.symbol = s.symbol ?? "";
+    } else if (ext.extension === "metadataPointer") {
+      out.pointerAuthority = (ext.state as { authority?: string }).authority ?? null;
     }
   }
-  return { updateAuthority, pointerAuthority, name, symbol };
+  return out;
 }
 
-async function main() {
-  const cfg = loadCfg();
-  const conn = new Connection(cfg.rpcUrl, 'confirmed');
-  const state = await readMint(conn, cfg.mint);
+async function main(): Promise<void> {
+  const cfg = loadSolanaMetadataAuthorityConfig();
+  if (!cfg.mint) throw new Error("SOLANA_WVIZ_MINT required.");
+  const conn = new Connection(cfg.rpcUrl, "confirmed");
+  const mint = new PublicKey(cfg.mint);
+  const state = await readMint(conn, mint);
 
   console.log(`[solana:metadata] rpc: ${cfg.rpcUrl}`);
-  console.log(`[solana:metadata] mint: ${cfg.mint.toBase58()} (${state.name} / ${state.symbol})`);
-  console.log(`[solana:metadata] metadata updateAuthority: ${state.updateAuthority ?? 'None'}`);
-  console.log(`[solana:metadata] metadataPointer authority: ${state.pointerAuthority ?? 'None'}`);
-  console.log(`[solana:metadata] target multisig: ${cfg.target.toBase58()}`);
+  console.log(`[solana:metadata] mint: ${mint.toBase58()} (${state.name} / ${state.symbol})`);
+  console.log(`[solana:metadata] metadata updateAuthority:  ${state.updateAuthority ?? "None (frozen)"}`);
+  console.log(`[solana:metadata] metadataPointer authority: ${state.pointerAuthority ?? "None (frozen)"}`);
+  console.log(`[solana:metadata] expected authority:        ${cfg.expected || "(unset)"}`);
 
-  const target = cfg.target.toBase58();
-  const alreadySecured =
-    (state.updateAuthority === null || state.updateAuthority === target) &&
-    (state.pointerAuthority === null || state.pointerAuthority === target);
-  if (alreadySecured) {
-    console.log('\n[solana:metadata] SECURED: metadata authorities are already on the multisig.');
+  const verdict = evaluateMetadataAuthority({
+    state,
+    expected: cfg.expected,
+    payer: cfg.payer?.publicKey.toBase58() ?? null,
+  });
+  console.log(`[solana:metadata] verdict: ${verdict.status} — ${verdict.reason}`);
+  if (verdict.ok) {
+    console.log("[solana:metadata] OK — metadata authorities are safe.");
     return;
   }
 
-  const payerPub = cfg.payer?.publicKey.toBase58();
-  const cannotHandoff =
-    !cfg.payer ||
-    (state.updateAuthority !== null && state.updateAuthority !== payerPub) ||
-    (state.pointerAuthority !== null && state.pointerAuthority !== payerPub);
-  if (cannotHandoff) {
+  // Fail-closed guard: an SPL token multisig can never be `is_signer` for token-metadata
+  // instructions — handing off to one would succeed on-chain and freeze metadata forever.
+  const targetAcct = await conn.getAccountInfo(new PublicKey(cfg.expected));
+  if (targetAcct && isSplTokenMultisigAccount(targetAcct.owner.toBase58(), targetAcct.data.length)) {
     throw new Error(
-      `cannot hand off: current authorities (update=${state.updateAuthority ?? 'None'}, pointer=${state.pointerAuthority ?? 'None'}) ` +
-        `are not the payer ${payerPub ?? '(no payer)'} — only the current authorities may reassign them`,
+      `SOLANA_METADATA_AUTHORITY ${cfg.expected} is an SPL token multisig account — token-metadata ` +
+        `instructions require the authority itself to sign, which a multisig cannot do. Use the Squads ` +
+        `vault PDA (or another CPI-signing authority) instead, or metadata updates are bricked forever.`,
     );
   }
 
   const tx = new Transaction();
-  if (state.pointerAuthority !== null && state.pointerAuthority === payerPub) {
-    tx.add(
-      createSetAuthorityInstruction(
-        cfg.mint,
-        cfg.payer!.publicKey, // current metadataPointer authority
-        AuthorityType.MetadataPointer,
-        cfg.target,
-        undefined,
-        TOKEN_2022_PROGRAM_ID,
-      ),
+  for (const ix of buildMetadataHandoffIxs({ mint, state, newAuthority: new PublicKey(cfg.expected) })) tx.add(ix);
+  if (tx.instructions.length === 0) throw new Error("UNSAFE verdict but nothing to move — unexpected state");
+
+  if (!cfg.apply) {
+    // Prove the write path on the live cluster without any secret: simulate the exact unsigned
+    // hand-off tx (sigVerify is off for unsigned simulations, so the current authority's signature
+    // is assumed). A clean simulation is the go/no-go evidence for APPLY.
+    tx.feePayer = new PublicKey(state.pointerAuthority ?? state.updateAuthority!);
+    tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
+    const sim = await conn.simulateTransaction(tx);
+    if (sim.value.err) {
+      console.error(`[solana:metadata] hand-off simulation FAILED: ${JSON.stringify(sim.value.err)}`);
+      for (const l of sim.value.logs ?? []) console.error(`  ${l}`);
+    } else {
+      console.log(`[solana:metadata] hand-off simulation OK (${tx.instructions.length} ix) — write path executes cleanly.`);
+    }
+    console.error(
+      "\n[solana:metadata] FAIL-CLOSED: metadata authorities are not the federation authority." +
+        (verdict.canHandoff
+          ? "\n  Set APPLY=1 + SOLANA_PAYER_SECRET (the current authority) to hand them off to SOLANA_METADATA_AUTHORITY."
+          : "\n  Cannot auto-fix: fix SOLANA_METADATA_AUTHORITY, or have the CURRENT authority reassign them."),
     );
-  }
-  if (state.updateAuthority !== null && state.updateAuthority === payerPub) {
-    tx.add(
-      createUpdateAuthorityInstruction({
-        programId: TOKEN_2022_PROGRAM_ID,
-        metadata: cfg.mint, // on-mint metadata (metadataAddress == mint)
-        oldAuthority: cfg.payer!.publicKey,
-        newAuthority: cfg.target,
-      }),
-    );
-  }
-  if (tx.instructions.length === 0) {
-    console.log('\n[solana:metadata] nothing to do.');
-    return;
+    process.exit(2);
   }
 
-  const sig = await sendAndConfirmTransaction(conn, tx, [cfg.payer!]);
+  if (!verdict.canHandoff) {
+    throw new Error(
+      `cannot hand off: current authorities (update=${state.updateAuthority ?? "None"}, pointer=${state.pointerAuthority ?? "None"}) ` +
+        `are not the payer ${cfg.payer?.publicKey.toBase58() ?? "(no payer)"} — only the current authority may reassign them`,
+    );
+  }
+  if (!cfg.payer) throw new Error("SOLANA_PAYER_SECRET required to APPLY.");
+
+  const sig = await sendAndConfirmTransaction(conn, tx, [cfg.payer]);
   console.log(`[solana:metadata] hand-off sent: ${sig}`);
 
-  const after = await readMint(conn, cfg.mint);
-  if (
-    (after.updateAuthority !== null && after.updateAuthority !== target) ||
-    (after.pointerAuthority !== null && after.pointerAuthority !== target)
-  ) {
+  // Re-read and verify the hand-off actually landed (never trust the send alone). A field that was
+  // already None stays None — the evaluator, not a raw equality, is the source of truth.
+  const after = await readMint(conn, mint);
+  if (!evaluateMetadataAuthority({ state: after, expected: cfg.expected }).ok) {
     throw new Error(
-      `hand-off FAILED: update=${after.updateAuthority ?? 'None'} pointer=${after.pointerAuthority ?? 'None'}, expected ${target}`,
+      `hand-off FAILED: update=${after.updateAuthority ?? "None"} pointer=${after.pointerAuthority ?? "None"}, expected ${cfg.expected}`,
     );
   }
-  console.log(`[solana:metadata] verified: metadata authorities are now ${target}`);
+  console.log(`[solana:metadata] verified: metadata authorities are now ${cfg.expected}`);
 }
 
 main().catch((e) => {
