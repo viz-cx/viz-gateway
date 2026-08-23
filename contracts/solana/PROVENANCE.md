@@ -83,7 +83,9 @@ solana program show MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 --url <RPC_URL> 
 | Mint+freeze authority | SPL multisig `Bkyv7EU75KKpfm1J3UpEXHHhxhchVQ25vVxVwJsjjS4A`, **2-of-2**: op-2 `BEC96NEfJi4DGgJN1cqP4xud4miXbv1U9BuiaqqxwN2H`, op-3 `3s1Senk3oZ1VrX2Cjh5QW2VV41sfg7Ta3EK1wMRKtSBW` |
 | Submitter | `9XfnroymZEZQJsbBenCMXQe5ZtFAFYc87QgFAzHwXyoz` (fee payer / nonce authority; NOT a multisig member) |
 | Nonce accounts | mint `67TMpJCdLHqbzoFJQV6ggBPmKjGCf2Fh8bJQZm2Ysi5d`, rotation `4KD2ozU91YocmVtpHnReV2SY5ArP2tNsiqgY3fY3QYMN` (authority = submitter) |
-| Upgrade authority | ⚠️ **INTERIM**: still the deploy payer `ENPmfoRoUSFSonrV5GjbEZ8fZgY5YGXwRsJx4ucPcSm` — §3b hand-off to a Squads v4 authority PDA is pending and MUST complete before the go-live flip (§3d) |
+| Upgrade authority | **Squads v4 vault PDA `GF1hHZkDcSTHgxfsUr5sUgYPjD9LLTFYBFWSjXV78PmW`** — §3b hand-off DONE 2026-08-23, tx `4JcAZ4oCEqpCKTQkBEar9puggPfKR1RyfLtqDVcs9PHuQxVUhvRMt8Xu1hrKwoSrWYX5zt8BPmdBGf3zi67zFAM2` |
+| Metadata updateAuthority + metadataPointer | same Squads vault PDA `GF1hHZk…` (NOT the SPL mint multisig — token-metadata ix require a real signer, see AUTHORITY-HANDOFF.md), tx `2YMQiq6Wd1U3Mmo7AF1etB7eFoLkXbmo8sqq5PqFy1AbLnd9kkM4Utm1dN7NTNgY4LSJtyDSinmeCt9qxiEwTdWM` |
+| Squads v4 multisig | `Bkq9iVxxJvK5ZmkdicY9v9NqYcK8pNKNYjPiw2qjiV8t` **2-of-3, autonomous** (op-1 `6WMGd1g3mRx7rKn469km6ghp7h1DRmaPQfPWQ4icGP5s`, op-2 `BEC96NEf…`, op-3 `3s1Senk…`; timeLock 0), created 2026-08-23 tx `4v7KWEQ5MFU66ri2vLia1VBDEuJZLoqooZJHTXJeAeWwRCctzLjeR6P6Yg1jNy4uraKjYUu9HZm3qQrJ1oUSshR`; create-key backed up beside the other mainnet keypairs |
 | `SOLANA_GATEWAY_TOKEN_ACCOUNT` | **deliberately UNSET** (the §3a checklist item was skipped, not missed): it drives the legacy transfer+memo peg-out path, while mainnet custody is per-deposit PDAs keyed off `SOLANA_DEPOSIT_PROGRAM_ID`; `circulatingSupplyMilliViz` is raw `getTokenSupply` with no gateway-held subtraction |
 
 ### Devnet proof
