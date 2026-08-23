@@ -84,6 +84,7 @@ solana program show MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 --url <RPC_URL> 
 | Submitter | `9XfnroymZEZQJsbBenCMXQe5ZtFAFYc87QgFAzHwXyoz` (fee payer / nonce authority; NOT a multisig member) |
 | Nonce accounts | mint `67TMpJCdLHqbzoFJQV6ggBPmKjGCf2Fh8bJQZm2Ysi5d`, rotation `4KD2ozU91YocmVtpHnReV2SY5ArP2tNsiqgY3fY3QYMN` (authority = submitter) |
 | Upgrade authority | ⚠️ **INTERIM**: still the deploy payer `ENPmfoRoUSFSonrV5GjbEZ8fZgY5YGXwRsJx4ucPcSm` — §3b hand-off to a Squads v4 authority PDA is pending and MUST complete before the go-live flip (§3d) |
+| `SOLANA_GATEWAY_TOKEN_ACCOUNT` | **deliberately UNSET** (the §3a checklist item was skipped, not missed): it drives the legacy transfer+memo peg-out path, while mainnet custody is per-deposit PDAs keyed off `SOLANA_DEPOSIT_PROGRAM_ID`; `circulatingSupplyMilliViz` is raw `getTokenSupply` with no gateway-held subtraction |
 
 ### Devnet proof
 
