@@ -354,5 +354,7 @@ Run with minimal value and confirm each leg + recon drift = 0. Mirror the testne
 - **gram.gate funding:** not pre-funded — peg-ins fill it, so `locked ≥ circulating`
   holds from 0. Do not send VIZ to a gate account while pondering a rollback of its
   2-of-3 authority.
-- **Solana:** dormant this launch (`solana.gate` stays 0, `RECON_EXPECTED_REMOTES=GRAM`);
-  add it at Phase 2.
+- **Solana:** LIVE since the 2026-08 cutover (`RECON_EXPECTED_REMOTES=GRAM,SOLANA`; like
+  gram.gate, `solana.gate` fills from peg-ins). Addresses in `contracts/solana/PROVENANCE.md`;
+  wiring in `config/deploy.coordinator.yml` (+ lookup / pegout-scanner roles) and
+  `config/deploy.signer.yml`; cutover steps in `docs/runbook-solana-devnet-cutover.md`.

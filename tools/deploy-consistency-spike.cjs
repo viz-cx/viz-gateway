@@ -36,8 +36,15 @@ assert.ok(!/\bton-watcher\b/.test(entrypoint), "entrypoint still references the 
 assert.ok(cases["gram-watcher"], "entrypoint missing the gram-watcher case (TON burn watcher)");
 console.log("[deploy-consistency] no dead ton-watcher reference; gram-watcher present OK");
 
-// 2) + 4) every SERVICE in every compose file resolves to an entrypoint case (and isn't ton-watcher).
-const composeFiles = ["docker-compose.yml", "docker-compose.coordinator.yml"];
+// 2) + 4) every SERVICE in every compose/Kamal file resolves to an entrypoint case (and isn't
+// ton-watcher). The Kamal configs are the PRODUCTION wiring — a role there with no entrypoint
+// case is exactly silent-death class (2) in a place that matters most.
+const composeFiles = [
+  "docker-compose.yml",
+  "docker-compose.coordinator.yml",
+  "config/deploy.coordinator.yml",
+  "config/deploy.signer.yml",
+];
 const seenServices = new Set();
 for (const f of composeFiles) {
   const text = fs.readFileSync(path.join(ROOT, f), "utf8");
