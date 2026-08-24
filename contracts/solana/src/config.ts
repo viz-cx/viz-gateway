@@ -73,6 +73,25 @@ export function loadSolanaProgramAuthorityConfig(): SolanaProgramAuthorityConfig
   };
 }
 
+export interface SolanaMetadataAuthorityConfig {
+  rpcUrl: string;
+  mint: string; // SOLANA_WVIZ_MINT
+  expected: string; // SOLANA_METADATA_AUTHORITY — a signing key or CPI-signing PDA (Squads vault), NEVER an SPL token multisig
+  payer: Keypair | null; // current authority holder; required to hand off (APPLY)
+  apply: boolean; // APPLY=1 to actually reassign the authorities
+}
+
+export function loadSolanaMetadataAuthorityConfig(): SolanaMetadataAuthorityConfig {
+  return {
+    rpcUrl: opt("SOLANA_RPC_URL", "https://api.devnet.solana.com"),
+    mint: opt("SOLANA_WVIZ_MINT", ""),
+    // Trimmed at load for the same reason as SOLANA_UPGRADE_MULTISIG above (issue #39).
+    expected: opt("SOLANA_METADATA_AUTHORITY", "").trim(),
+    payer: loadPayer(opt("SOLANA_PAYER_SECRET", "")),
+    apply: opt("APPLY", "0") === "1",
+  };
+}
+
 function loadSecret(name: string): Uint8Array | null {
   const v = opt(name, "");
   if (!v) return null;
