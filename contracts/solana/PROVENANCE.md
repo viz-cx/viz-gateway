@@ -71,6 +71,23 @@ solana program show MCFeMZJYARXVcLvuFbajFC8BzHZNS6Ef8DV59RiteL1 --url <RPC_URL> 
 > `SOLANA_PAYER_SECRET` also pays the SetAuthority fee — a freshly-created multisig-side
 > key needs a few lamports before it can hand authority back.
 
+### Mainnet deploy (2026-08-21)
+
+| Field | Value |
+|---|---|
+| Program ID | `3wp7eV7RCNoRaEie1MUvhf2qjbeBk13XZ6WpvGNihDtD` |
+| ProgramData | `ApzVXi9NY7x2E6MEXAYNufda1yXeJ38Cbvw3QhabefQy` (`--max-len 20480`) |
+| Deployed in slot | `440662083`, tx `4Dy6uMjhyeugPZZ4YPnc9iC73BQa9RMBp1RFFJjURHay2jCVMy2GHTEBQ5S4Uny5KaW2k7Fk4o9S73hpw7pfvAAr` |
+| `.so` | 16,992 B, sha256 `4774339224492df38aa57b0b867599a57cc304b22de17b44f5d9bf6b0f51c6fa` (byte-identical to the `Solana program build` CI artifact), built with agave **3.1.10** |
+| wVIZ mint | `APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD` (Token-2022, 3 decimals, on-mint metadata), tx `3hM6fzBdMEyETTHAymwvfh1Nvg2Y57cJprV7APJ6CrxZxyo9JzQFrbAFjGxHNKXHCkFa1m5g2NKEDzsMuKy9jud2` |
+| Mint+freeze authority | SPL multisig `Bkyv7EU75KKpfm1J3UpEXHHhxhchVQ25vVxVwJsjjS4A`, **2-of-2**: op-2 `BEC96NEfJi4DGgJN1cqP4xud4miXbv1U9BuiaqqxwN2H`, op-3 `3s1Senk3oZ1VrX2Cjh5QW2VV41sfg7Ta3EK1wMRKtSBW` |
+| Submitter | `9XfnroymZEZQJsbBenCMXQe5ZtFAFYc87QgFAzHwXyoz` (fee payer / nonce authority; NOT a multisig member) |
+| Nonce accounts | mint `67TMpJCdLHqbzoFJQV6ggBPmKjGCf2Fh8bJQZm2Ysi5d`, rotation `4KD2ozU91YocmVtpHnReV2SY5ArP2tNsiqgY3fY3QYMN` (authority = submitter) |
+| Upgrade authority | **Squads v4 vault PDA `GF1hHZkDcSTHgxfsUr5sUgYPjD9LLTFYBFWSjXV78PmW`** — §3b hand-off DONE 2026-08-23, tx `4JcAZ4oCEqpCKTQkBEar9puggPfKR1RyfLtqDVcs9PHuQxVUhvRMt8Xu1hrKwoSrWYX5zt8BPmdBGf3zi67zFAM2` |
+| Metadata updateAuthority + metadataPointer | same Squads vault PDA `GF1hHZk…` (NOT the SPL mint multisig — token-metadata ix require a real signer, see AUTHORITY-HANDOFF.md), tx `2YMQiq6Wd1U3Mmo7AF1etB7eFoLkXbmo8sqq5PqFy1AbLnd9kkM4Utm1dN7NTNgY4LSJtyDSinmeCt9qxiEwTdWM` |
+| Squads v4 multisig | `Bkq9iVxxJvK5ZmkdicY9v9NqYcK8pNKNYjPiw2qjiV8t` **2-of-3, autonomous** (op-1 `6WMGd1g3mRx7rKn469km6ghp7h1DRmaPQfPWQ4icGP5s`, op-2 `BEC96NEf…`, op-3 `3s1Senk…`; timeLock 0), created 2026-08-23 tx `4v7KWEQ5MFU66ri2vLia1VBDEuJZLoqooZJHTXJeAeWwRCctzLjeR6P6Yg1jNy4uraKjYUu9HZm3qQrJ1oUSshR`; create-key backed up beside the other mainnet keypairs |
+| `SOLANA_GATEWAY_TOKEN_ACCOUNT` | **deliberately UNSET** (the §3a checklist item was skipped, not missed): it drives the legacy transfer+memo peg-out path, while mainnet custody is per-deposit PDAs keyed off `SOLANA_DEPOSIT_PROGRAM_ID`; `circulatingSupplyMilliViz` is raw `getTokenSupply` with no gateway-held subtraction |
+
 ### Devnet proof
 
 Verified locally via `tools/solana-pegout-proof.cjs` (see §5 of `RUNBOOK.md`).
