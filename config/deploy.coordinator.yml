@@ -1,8 +1,13 @@
 # Kamal 2 — op-1's KEYLESS coordinator app on axveer.
 #
-# Five processes off ONE image, each a Kamal role selecting its service via env SERVICE
+# Seven processes off ONE image, each a Kamal role selecting its service via env SERVICE
 # (docker-entrypoint.sh switches on $SERVICE): coordinator (web, proxied at gateway.viz.cx)
-# + viz-watcher / gram-watcher / dispatcher / recon (workers, no proxy).
+# + viz-watcher / gram-watcher / dispatcher / recon / lookup / pegout-scanner (workers, no proxy).
+#
+# NO solana-watcher role ON PURPOSE: that service watches the legacy SOLANA_GATEWAY_TOKEN_ACCOUNT
+# transfer+memo peg-out path, which mainnet deliberately leaves unset (PDA custody —
+# contracts/solana/PROVENANCE.md). With it unset the watcher scans nothing (solanaChain returns
+# empty); the live Solana peg-out path is the pegout-scanner role below.
 #
 # STORE: sqlite on a SHARED host volume, NOT postgres. createStore() only implements
 # sqlite:/memory: ("Postgres … is a future driver") — a postgres:// URL crashes at boot.
@@ -11,11 +16,15 @@
 #
 # CUSTODY: this app holds NO FUND-CONTROLLING keys. Never add VIZ_SIGNING_WIF /
 # GRAM_SIGNER_MNEMONIC / FED_KEYSTORE_* here — those live only in the separate
-# viz-gateway-signer app. The ONE deliberate exception is VIZ_MEMO_WIF_GRAM: the gram.gate
-# memo key, which the viz-watcher role (running here) needs to decrypt '#'-encrypted peg-in
-# memos into the canonical destination. It controls no funds (memo role is in no authority)
-# and cannot redirect a mint (signers independently re-decrypt and reject a mismatched
-# digest), so the no-theft property is unchanged — only memo privacy. See AUDIT.md §8.
+# viz-gateway-signer app. TWO deliberate exceptions, both non-fund-controlling:
+#   - VIZ_MEMO_WIF_GRAM: the gram.gate memo key; the viz-watcher role decrypts '#'-encrypted
+#     peg-in memos into the canonical destination. Memo role is in no authority and signers
+#     independently re-decrypt + reject a mismatched digest — only memo privacy at risk
+#     (AUDIT.md §8).
+#   - SOLANA_SUBMITTER_SECRET: fee payer + durable-nonce authority for Solana mints/burns.
+#     It cannot mint (mint authority is the SPL 2-of-2 operator multisig) and cannot move
+#     custody funds (deposit PDAs are burn-only, program 3wp7eV7…). Worst case on leak =
+#     draining its own SOL fee balance.
 
 service: viz-gateway-coordinator
 image: chiliec/viz-gateway            # → ghcr.io/chiliec/viz-gateway via registry.server
@@ -85,6 +94,21 @@ servers:
     env:
       clear:
         SERVICE: recon
+  lookup:                             # Solana deposit-address derivation (GET /address; internal-only until the site grows a Solana UI)
+    hosts:
+      - axveer.io
+    proxy: false
+    env:
+      clear:
+        SERVICE: lookup
+        LOOKUP_LISTEN: 0.0.0.0:8110
+  pegout-scanner:                     # Solana peg-out: burns finalized deposit-PDA wVIZ, enqueues the VIZ release
+    hosts:
+      - axveer.io
+    proxy: false
+    env:
+      clear:
+        SERVICE: pegout-scanner
 
 # Shared across every role (merged with the per-role SERVICE above). PUBLIC values only.
 env:
@@ -118,15 +142,26 @@ env:
     GRAM_JETTON_MINTER_ADDRESS: EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ
     GRAM_MULTISIG_ADDRESS: EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0
     GRAM_GATEWAY_JETTON_WALLET: EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy
+    # --- Solana runtime — mainnet wVIZ (Token-2022) + PDA custody. Addresses recorded in
+    #     contracts/solana/PROVENANCE.md (2026-08-21 deploy). SOLANA_GATEWAY_TOKEN_ACCOUNT
+    #     stays UNSET on purpose (legacy transfer+memo path; see header). ---
+    SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
+    SOLANA_WVIZ_MINT: APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD
+    SOLANA_MULTISIG: Bkyv7EU75KKpfm1J3UpEXHHhxhchVQ25vVxVwJsjjS4A          # mint authority: SPL 2-of-2 (op-2 + op-3)
+    SOLANA_NONCE_ACCOUNT: 67TMpJCdLHqbzoFJQV6ggBPmKjGCf2Fh8bJQZm2Ysi5d    # durable nonce (authority = submitter)
+    SOLANA_SIGNERS: BEC96NEfJi4DGgJN1cqP4xud4miXbv1U9BuiaqqxwN2H,3s1Senk3oZ1VrX2Cjh5QW2VV41sfg7Ta3EK1wMRKtSBW
+    SOLANA_SUBMITTER_PUBKEY: 9XfnroymZEZQJsbBenCMXQe5ZtFAFYc87QgFAzHwXyoz # public fee-payer pin (signers verify feePayer against it)
+    SOLANA_DEPOSIT_PROGRAM_ID: 3wp7eV7RCNoRaEie1MUvhf2qjbeBk13XZ6WpvGNihDtD
     # --- Caps: UNLIMITED at launch (Phase 0 decision, risk accepted). MUST match the
     #     signer app or an approval the coordinator allows gets rejected downstream. ---
     CAP_PER_TX_MILLI_VIZ: "1000000000000000000000000000000"
     CAP_24H_MILLI_VIZ: "1000000000000000000000000000000"
     MANUAL_REVIEW_ABOVE_MILLI_VIZ: "1000000000000000000000000000000"
-    # --- Reconciliation: TON-only launch (recon fails closed if GRAM is missing) ---
-    RECON_EXPECTED_REMOTES: GRAM
+    # --- Reconciliation: GRAM + SOLANA both monitored (recon fails closed if either is missing) ---
+    RECON_EXPECTED_REMOTES: GRAM,SOLANA
   secret:
     - GRAM_API_KEY                    # toncenter API key (rate limits) — SOPS app secret
     - VIZ_MEMO_WIF_GRAM               # gram.gate memo key — viz-watcher decrypts encrypted memos (non-fund; AUDIT.md §8)
     - COORDINATOR_SUBMIT_TOKEN        # /submit Bearer (PR #129) — web verifies, dispatcher sends; unset = fails OPEN
     - STAFF_WEBHOOK_URL               # fail-closed pause alerts → on-call Telegram (notifyStaff); secret: embeds the bot token
+    - SOLANA_SUBMITTER_SECRET         # Solana fee payer + nonce authority (web submits mints, pegout-scanner pays burns, recon reads its pubkey) — non-fund; see CUSTODY header

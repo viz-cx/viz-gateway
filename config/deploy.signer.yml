@@ -84,6 +84,18 @@ env:
     # non-recoverable floor (0.06 mint delivery + gas); surplus piles into the multisig.
     # Pinned explicitly so the value is auditable in ops config, not a silent code default.
     GRAM_ORDER_VALUE_NANO: "100000000"
+    # --- Solana runtime (mainnet, PROVENANCE.md 2026-08-21). These pins are THIS operator's
+    # own trusted knowledge: the signer validates every mint proposal against them (mint,
+    # multisig, nonce, feePayer) and F2-revalidates burns via its own RPC — like VIZ/GRAM
+    # above, SOLANA_RPC_URL is OPERATOR-CHOSEN; a separate-box operator sets its own.
+    # SOLANA_SIGNER_SECRET is NOT env: it unseals from the keystore (FED_KEYSTORE above). ---
+    SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
+    SOLANA_WVIZ_MINT: APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD
+    SOLANA_MULTISIG: Bkyv7EU75KKpfm1J3UpEXHHhxhchVQ25vVxVwJsjjS4A
+    SOLANA_NONCE_ACCOUNT: 67TMpJCdLHqbzoFJQV6ggBPmKjGCf2Fh8bJQZm2Ysi5d
+    SOLANA_SIGNERS: BEC96NEfJi4DGgJN1cqP4xud4miXbv1U9BuiaqqxwN2H,3s1Senk3oZ1VrX2Cjh5QW2VV41sfg7Ta3EK1wMRKtSBW
+    SOLANA_SUBMITTER_PUBKEY: 9XfnroymZEZQJsbBenCMXQe5ZtFAFYc87QgFAzHwXyoz
+    SOLANA_DEPOSIT_PROGRAM_ID: 3wp7eV7RCNoRaEie1MUvhf2qjbeBk13XZ6WpvGNihDtD
     # --- Caps: UNLIMITED (MUST match the coordinator app) ---
     CAP_PER_TX_MILLI_VIZ: "1000000000000000000000000000000"
     CAP_24H_MILLI_VIZ: "1000000000000000000000000000000"
