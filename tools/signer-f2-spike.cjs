@@ -186,6 +186,21 @@ async function expectReject(promise, label) {
     await expectReject(validateAction(tampered, depsPegOut(honestReader())), "5b tampered PEG_OUT amount");
   }
 
+  // 5c) Hostile recipient — EMPTY string: depositAta derivation throws ("vizAccount
+  //     required"); the validateAction boundary must normalize that to a fail-closed
+  //     SourceMismatchError, never crash the signer or fall through to a sign.
+  {
+    const tampered = canonicalPegOut(trueBurn(""));
+    await expectReject(validateAction(tampered, depsPegOut(honestReader())), "5c empty PEG_OUT recipient (derivation throws -> refuse)");
+  }
+
+  // 5d) Hostile recipient — longer than the 32-byte PDA seed limit: findProgramAddressSync
+  //     throws; same normalization requirement (fail-closed, no crash).
+  {
+    const tampered = canonicalPegOut(trueBurn("x".repeat(40)));
+    await expectReject(validateAction(tampered, depsPegOut(honestReader())), "5d oversized PEG_OUT recipient (seed > 32 bytes -> refuse)");
+  }
+
   // 6) Transfer not found / not finalized (getDepositTransfer -> null): fail-closed reject.
   {
     const action = canonicalPegOut(trueBurn(VIZ_ACCT));
