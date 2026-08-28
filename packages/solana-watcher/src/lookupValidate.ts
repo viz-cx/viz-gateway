@@ -75,3 +75,23 @@ export async function resolveDepositAddress(
     ata: deps.depositAta(vizAccount),
   };
 }
+
+/**
+ * The public 200 response for a resolved lookup — ONE shape for both servers
+ * (the internal lookup service and the coordinator's public /solana/address),
+ * so the site never sees two divergent payloads.
+ */
+export function lookupResponseBody(
+  d: { vizAccount: string; address: string; ata: string },
+  mint: string,
+): Record<string, unknown> {
+  return {
+    viz_account: d.vizAccount,
+    address: d.address,
+    ata: d.ata,
+    mint,
+    network: "solana",
+    warning: "Send ONLY wVIZ (this mint) on Solana to this address. Other tokens/networks are lost.",
+    rate: "1:1, no fee",
+  };
+}
