@@ -508,7 +508,12 @@ export class VizJsChain implements VizChain {
     // TaPoS: low 16 bits of head block number + bytes 4..8 of the head block id.
     const refBlockNum = gp.head_block_number & 0xffff;
     const refBlockPrefix = Buffer.from(gp.head_block_id, "hex").readUInt32LE(4);
-    const expiration = new Date(Date.now() + 60_000).toISOString().slice(0, 19);
+    // 10 min (VIZ allows up to 1h). A short window forced a rebuild nearly every drive
+    // round; each rebuild is a NEW body => a new per-signer replay-ledger claim, and with
+    // staggered claim windows across operators the federation livelocked on mainnet
+    // (2026-08-28: 17 rounds, approvals never reached threshold). One body must live long
+    // enough for every signer to approve it across several rounds.
+    const expiration = new Date(Date.now() + 600_000).toISOString().slice(0, 19);
     return {
       refBlockNum,
       refBlockPrefix,

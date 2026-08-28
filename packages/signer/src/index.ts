@@ -20,7 +20,7 @@ import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { KeyedSigner } from "./keyedSigner";
 import { assertNotReplay, type ReplayLedgerDeps } from "./replayLedger";
 import { routeApproval } from "./routeApproval";
-import { validateAction, type BurnReader, type SourceValidatorDeps } from "./sourceValidator";
+import { validateAction, type BurnReader, type SolanaDepositReader, type SourceValidatorDeps } from "./sourceValidator";
 import { startRegisterLoop } from "./register";
 import { resolveOperatorId } from "./resolveOperatorId";
 
@@ -102,13 +102,13 @@ async function main(): Promise<void> {
   // shared by this signer's GRAM reader and its on-chain approver. Operator-chosen (F2): each
   // operator supplies its own GRAM_ENDPOINT list, never forced onto shared public endpoints.
   const gramEndpoints = await resolveGramEndpoints(cfg.gram.endpoints, cfg.gram.orbsFallback);
-  // Read-only Solana reader (no writer): only getBurn is exercised here. Constructing it
-  // needs a real mint; if Solana is not configured on this signer, a Solana peg-out can
-  // never be validated, so fail closed if one ever arrives.
-  const solanaReader: BurnReader = cfg.solana.wvizMint
+  // Read-only Solana reader (no writer): only getDepositTransfer is exercised here.
+  // Constructing it needs a real mint; if Solana is not configured on this signer, a
+  // Solana peg-out can never be validated, so fail closed if one ever arrives.
+  const solanaReader: SolanaDepositReader = cfg.solana.wvizMint
     ? new SolanaChain(cfg.solana.rpcUrl, cfg.solana.wvizMint, cfg.solana.gatewayTokenAccount, cfg.solana.finalitySlots)
     : {
-        async getBurn() {
+        async getDepositTransfer() {
           throw new Error("Solana not configured on this signer (SOLANA_WVIZ_MINT unset); refusing Solana peg-out");
         },
       };
@@ -148,8 +148,8 @@ async function main(): Promise<void> {
     vizChain,
     solanaChain: solanaReader,
     tonChain: tonReader,
-    store,
     depositProgramId: cfg.solana.depositProgramId,
+    wvizMint: cfg.solana.wvizMint,
     // FEE_SWEEP/REFUND re-derivation: the operator's OWN fee config + fees.gate account,
     // never coordinator-fed, so a swept fee can only ever land at this operator's fees.gate.
     fees: cfg.fees,

@@ -306,6 +306,33 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
   }
 
   /**
+   * F2 peg-out source re-validation (registry-free): fetch ONE finalized tx by its
+   * signature and parse it as a wVIZ transfer INTO the given deposit ATA — the exact
+   * event the peg-out scanner keyed the action on (sourceId = transfer signature).
+   * Same parse (parseGatewayDeposit) as the scanner, so amounts can never diverge.
+   *
+   * Fail-closed: returns null if the tx is unknown, failed, not yet final per the
+   * buffer, or contains no transfer into `depositAta` (the signer then refuses).
+   */
+  async getDepositTransfer(
+    sourceId: string,
+    depositAta: string,
+  ): Promise<{ slot: number; amountBaseUnits: bigint } | null> {
+    const tx = await this.conn.getParsedTransaction(sourceId, {
+      commitment: "finalized",
+      maxSupportedTransactionVersion: 0,
+    });
+    if (!tx || tx.meta?.err) return null;
+    if (this.finalitySlots > 0) {
+      const safeSlot = (await this.finalizedHeight()) - this.finalitySlots;
+      if (tx.slot > safeSlot) return null; // not yet final per the buffer
+    }
+    const parsed = parseGatewayDeposit(tx, depositAta);
+    if (!parsed) return null;
+    return { slot: tx.slot, amountBaseUnits: parsed.amountBaseUnits };
+  }
+
+  /**
    * Scan a SPECIFIC token account (a peg-out deposit ATA, Variant A) for finalized
    * incoming wVIZ transfers. Same parse/throttle as finalizedBurnsSince but keyed
    * on the per-recipient ATA instead of the single gateway account.

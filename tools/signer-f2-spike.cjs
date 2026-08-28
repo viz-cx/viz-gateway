@@ -10,7 +10,7 @@
 const { canonicalPegIn, canonicalPegOut } = require("@gateway/common");
 const { validateAction, SourceMismatchError } = require("../packages/signer/dist/sourceValidator.js");
 const {
-  depositAddress,
+  depositAta,
 } = require("../packages/solana-watcher/dist/depositAddress.js");
 
 let failures = 0;
@@ -34,8 +34,9 @@ async function expectReject(promise, label) {
 (async () => {
   // --- shared fixtures ----------------------------------------------------------
   const FAKE_PROGRAM_ID = "GateWayDep1111111111111111111111111111111111"; // deterministic fake
+  const FAKE_MINT = "So11111111111111111111111111111111111111112"; // any valid pubkey
   const VIZ_ACCT = "alice";
-  const ALICE_DEPOSIT = depositAddress(FAKE_PROGRAM_ID, VIZ_ACCT);
+  const ALICE_ATA = depositAta(FAKE_PROGRAM_ID, VIZ_ACCT, FAKE_MINT);
   const SOL_RECIPIENT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"; // a base58 owner
   // A Solana-signature-shaped id (86-90 base58 chars) so PEG_OUT dispatch picks Solana.
   const SOL_SIG = "5".repeat(88);
@@ -56,7 +57,6 @@ async function expectReject(promise, label) {
   // Mock chain readers / store. Each test swaps in the relevant behavior.
   const vizChainReturning = (deposit) => ({ getDeposit: async () => deposit });
   const solanaReturning = (burn) => ({ getBurn: async () => burn });
-  const storeWith = (rec) => ({ depositAddressBy: async () => rec });
 
   const FEES = {
     floorMilliViz: 10_000n,
@@ -68,10 +68,10 @@ async function expectReject(promise, label) {
 
   const depsPegIn = (deposit) => ({
     vizChain: vizChainReturning(deposit),
-    solanaChain: solanaReturning(null),
+    solanaChain: { getDepositTransfer: async () => null },
     tonChain: solanaReturning(null),
-    store: storeWith(undefined),
     depositProgramId: FAKE_PROGRAM_ID,
+    wvizMint: FAKE_MINT,
     fees: FEES,
     feesGateAccount: FEES_GATE,
   });
@@ -136,59 +136,68 @@ async function expectReject(promise, label) {
 
   // =========================== PEG_OUT (Solana) =================================
 
-  // The TRUE burn the operator's own Solana node would return (homeDestination filled
-  // by the validator after the binding check, so the adapter leaves it "").
-  const trueBurn = {
+  // Registry-free deposit-event validation (2026-08-28 fix): the action id is the
+  // finalized wVIZ TRANSFER signature into the burn-only deposit ATA (the pegout
+  // scanner's sourceId), NOT a burn tx. The validator re-derives the ATA from
+  // action.recipient + its OWN program/mint pins and requires the transfer to credit
+  // exactly that ATA — the derivation IS the binding; no registry row is consulted.
+  const AMOUNT = 500_000n;
+
+  // The TRUE transfer the operator's own Solana node would return, keyed by (sig, ata).
+  const solanaWithDeposit = (sig, ata, amountBaseUnits) => ({
+    getDepositTransfer: async (id, dep) => (id === sig && dep === ata ? { slot: 1234, amountBaseUnits } : null),
+  });
+  const trueBurn = (homeDestination) => ({
     chain: "SOLANA",
     sourceId: SOL_SIG,
     height: 1234,
-    from: ALICE_DEPOSIT, // burn authority = alice's PDA deposit address
-    amountMilliViz: 500_000n,
-    homeDestination: "",
-  };
-  const depsPegOut = (burn, rec) => ({
+    from: ALICE_ATA,
+    amountMilliViz: AMOUNT,
+    homeDestination,
+  });
+  const depsPegOut = (reader) => ({
     vizChain: vizChainReturning(null),
-    solanaChain: solanaReturning(burn),
+    solanaChain: reader,
     tonChain: solanaReturning(null),
-    store: storeWith(rec),
     depositProgramId: FAKE_PROGRAM_ID,
+    wvizMint: FAKE_MINT,
     fees: FEES,
     feesGateAccount: FEES_GATE,
   });
-  const aliceRec = { vizAccount: VIZ_ACCT, solAddress: ALICE_DEPOSIT, wvizAta: "ata", createdAt: 0, scanTime: 0, priority: 0 };
+  const honestReader = () => solanaWithDeposit(SOL_SIG, ALICE_ATA, AMOUNT);
 
-  // 4) Honest PEG_OUT Solana: burn source binds to alice; release target = alice -> passes.
+  // 4) Honest PEG_OUT Solana: transfer into alice's derived ATA, release to alice -> passes.
   {
-    const action = canonicalPegOut({ ...trueBurn, homeDestination: VIZ_ACCT });
-    await validateAction(action, depsPegOut({ ...trueBurn }, aliceRec));
-    ok("4 honest PEG_OUT Solana: burn binds to alice -> signs");
+    const action = canonicalPegOut(trueBurn(VIZ_ACCT));
+    await validateAction(action, depsPegOut(honestReader()));
+    ok("4 honest PEG_OUT Solana: deposit transfer binds to alice -> signs");
   }
 
-  // 5) Tampered PEG_OUT recipient: coordinator redirects alice's burn to "bob" -> rejected.
+  // 5) Tampered PEG_OUT recipient: coordinator redirects alice's deposit to "bob"; the
+  //    validator derives BOB's ATA, finds no transfer there -> rejected.
   {
-    const tampered = canonicalPegOut({ ...trueBurn, homeDestination: "bob" });
-    await expectReject(validateAction(tampered, depsPegOut({ ...trueBurn }, aliceRec)), "5 tampered PEG_OUT recipient");
+    const tampered = canonicalPegOut(trueBurn("bob"));
+    await expectReject(validateAction(tampered, depsPegOut(honestReader())), "5 tampered PEG_OUT recipient");
   }
 
-  // 5b) Tampered registry binding: a registry row claims alice's deposit address belongs
-  //     to "bob"; the PDA re-derivation depositAddress(programId, "bob") != alice's address
-  //     -> rejected (proves a poisoned registry cannot redirect funds).
+  // 5b) Tampered PEG_OUT amount: real transfer, inflated release -> rejected.
   {
-    const action = canonicalPegOut({ ...trueBurn, homeDestination: "bob" });
-    const poisoned = { ...aliceRec, vizAccount: "bob" };
-    await expectReject(validateAction(action, depsPegOut({ ...trueBurn }, poisoned)), "5b poisoned registry binding");
+    const tampered = canonicalPegOut({ ...trueBurn(VIZ_ACCT), amountMilliViz: AMOUNT * 2n });
+    await expectReject(validateAction(tampered, depsPegOut(honestReader())), "5b tampered PEG_OUT amount");
   }
 
-  // 6) Unknown deposit address: no registry row for the burn source -> rejected.
+  // 6) Transfer not found / not finalized (getDepositTransfer -> null): fail-closed reject.
   {
-    const action = canonicalPegOut({ ...trueBurn, homeDestination: VIZ_ACCT });
-    await expectReject(validateAction(action, depsPegOut({ ...trueBurn }, undefined)), "6 unknown deposit address");
+    const action = canonicalPegOut(trueBurn(VIZ_ACCT));
+    await expectReject(validateAction(action, depsPegOut({ getDepositTransfer: async () => null })), "6 PEG_OUT deposit not finalized");
   }
 
-  // 6b) Burn not found / not finalized (getBurn -> null): fail-closed reject.
+  // 6b) Missing wVIZ-mint pin: the ATA cannot be derived, so refuse outright (fail-closed).
   {
-    const action = canonicalPegOut({ ...trueBurn, homeDestination: VIZ_ACCT });
-    await expectReject(validateAction(action, depsPegOut(null, aliceRec)), "6b PEG_OUT burn not finalized");
+    const action = canonicalPegOut(trueBurn(VIZ_ACCT));
+    const deps = depsPegOut(honestReader());
+    deps.wvizMint = "";
+    await expectReject(validateAction(action, deps), "6b PEG_OUT without a wVIZ-mint pin");
   }
 
   // 6c) TON-shaped PEG_OUT id (64-hex burn tx hash) but the operator's TON node has no such
@@ -196,8 +205,8 @@ async function expectReject(promise, label) {
   //     in tools/gram-pegout-f2-spike.cjs; here we just prove the dispatch + fail-closed path.
   {
     const tonHash = "a".repeat(64); // 64-hex burn tx hash — routes to the TON branch
-    const action = canonicalPegOut({ ...trueBurn, sourceId: tonHash, homeDestination: VIZ_ACCT });
-    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: tonHash }, aliceRec)), "6c TON PEG_OUT burn not final (fail-closed)");
+    const action = canonicalPegOut({ ...trueBurn(VIZ_ACCT), sourceId: tonHash });
+    await expectReject(validateAction(action, depsPegOut(honestReader())), "6c TON PEG_OUT burn not final (fail-closed)");
   }
 
   // 6d) An id matching NEITHER a Solana signature, a TON tx hash, NOR a FEE_SWEEP/REFUND
@@ -205,8 +214,8 @@ async function expectReject(promise, label) {
   //     FAIL CLOSED (regression guard for the silent-bypass hole). FEE_SWEEP/REFUND
   //     validation itself is exercised in tools/fee-sweep-refund-spike.cjs.
   {
-    const action = canonicalPegOut({ ...trueBurn, sourceId: "not-a-known-shape", homeDestination: VIZ_ACCT });
-    await expectReject(validateAction(action, depsPegOut({ ...trueBurn, sourceId: "not-a-known-shape" }, aliceRec)), "6d unknown-shape PEG_OUT refused (fail-closed)");
+    const action = canonicalPegOut({ ...trueBurn(VIZ_ACCT), sourceId: "not-a-known-shape" });
+    await expectReject(validateAction(action, depsPegOut(honestReader())), "6d unknown-shape PEG_OUT refused (fail-closed)");
   }
 
   if (failures > 0) {

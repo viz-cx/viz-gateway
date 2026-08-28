@@ -58,8 +58,23 @@ export class HttpSignerClient implements SignerClient {
 /** Minimal outbox surface the broadcasters need for idempotent delivery. */
 type IdempotencyStore = Pick<GatewayStore, "get" | "setStatus">;
 
+/**
+ * Reuse a pinned release body only while at least this much validity remains — enough
+ * for one full sequential signer round (pegOut approve ceiling is 30s per signer).
+ */
+const RELEASE_REUSE_MIN_REMAINING_MS = 90_000;
+
 /** PEG_OUT: build a VIZ release proposal and broadcast the signed transfer. */
 export class VizReleaseBroadcaster implements Broadcaster {
+  // action.id -> the ONE release body every operator must sign this delivery attempt.
+  // Rebuilding per drive round gave each round a fresh expiration = a fresh replay-ledger
+  // key at every signer; with the per-signer claim windows staggered across operators,
+  // approvals could never reach threshold simultaneously (mainnet livelock, 2026-08-28).
+  // Pinning makes re-drives idempotent: an identical body re-signs freely at every signer.
+  // In-memory only is enough: after a coordinator restart the first rebuilt body is again
+  // stable, so signers converge on it once their pre-restart claims expire (~expiry+60s).
+  private readonly pinned = new Map<string, VizReleaseProposal>();
+
   constructor(
     private readonly chain: VizJsChain,
     private readonly accounts: GatewayAccounts,
@@ -70,7 +85,14 @@ export class VizReleaseBroadcaster implements Broadcaster {
     if (!action.remoteChain) throw new Error(`release ${action.id} missing remoteChain — cannot select backing account`);
     const from = this.accounts.accountFor(action.remoteChain);
     // PEG_OUT / FEE_SWEEP / REFUND are all fee-free VIZ releases.
-    return { proposal: await this.chain.buildReleaseProposal(action, from), feeMilliViz: 0n };
+    const prev = this.pinned.get(action.id);
+    // Proposal expirations are UTC without the "Z" (VIZ ISO format) — append it to parse.
+    if (prev && Date.parse(`${prev.expiration}Z`) - Date.now() > RELEASE_REUSE_MIN_REMAINING_MS) {
+      return { proposal: prev, feeMilliViz: 0n };
+    }
+    const proposal = await this.chain.buildReleaseProposal(action, from);
+    this.pinned.set(action.id, proposal);
+    return { proposal, feeMilliViz: 0n };
   }
 
   async broadcast(action: CanonicalAction, proposal: Proposal, signatures: string[]): Promise<string> {
@@ -83,6 +105,9 @@ export class VizReleaseBroadcaster implements Broadcaster {
     const txid = this.chain.transactionId(p);
     await this.store.setStatus(action.id, "BROADCAST", { txid });
     const sent = await this.chain.broadcastRelease(p, signatures);
+    // Drop the pin only AFTER the node accepted: a failed send must retry the SAME body
+    // (same deterministic txid) so the persisted-txid idempotency backstop stays exact.
+    this.pinned.delete(action.id);
     if (sent && sent !== txid) {
       console.warn(`[viz-broadcast] node txid ${sent} != computed ${txid} for ${action.id} (serializer drift?)`);
     }

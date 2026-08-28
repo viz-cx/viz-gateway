@@ -69,15 +69,13 @@ test("FEE_SWEEP with action.remoteChain=GRAM but parent deposit remoteChain=SOLA
       async accountExists() { return false; },
     },
     solanaChain: {
-      async getBurn() { return null; },
+      async getDepositTransfer() { return null; },
     },
     tonChain: {
       async getBurn() { return null; },
     },
-    store: {
-      async depositAddressBy() { return undefined; },
-    },
     depositProgramId: "",
+    wvizMint: "",
     fees: FEES,
     feesGateAccount: "fees.gate",
     accounts,
