@@ -6,13 +6,12 @@ import {
   type CanonicalAction,
   type GatewayAccounts,
   type GatewayFeeConfig,
-  type GatewayStore,
   type RemoteBurn,
   type SourceHint,
   type VizChain,
   type VizDeposit,
 } from "@gateway/common";
-import { depositAddress } from "@gateway/solana-watcher/dist/depositAddress";
+import { depositAta } from "@gateway/solana-watcher/dist/depositAddress";
 
 /**
  * F2 — the signer's INDEPENDENT source-event validation.
@@ -39,22 +38,27 @@ export class SourceMismatchError extends Error {
   }
 }
 
-/** Minimal burn-reader surface (SolanaChain.getBurn) — keeps deps mockable. */
+/** Minimal burn-reader surface (TON getBurn) — keeps deps mockable. */
 export interface BurnReader {
   getBurn(sourceId: string): Promise<RemoteBurn | null>;
+}
+
+/** Minimal deposit-transfer reader surface (SolanaChain.getDepositTransfer) — keeps deps mockable. */
+export interface SolanaDepositReader {
+  getDepositTransfer(sourceId: string, depositAta: string): Promise<{ slot: number; amountBaseUnits: bigint } | null>;
 }
 
 export interface SourceValidatorDeps {
   /** Operator's own VIZ node reader: peg-in source (getDeposit) + destination existence (accountExists). */
   vizChain: Pick<VizChain, "getDeposit" | "accountExists">;
   /** Operator's own Solana reader (peg-out source). */
-  solanaChain: BurnReader;
+  solanaChain: SolanaDepositReader;
   /** Operator's own TON reader (peg-out source). */
   tonChain: BurnReader;
-  /** Shared deposit-address registry (peg-out routing identity). */
-  store: Pick<GatewayStore, "depositAddressBy">;
-  /** Public program ID of the burn-only deposit program — used to re-derive deposit PDAs (F2). */
+  /** Public program ID of the burn-only deposit program — used to re-derive deposit PDAs/ATAs (F2). */
   depositProgramId: string;
+  /** This operator's OWN pinned wVIZ mint — completes the deposit-ATA re-derivation (F2). */
+  wvizMint: string;
   /**
    * The operator's OWN fee configuration — used to independently re-derive the fee a
    * FEE_SWEEP is allowed to sweep. Must be the identical config every operator runs
@@ -383,28 +387,47 @@ async function validatePegIn(action: CanonicalAction, deps: SourceValidatorDeps,
   assertSameAction(canonicalPegIn(deposit), action);
 }
 
+/**
+ * Solana PEG_OUT (Variant A, PDA deposit addresses). The source event is the FINALIZED
+ * wVIZ transfer INTO the burn-only deposit ATA — NOT the scanner's burn tx: the action id
+ * is the transfer signature (pegoutScanner sourceId), and funds at that ATA are already
+ * irrevocably out of circulation (the program can only burn; there is no transfer path),
+ * so the deposit alone is release-grade proof. The burn is scanner-side supply
+ * housekeeping outside this trust chain — validating it here would also be UNSOUND: a
+ * burn tx cannot be bound one-to-one to a specific incoming transfer, so one real burn
+ * could vouch for two same-amount claims (double release).
+ *
+ * Fully independent, registry-free: the ATA is re-derived from action.recipient (which the
+ * digest binds) + this operator's OWN program-ID and mint pins. A coordinator lying about
+ * the recipient derives a different ATA, the transfer is not found there, and we refuse
+ * (fail-closed). Double-release is blocked by the transfer-signature idempotency key +
+ * the replay ledger.
+ */
 async function validateSolanaPegOut(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {
-  if (!deps.depositProgramId) {
-    throw new SourceMismatchError(`SOLANA_DEPOSIT_PROGRAM_ID not configured; cannot validate Solana peg-out ${action.id}`);
-  }
-  const burn = await deps.solanaChain.getBurn(action.id);
-  if (!burn) {
-    throw new SourceMismatchError(`PEG_OUT burn ${action.id} not found or not yet finalized on Solana`);
-  }
-  const rec = await deps.store.depositAddressBy(burn.from);
-  if (!rec) {
-    throw new SourceMismatchError(`no registered deposit address for burn source ${burn.from} (${action.id})`);
-  }
-  // Re-derive the deposit PDA from the VIZ account + public program ID. A tampered registry
-  // row cannot redirect the release: the binding is recomputed independently, trustlessly.
-  const expected = depositAddress(deps.depositProgramId, rec.vizAccount);
-  if (expected !== burn.from) {
+  if (!deps.depositProgramId || !deps.wvizMint) {
     throw new SourceMismatchError(
-      `deposit-address binding mismatch for ${action.id}: derived ${expected} from "${rec.vizAccount}" != burn source ${burn.from}`,
+      `SOLANA_DEPOSIT_PROGRAM_ID/SOLANA_WVIZ_MINT not configured; cannot validate Solana peg-out ${action.id}`,
     );
   }
-  burn.homeDestination = rec.vizAccount;
-  assertSameAction(canonicalPegOut(burn), action);
+  const ata = depositAta(deps.depositProgramId, action.recipient, deps.wvizMint);
+  const dep = await deps.solanaChain.getDepositTransfer(action.id, ata);
+  if (!dep) {
+    throw new SourceMismatchError(
+      `PEG_OUT deposit ${action.id} not found, not yet finalized, or not a wVIZ transfer into ${ata} ` +
+        `(the deposit ATA derived for "${action.recipient}") on Solana`,
+    );
+  }
+  assertSameAction(
+    canonicalPegOut({
+      chain: "SOLANA",
+      sourceId: action.id,
+      height: dep.slot,
+      from: ata,
+      amountMilliViz: dep.amountBaseUnits, // 3-decimal mint => base unit == milli-VIZ
+      homeDestination: action.recipient,
+    }),
+    action,
+  );
 }
 
 async function validateTonPegOut(action: CanonicalAction, deps: SourceValidatorDeps): Promise<void> {

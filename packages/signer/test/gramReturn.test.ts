@@ -17,10 +17,10 @@ const returnAction: CanonicalAction = {
 function deps(accountExists: boolean): SourceValidatorDeps {
   return {
     vizChain: { getDeposit: async () => null, accountExists: async () => accountExists },
-    solanaChain: { getBurn: async () => null },
+    solanaChain: { getDepositTransfer: async () => null },
     tonChain: { getBurn: async (id) => (id === TX ? burn : null) },
-    store: { depositAddressBy: async () => undefined },
     depositProgramId: "prog",
+    wvizMint: "",
     fees: { refundFeeMilliViz: 5000n } as any,
     feesGateAccount: "fees.gate",
     accounts: {} as any,

@@ -73,9 +73,8 @@ async function expectReject(promise, label) {
   const spikeAccounts = new GatewayAccounts({ GRAM: "viz-gateway", SOLANA: "solana.gate" });
   const deps = (dep) => ({
     vizChain: { getDeposit: async () => dep },
-    solanaChain: { getBurn: async () => null },
+    solanaChain: { getDepositTransfer: async () => null },
     tonChain: { getBurn: async () => null },
-    store: { depositAddressBy: async () => undefined },
     fees,
     feesGateAccount: FEES_GATE,
     accounts: spikeAccounts,
