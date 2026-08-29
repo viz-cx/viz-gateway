@@ -120,6 +120,8 @@ function renderFeesPanel() {
   set("fee-activation", fmtViz(fees.activationSurchargeMilliViz) + " VIZ");
   set("fee-min", fmtViz(fees.mintGasFloorMilliViz) + " VIZ");
   set("fee-refund", fmtViz(fees.refundFeeMilliViz) + " VIZ");
+  set("ft-fee", `max(${fmtViz(fees.floorMilliViz)} VIZ, ${(fees.bps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%)`);
+  set("ft-surcharge", fmtViz(fees.activationSurchargeMilliViz) + " VIZ");
 }
 
 async function loadFees() {
@@ -263,3 +265,15 @@ selectTab(location.hash === "#peg-in" ? "in" : "out", false);
 validatePegout();
 renderFeesPanel();
 loadStatus(); loadHealth(); loadFees();
+
+/* ---------- FAQ: single-open accordion ---------- */
+var faqItems = document.querySelectorAll("#faqList details");
+faqItems.forEach(function (d) {
+  d.addEventListener("toggle", function () {
+    if (d.open) {
+      faqItems.forEach(function (other) {
+        if (other !== d) other.open = false;
+      });
+    }
+  });
+});
