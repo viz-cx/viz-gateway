@@ -756,11 +756,17 @@
   }
 
   /* ---------- Reduced motion ---------- */
+  .bridge-wrap .flow-arc { animation: bridge-flow 1.1s linear infinite; }
+  @keyframes bridge-flow {
+    to { stroke-dashoffset: -22; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     .hero-badge .dot,
     .status .dot,
-    .meter .fill { animation: none !important; transition: none !important; }
+    .meter .fill,
+    .bridge-wrap .flow-arc { animation: none !important; transition: none !important; }
     .card:hover, .btn:hover, .btn:active { transform: none; }
   }
 
