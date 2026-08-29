@@ -227,11 +227,12 @@
       </div>
       <div class="table-wrap">
         <table class="fees">
+          <thead><tr><th scope="col"></th><th scope="col" class="h-in">Peg-in · VIZ → wVIZ</th><th scope="col" class="h-out">Peg-out · wVIZ → VIZ</th></tr></thead>
           <tbody>
-            <tr><th scope="row">Fee</th><td id="ft-fee">max(45 VIZ, 0.20%)</td></tr>
-            <tr><th scope="row">First-time surcharge</th><td><span id="ft-surcharge">37.5 VIZ</span> (once per GRAM wallet)</td></tr>
-            <tr><th scope="row">Minimum</th><td>~83.5 VIZ first peg-in, ~46 VIZ after — just enough to cover the fee</td></tr>
-            <tr><th scope="row">Rate</th><td>1:1 (minus fee)</td></tr>
+            <tr><th scope="row">Fee</th><td id="ft-fee">max(45 VIZ, 0.20%)</td><td><span class="free">Free</span></td></tr>
+            <tr><th scope="row">First-time surcharge</th><td><span id="ft-surcharge">37.5 VIZ</span> (once per GRAM wallet)</td><td><span class="dash">—</span></td></tr>
+            <tr><th scope="row">Minimum</th><td>~83.5 VIZ first peg-in, ~46 VIZ after — just enough to cover the fee</td><td>None</td></tr>
+            <tr><th scope="row">Rate</th><td>1:1 (minus fee)</td><td>1:1</td></tr>
           </tbody>
         </table>
       </div>
