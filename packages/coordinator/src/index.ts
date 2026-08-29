@@ -6,6 +6,8 @@ import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
+import { lookupResponseBody, resolveDepositAddress } from "@gateway/solana-watcher/dist/lookupValidate";
+import { depositAddress, depositAta } from "@gateway/solana-watcher/dist/depositAddress";
 import { Orchestrator } from "./orchestrator";
 import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, GramReturnBroadcaster, VizReleaseBroadcaster } from "./adapters";
 import { SignerRegistry } from "./registry";
@@ -192,7 +194,52 @@ async function main(): Promise<void> {
         });
       return;
     }
-    if (req.method === "OPTIONS" && (req.url === "/health" || req.url === "/fees" || req.url === "/recon")) {
+    if (req.method === "GET" && req.url?.startsWith("/solana/address")) {
+      // Public mirror of the internal lookup service (peg-out Variant A) for the site's
+      // Solana bridge UI. Same pure resolver, same store registration (the pegout-scanner
+      // reads deposit_addresses from this shared store), same response shape — only the
+      // listener differs. Open/unauthenticated by design: the release is bound to the
+      // derivation, so a third party can only gift, never redirect.
+      const cors = corsHeadersFor(req.headers.origin, allowedOrigins);
+      const jsonCors = (code: number, obj: unknown) => {
+        res.writeHead(code, { "content-type": "application/json", ...cors });
+        res.end(JSON.stringify(obj));
+      };
+      if (!cfg.solana.depositProgramId || !cfg.solana.wvizMint) {
+        jsonCors(404, { error: "Solana peg-out not configured" });
+        return;
+      }
+      void (async () => {
+        try {
+          const decision = await resolveDepositAddress(
+            new URL(req.url ?? "/", "http://localhost").searchParams.get("viz_account"),
+            {
+              accountExists: (name) => vizChain.accountExists(name),
+              depositAddress: (name) => depositAddress(cfg.solana.depositProgramId, name),
+              depositAta: (name) => depositAta(cfg.solana.depositProgramId, name, cfg.solana.wvizMint),
+            },
+          );
+          if (decision.status !== 200) {
+            jsonCors(decision.status, decision.body);
+            return;
+          }
+          await store.registerDepositAddress({
+            vizAccount: decision.vizAccount,
+            solAddress: decision.address,
+            wvizAta: decision.ata,
+          });
+          jsonCors(200, lookupResponseBody(decision, cfg.solana.wvizMint));
+        } catch (err) {
+          // VIZ node down etc. — fail closed (500), never issue an unverified address.
+          jsonCors(500, { error: String(err) });
+        }
+      })();
+      return;
+    }
+    if (
+      req.method === "OPTIONS" &&
+      (req.url === "/health" || req.url === "/fees" || req.url === "/recon" || req.url?.startsWith("/solana/address"))
+    ) {
       const cors = corsHeadersFor(req.headers.origin, allowedOrigins);
       res.writeHead(204, { ...cors, "access-control-allow-methods": "GET" });
       res.end();

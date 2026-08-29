@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { buildGatewayAccounts, createStore, loadConfig } from "@gateway/common";
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { depositAddress, depositAta } from "./depositAddress";
-import { resolveDepositAddress } from "./lookupValidate";
+import { lookupResponseBody, resolveDepositAddress } from "./lookupValidate";
 
 /**
  * Deposit-address lookup service (peg-out Variant A). Stateless derivation:
@@ -55,15 +55,7 @@ async function main(): Promise<void> {
           solAddress: decision.address,
           wvizAta: decision.ata,
         });
-        json(200, {
-          viz_account: decision.vizAccount,
-          address: decision.address,
-          ata: decision.ata,
-          mint: cfg.solana.wvizMint,
-          network: "solana",
-          warning: "Send ONLY wVIZ (this mint) on Solana to this address. Other tokens/networks are lost.",
-          rate: "1:1, no fee",
-        });
+        json(200, lookupResponseBody(decision, cfg.solana.wvizMint));
       } catch (err) {
         json(500, { error: String(err) });
       }

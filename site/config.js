@@ -6,6 +6,13 @@ export const CONFIG = {
     gatewayJettonWallet: "EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy", // display only
     decimals: 3,
   },
+  solana: {
+    mint: "APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD", // wVIZ (Token-2022)
+    decimals: 3,
+    vizAccount: "solana.gate", // peg-in gate account on VIZ
+    rpc: "https://api.mainnet-beta.solana.com", // public endpoint, CORS-enabled, no key
+    explorerUrl: "https://solscan.io/token/", // append the mint address
+  },
   pegIn: {
     vizAccount: "gram.gate",
     // WebVIZWallet deep-link: hash-routed path, bare numeric amount (the wallet is
