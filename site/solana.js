@@ -6,8 +6,8 @@ const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
 
 /* ---------- Theme / toast / copy / tabs ----------
-   Kept in sync with app.js by hand. Deliberately NOT extracted into a shared
-   module: app.js is the live GRAM money page and stays untouched by this app. */
+   Kept in sync with gram.js by hand. Deliberately NOT extracted into a shared
+   module: gram.js is the live GRAM money page and stays untouched by this app. */
 (function theme() {
   const meta = document.querySelector('meta[name="theme-color"]');
   const apply = (t) => {
