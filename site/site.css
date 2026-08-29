@@ -913,3 +913,15 @@
 }
 #token .tok-row b { color: var(--text, #fff); }
 #token .tok-empty { color: var(--muted, #8b97a8); font-size: 0.9rem; margin-top: 10px; }
+
+/* ---------- Chain cards (hub) ---------- */
+.chain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.chain-card { border-top: 3px solid var(--chain-accent, #2DD4BF); display: flex; flex-direction: column; }
+.chain-card.gram { --chain-accent: #0098EA; }
+.chain-card.sol { --chain-accent: #9945FF; }
+.chain-card .chain-sub { font-size: 0.62em; font-weight: 500; opacity: 0.6; margin-left: 6px; }
+.chain-facts { list-style: none; padding: 0; margin: 0 0 18px; }
+.chain-facts li { padding: 5px 0 5px 24px; position: relative; }
+.chain-facts li::before { content: "✓"; position: absolute; left: 0; color: var(--chain-accent); font-weight: 700; }
+.chain-card .btn { margin-top: auto; width: 100%; }
+@media (max-width: 720px) { .chain-grid { grid-template-columns: 1fr; } }
