@@ -22,7 +22,7 @@
   "fees": {
     "floorMilliViz": 10000,
     "bps": 20,
-    "activationSurchargeMilliViz": { "SOLANA": 10000, "GRAM": 150000 },
+    "activationSurchargeMilliViz": { "SOLANA": 40000, "GRAM": 150000 },
     "mintGasFloorMilliViz": { "SOLANA": 1000, "GRAM": 1000 },
     "mintGasTon": 0.06,
     "walletDeployGasTon": 0.05,

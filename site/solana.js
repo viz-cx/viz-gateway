@@ -108,7 +108,7 @@ const solInput = $("sol-addr");
 const fees = {
   floorMilliViz: 10000n,
   bps: 20,
-  activationSurchargeMilliViz: 10000n,
+  activationSurchargeMilliViz: 40000n,
   mintGasFloorMilliViz: 1000n,
   refundFeeMilliViz: 5000n,
 };
