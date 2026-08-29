@@ -761,12 +761,46 @@
     to { stroke-dashoffset: -22; }
   }
 
+  /* Glowing particles along the hero arcs (restored from the pre-dual-chain hero).
+     @supports-gated: without offset-path on SVG they'd sit parked at the viewBox origin. */
+  .bridge-wrap .pt { opacity: 0; fill: currentColor; }
+  @supports (offset-path: path("M0 0 L1 1")) {
+    .bridge-wrap .pt {
+      offset-rotate: 0deg;
+      filter: drop-shadow(0 0 5px currentColor);
+      animation: bridge-travel 3.6s cubic-bezier(0.55, 0, 0.5, 1) infinite;
+    }
+    .bridge-wrap .pt.g { offset-path: path("M120 130 C 280 40, 400 40, 520 70"); }
+    .bridge-wrap .pt.s { offset-path: path("M120 130 C 280 230, 400 230, 520 200"); }
+    .bridge-wrap .pt.rev { animation-name: bridge-travel-rev; }
+    .bridge-wrap .pt.c-viz { color: var(--viz); }
+    .bridge-wrap .pt.c-gram { color: var(--ton-2); }
+    .bridge-wrap .pt.c-sol { color: #9945FF; }
+    .bridge-wrap .pt.d1 { animation-delay: 0.6s; }
+    .bridge-wrap .pt.d2 { animation-delay: 1.2s; }
+    .bridge-wrap .pt.d3 { animation-delay: 1.8s; }
+    .bridge-wrap .pt.d4 { animation-delay: 2.4s; }
+    @keyframes bridge-travel {
+      0% { offset-distance: 0%; opacity: 0; }
+      12% { opacity: 1; }
+      88% { opacity: 1; }
+      100% { offset-distance: 100%; opacity: 0; }
+    }
+    @keyframes bridge-travel-rev {
+      0% { offset-distance: 100%; opacity: 0; }
+      12% { opacity: 1; }
+      88% { opacity: 1; }
+      100% { offset-distance: 0%; opacity: 0; }
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     .hero-badge .dot,
     .status .dot,
     .meter .fill,
-    .bridge-wrap .flow-arc { animation: none !important; transition: none !important; }
+    .bridge-wrap .flow-arc,
+    .bridge-wrap .pt { animation: none !important; transition: none !important; }
     .card:hover, .btn:hover, .btn:active { transform: none; }
   }
 
