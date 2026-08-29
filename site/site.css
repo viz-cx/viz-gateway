@@ -318,114 +318,6 @@
 
   /* ---------- Bridge animation ---------- */
   .bridge-wrap { container-type: inline-size; width: 100%; margin-top: 8px; }
-  .bridge-fit {
-    --bs: 1;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    height: calc(240px * var(--bs));
-  }
-  @container (max-width: 600px) { .bridge-fit { --bs: 0.9; } }
-  @container (max-width: 540px) { .bridge-fit { --bs: 0.8; } }
-  @container (max-width: 480px) { .bridge-fit { --bs: 0.72; } }
-  @container (max-width: 420px) { .bridge-fit { --bs: 0.62; } }
-  @container (max-width: 360px) { .bridge-fit { --bs: 0.54; } }
-  @container (max-width: 300px) { .bridge-fit { --bs: 0.46; } }
-  .stage {
-    position: relative;
-    width: 600px;
-    height: 240px;
-    flex: 0 0 auto;
-    transform: scale(var(--bs));
-    transform-origin: top center;
-  }
-  .stage svg { position: absolute; inset: 0; width: 600px; height: 240px; overflow: visible; }
-
-  .node {
-    position: absolute;
-    width: 90px;
-    height: 90px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    font-weight: 800;
-    font-size: 20px;
-    letter-spacing: 0.02em;
-    color: #fff;
-    top: 106px;
-    z-index: 2;
-  }
-  .node small {
-    position: absolute;
-    bottom: -26px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted-2);
-    white-space: nowrap;
-  }
-  .node.viz {
-    left: 15px;
-    background: radial-gradient(120% 120% at 32% 26%, var(--viz-2), var(--viz) 62%, #10a894);
-    box-shadow: 0 0 44px -6px color-mix(in oklab, var(--viz) 75%, transparent), inset 0 2px 6px rgba(255, 255, 255, 0.35);
-    color: #04201c;
-  }
-  .node.ton {
-    left: 495px;
-    background: radial-gradient(120% 120% at 32% 26%, var(--ton-2), var(--ton) 62%, #0069b3);
-    box-shadow: 0 0 44px -6px color-mix(in oklab, var(--ton) 75%, transparent), inset 0 2px 6px rgba(255, 255, 255, 0.3);
-  }
-  .node::after {
-    content: "";
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    border: 1.5px solid currentColor;
-    opacity: 0;
-    animation: ping 3s ease-out infinite;
-  }
-  .node.viz::after { color: var(--viz); }
-  .node.ton::after { color: var(--ton); animation-delay: 1.5s; }
-  @keyframes ping {
-    0% { transform: scale(1); opacity: 0.55; }
-    80% { transform: scale(1.5); opacity: 0; }
-    100% { transform: scale(1.5); opacity: 0; }
-  }
-
-  .p {
-    position: absolute;
-    width: 15px;
-    height: 15px;
-    border-radius: 50%;
-    offset-path: path("M60 152 C 210 46, 390 46, 540 152");
-    offset-anchor: 50% 50%;
-    offset-rotate: 0deg;
-    opacity: 0;
-    z-index: 1;
-    animation: flow 3.6s cubic-bezier(0.55, 0, 0.5, 1) infinite;
-  }
-  .p.viz { background: var(--viz); box-shadow: 0 0 14px 3px color-mix(in oklab, var(--viz) 80%, transparent); }
-  .p.ton { background: var(--ton-2); box-shadow: 0 0 14px 3px color-mix(in oklab, var(--ton) 80%, transparent); }
-  .p.d1 { animation-delay: 0s; }
-  .p.d2 { animation-delay: 1.2s; }
-  .p.d3 { animation-delay: 2.4s; }
-  .p.rev { animation-name: flow-rev; animation-delay: 0.6s; }
-  .p.rev2 { animation-name: flow-rev; animation-delay: 2.4s; }
-  @keyframes flow {
-    0% { offset-distance: 0%; opacity: 0; }
-    12% { opacity: 1; }
-    88% { opacity: 1; }
-    100% { offset-distance: 100%; opacity: 0; }
-  }
-  @keyframes flow-rev {
-    0% { offset-distance: 100%; opacity: 0; }
-    12% { opacity: 1; }
-    88% { opacity: 1; }
-    100% { offset-distance: 0%; opacity: 0; }
-  }
 
   /* ---------- Cards / grid ---------- */
   .grid-3 { display: grid; grid-template-columns: 1fr; gap: 20px; }
@@ -866,8 +758,6 @@
   /* ---------- Reduced motion ---------- */
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
-    .p { animation: none; offset-distance: 50%; opacity: 0.9; }
-    .node::after,
     .hero-badge .dot,
     .status .dot,
     .meter .fill { animation: none !important; transition: none !important; }

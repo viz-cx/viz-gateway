@@ -1,7 +1,7 @@
-// Landing "Token" section controller. Static links render immediately from CONFIG;
+// GRAM page "Token" section controller. Static links render immediately from CONFIG;
 // live figures (price, market cap, circulating, VIZ locked) load fail-soft — each
 // row stays hidden until its value is available, so the price self-activates when a
-// DEX indexes a pool. Copy button + toast are handled by index.html's inline IIFE.
+// DEX indexes a pool. Copy button + toast are handled by gram.html's gram.js.
 import { CONFIG } from "./config.js";
 import { fetchCirculatingSupply, fetchVizLocked, fetchWvizPriceUsd } from "./token-stats.js";
 import { formatPriceUsd, formatMarketCapUsd, baseUnitsToNumber } from "./token-format.mjs";

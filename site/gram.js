@@ -380,3 +380,29 @@ faqItems.forEach(function (d) {
     }
   });
 });
+
+/* ---------- Mobile menu ---------- */
+var header = document.querySelector(".site-header");
+var menuBtn = document.getElementById("menuBtn");
+var navLinks = document.getElementById("navLinks");
+function closeMenu() {
+  header.classList.remove("menu-open");
+  if (menuBtn) menuBtn.setAttribute("aria-expanded", "false");
+}
+if (menuBtn) {
+  menuBtn.addEventListener("click", function () {
+    var open = header.classList.toggle("menu-open");
+    menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+}
+if (navLinks) {
+  navLinks.querySelectorAll("a").forEach(function (a) {
+    a.addEventListener("click", closeMenu);
+  });
+}
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape") closeMenu();
+});
+document.addEventListener("click", function (e) {
+  if (header.classList.contains("menu-open") && !e.target.closest(".nav")) closeMenu();
+});
