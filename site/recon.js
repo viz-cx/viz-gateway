@@ -65,7 +65,7 @@ function renderCard(tpl, payload, now) {
   const card = frag.querySelector(".rc-card");
   if (!card) return null;
 
-  // Circulating wVIZ as-is — the SAME figure the token panel and app.html show. Adding
+  // Circulating wVIZ as-is — the SAME figure the token panel and gram.html show. Adding
   // unsweptFees here made this card display a third number that looked like a rival
   // supply figure. Unswept fees still count as backing owed in recon's own pause check
   // (server side, checker.ts); this card just doesn't re-state them.

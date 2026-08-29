@@ -2,11 +2,11 @@
 <html lang="en" data-theme="dark"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Solana Bridge — wVIZ</title>
-<meta name="description" content="Bridge VIZ and wVIZ on Solana: get your personal deposit address to return wVIZ, and the exact peg-in memo — no fat-finger mistakes.">
+<title>GRAM Bridge — wVIZ</title>
+<meta name="description" content="Bridge VIZ and wVIZ safely: connect your GRAM wallet, return wVIZ to VIZ in one click, and get the exact peg-in memo — no fat-finger mistakes.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#060910">
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='15'%20fill='%23060910'/%3E%3Ccircle%20cx='25'%20cy='32'%20r='13'%20fill='%232DD4BF'/%3E%3Ccircle%20cx='40'%20cy='32'%20r='13'%20fill='%239945FF'%20fill-opacity='.92'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='15'%20fill='%23060910'/%3E%3Ccircle%20cx='25'%20cy='32'%20r='13'%20fill='%232DD4BF'/%3E%3Ccircle%20cx='40'%20cy='32'%20r='13'%20fill='%230098EA'%20fill-opacity='.92'/%3E%3C/svg%3E">
 <script>(function(){try{var t=localStorage.getItem('wviz-theme');if(t!=='light'&&t!=='dark')t='dark';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <link rel="stylesheet" href="./site.css">
 </head>
@@ -14,7 +14,7 @@
 <header class="site-header" id="top">
   <div class="nav container">
     <a class="brand" href="./" aria-label="wVIZ — home">
-      <span class="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6" fill="#2DD4BF"></circle><circle cx="15" cy="12" r="6" fill="#9945FF" fill-opacity=".9"></circle></svg></span>
+      <span class="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6" fill="#2DD4BF"></circle><circle cx="15" cy="12" r="6" fill="#0098EA" fill-opacity=".9"></circle></svg></span>
       <span>w<b>VIZ</b></span>
     </a>
     <nav class="nav-links" id="navLinks" aria-label="Primary">
@@ -23,13 +23,14 @@
       <a href="#token">Token</a>
       <a href="#fees">Fees</a>
       <a href="#faq">FAQ</a>
-      <a href="./gram.html">GRAM bridge →</a>
+      <a href="./solana.html">Solana bridge →</a>
     </nav>
     <div class="nav-actions">
       <button class="icon-btn" id="themeToggle" type="button" aria-label="Switch color theme">
         <svg class="i-sun" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.4M12 19.1v2.4M4.4 4.4l1.7 1.7M17.9 17.9l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.4 19.6l1.7-1.7M17.9 6.1l1.7-1.7"></path></svg>
         <svg class="i-moon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1111.2 3a6.8 6.8 0 009.8 9.8z"></path></svg>
       </button>
+      <div id="tonConnectButton"></div>
       <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="navLinks">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
       </button>
@@ -42,6 +43,7 @@
     <div class="statusbar" id="statusbar">
       <span class="item" id="st-reserve">VIZ locked <b>…</b></span>
       <span class="item" id="st-supply">wVIZ circulating <b>…</b></span>
+      <span class="item hidden" id="st-price"></span>
       <span class="item" id="st-health"></span>
     </div>
 
@@ -51,38 +53,33 @@
     </div>
 
     <section class="panel-card" id="panel-out" role="tabpanel" aria-labelledby="tab-out">
-      <p class="hint">Peg-out is free and 1:1. Enter your VIZ account to get your personal deposit address, then send wVIZ to it from any Solana wallet. VIZ arrives after the transfer finalizes.</p>
-      <div class="field" style="margin-top:16px;">
+      <div class="field">
         <label for="viz-acct">Your VIZ account (receives the VIZ)</label>
         <input id="viz-acct" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. alice">
         <span class="err" id="viz-acct-err"></span>
       </div>
       <div class="field">
-        <label for="wviz-amt">Amount of wVIZ to return (optional)</label>
+        <div class="field-label-row">
+          <label for="wviz-amt">Amount of wVIZ to return</label>
+          <span class="bal-line hidden" id="wviz-bal-line">Balance: <button class="bal-link" id="wviz-bal" type="button"></button></span>
+        </div>
         <input id="wviz-amt" type="text" inputmode="decimal" autocomplete="off" placeholder="0.000">
         <span class="err" id="wviz-amt-err"></span>
+        <span class="warn-msg" id="wviz-amt-warn"></span>
       </div>
-      <button class="btn btn-primary" id="pegout-lookup" type="button" disabled>Get deposit address</button>
-      <div id="pegout-result" class="hidden" style="margin-top:16px;">
-        <div class="field">
-          <label>Your deposit address (send wVIZ here)</label>
-          <div class="addr"><code id="pegout-addr"></code><button class="copy-btn" id="pegout-addr-copy" type="button" aria-label="Copy deposit address"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
-        </div>
-        <a class="btn btn-primary" id="pegout-pay" href="#" style="margin-top:4px;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"></path><path d="M20 4l-9 9"></path><path d="M18 13v5a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h5"></path></svg>Open in Solana wallet</a>
-        <p class="hint warn-msg" style="margin-top:12px;" id="pegout-warning"></p>
-      </div>
+      <button class="btn btn-primary" id="pegout-send" type="button" disabled>Connect wallet to continue</button>
+      <p class="hint" style="margin-top:14px;">Peg-out is free and 1:1. You'll confirm the transfer in your GRAM wallet; ~0.1 GRAM covers network gas (excess is refunded).</p>
     </section>
 
     <section class="panel-card hidden" id="panel-in" role="tabpanel" aria-labelledby="tab-in">
-      <p class="hint">Peg-in starts on the VIZ chain. Send VIZ from your VIZ wallet to the gateway account below, with your Solana address as the memo.</p>
+      <p class="hint">Peg-in starts on the VIZ chain. Send VIZ from your VIZ wallet to the gateway account below, with your TON address as the memo.</p>
       <div class="field" style="margin-top:16px;">
         <label>Gateway account (send VIZ here)</label>
-        <div class="addr"><code id="pegin-acct">solana.gate</code><button class="copy-btn" type="button" data-copy="solana.gate" aria-label="Copy gateway account"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
+        <div class="addr"><code id="pegin-acct">gram.gate</code><button class="copy-btn" type="button" data-copy="gram.gate" aria-label="Copy gateway account"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
       </div>
       <div class="field">
-        <label for="sol-addr">Memo (your Solana address — the wVIZ arrives there)</label>
-        <input id="sol-addr" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. 6WMG…GP5s">
-        <span class="err" id="sol-addr-err"></span>
+        <label>Memo (your TON address — paste exactly, nothing else)</label>
+        <div class="addr"><code id="pegin-memo">Connect your GRAM wallet to fill this in</code><button class="copy-btn hidden" id="pegin-memo-copy" type="button" aria-label="Copy memo"><svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg><svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg></button></div>
       </div>
       <div class="field">
         <label for="pegin-amt">VIZ amount (to preview the fee)</label>
@@ -125,8 +122,8 @@
               <div class="step-body">
                 <span>Send VIZ to this gateway account:</span>
                 <div class="addr">
-                  <code>solana.gate</code>
-                  <button class="copy-btn" type="button" data-copy="solana.gate" aria-label="Copy peg-in address solana.gate">
+                  <code>gram.gate</code>
+                  <button class="copy-btn" type="button" data-copy="gram.gate" aria-label="Copy peg-in address gram.gate">
                     <svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg>
                     <svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
                   </button>
@@ -135,11 +132,11 @@
             </li>
             <li>
               <span class="badge-num">2</span>
-              <div class="step-body"><span>Put your Solana address in the memo — exactly, and nothing else.</span></div>
+              <div class="step-body"><span>Put your TON address in the memo — exactly, and nothing else.</span></div>
             </li>
             <li>
               <span class="badge-num">3</span>
-              <div class="step-body"><span>Receive wVIZ at that address after the mint finalizes — usually about a minute.</span></div>
+              <div class="step-body"><span>Receive wVIZ in your GRAM wallet in ~40 seconds.</span></div>
             </li>
           </ol>
         </div>
@@ -154,15 +151,24 @@
           <ol class="steps">
             <li>
               <span class="badge-num">1</span>
-              <div class="step-body"><span>Enter your VIZ account in the widget above to get your personal deposit address.</span></div>
+              <div class="step-body">
+                <span>Send wVIZ to the gateway Jetton wallet:</span>
+                <div class="addr">
+                  <code>EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy</code>
+                  <button class="copy-btn" type="button" data-copy="EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy" aria-label="Copy peg-out address">
+                    <svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg>
+                    <svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
+                  </button>
+                </div>
+              </div>
             </li>
             <li>
               <span class="badge-num">2</span>
-              <div class="step-body"><span>Send wVIZ to that address from any Solana wallet — no memo needed; the address itself identifies you.</span></div>
+              <div class="step-body"><span>Put your VIZ account name in the comment.</span></div>
             </li>
             <li>
               <span class="badge-num">3</span>
-              <div class="step-body"><span>Receive VIZ after the transfer finalizes — free, 1:1.</span></div>
+              <div class="step-body"><span>Receive VIZ back — free, in seconds.</span></div>
             </li>
           </ol>
         </div>
@@ -178,27 +184,38 @@
   <!-- TOKEN -->
   <section class="section" id="token">
     <div class="container">
-      <div class="section-head"><span class="eyebrow">Token</span><h2>wVIZ on Solana at a glance.</h2></div>
+      <div class="section-head">
+        <span class="eyebrow">Token</span>
+        <h2>wVIZ at a glance.</h2>
+      </div>
       <div class="grid-3">
         <article class="card">
           <h3>Wrapped VIZ (wVIZ)</h3>
-          <p>SPL token (Token-2022) on Solana · 3 decimals · 1 wVIZ = 1 VIZ.</p>
+          <p>Standard Jetton on GRAM · 3 decimals · 1 wVIZ = 1 VIZ.</p>
           <div class="addr">
-            <code>APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD</code>
-            <button class="copy-btn" type="button" data-copy="APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD" aria-label="Copy wVIZ mint address">
+            <code>EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ</code>
+            <button class="copy-btn" type="button" data-copy="EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ" aria-label="Copy wVIZ token address">
               <svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg>
               <svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
             </button>
           </div>
-          <a class="src-link" href="https://solscan.io/token/APTCgk1UGYgrCiy6B1yVBxkCuzm2K9Rtk2ZSgEiWMdDD" target="_blank" rel="noopener">View on Solscan</a>
+          <a class="src-link" id="tok-explorer" href="#" target="_blank" rel="noopener">View on Tonviewer</a>
         </article>
+
         <article class="card">
-          <h3>Fully backed</h3>
-          <p>Every wVIZ on Solana is backed by VIZ locked in <code>solana.gate</code>, reconciled continuously — see the live meters on the <a href="./#security">security section</a>.</p>
+          <h3>Market</h3>
+          <div class="tok-row hidden" id="tok-price-row"><span>Price</span> <b id="tok-price">—</b></div>
+          <div class="tok-row hidden" id="tok-mcap-row"><span>Market cap</span> <b id="tok-mcap">—</b></div>
+          <div class="tok-row hidden" id="tok-supply-row"><span>Circulating</span> <b id="tok-supply">—</b></div>
+          <div class="tok-row hidden" id="tok-locked-row"><span>VIZ locked</span> <b id="tok-locked">—</b></div>
+          <p class="tok-empty" id="tok-empty">Live figures load from chain and the DEX. Price shows once a pool is live.</p>
         </article>
+
         <article class="card">
           <h3>Trade</h3>
-          <p>No DEX pool yet. wVIZ is a standard SPL token — pools can list it permissionlessly; links will appear here when one is live.</p>
+          <p>wVIZ trades as a standard Jetton on TON DEXes.</p>
+          <a class="btn btn-primary" id="tok-stonfi" href="#" target="_blank" rel="noopener">Trade on STON.fi</a>
+          <a class="btn btn-ghost" id="tok-dedust" href="#" target="_blank" rel="noopener" style="margin-top:10px;">Trade on DeDust</a>
         </article>
       </div>
     </div>
@@ -215,9 +232,9 @@
         <table class="fees">
           <thead><tr><th scope="col"></th><th scope="col" class="h-in">Peg-in · VIZ → wVIZ</th><th scope="col" class="h-out">Peg-out · wVIZ → VIZ</th></tr></thead>
           <tbody>
-            <tr><th scope="row">Fee</th><td id="ft-fee">max(10 VIZ, 0.20%)</td><td><span class="free">Free</span></td></tr>
-            <tr><th scope="row">First-time surcharge</th><td><span id="ft-surcharge">10 VIZ</span> (once per Solana address)</td><td><span class="dash">—</span></td></tr>
-            <tr><th scope="row">Minimum</th><td>~21 VIZ first peg-in, ~11 VIZ after — just enough to cover the fee</td><td>None</td></tr>
+            <tr><th scope="row">Fee</th><td id="ft-fee">max(45 VIZ, 0.20%)</td><td><span class="free">Free</span></td></tr>
+            <tr><th scope="row">First-time surcharge</th><td><span id="ft-surcharge">37.5 VIZ</span> (once per GRAM wallet)</td><td><span class="dash">—</span></td></tr>
+            <tr><th scope="row">Minimum</th><td>~83.5 VIZ first peg-in, ~46 VIZ after — just enough to cover the fee</td><td>None</td></tr>
             <tr><th scope="row">Rate</th><td>1:1 (minus fee)</td><td>1:1</td></tr>
           </tbody>
         </table>
@@ -229,14 +246,14 @@
   <!-- FAQ -->
   <section class="section" id="faq">
     <div class="container">
-      <div class="section-head"><span class="eyebrow">FAQ</span><h2>Solana questions.</h2></div>
+      <div class="section-head"><span class="eyebrow">FAQ</span><h2>GRAM questions.</h2></div>
       <div class="faq" id="faqList">
         <details open><summary>Which wallets do I need?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
-          <div class="ans">Any VIZ wallet, and any Solana wallet — Phantom, Solflare, a hardware wallet, or an exchange withdrawal all work. This site never asks to connect your wallet.</div></details>
-        <details><summary>Why a personal deposit address?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
-          <div class="ans">Peg-out uses a deposit address derived for your VIZ account. Anything sent to it can only ever be released to that account — there is no memo to get wrong.</div></details>
+          <div class="ans">Any VIZ wallet, and any GRAM wallet that supports Jettons (e.g. Tonkeeper).</div></details>
         <details><summary>How long does bridging take?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
-          <div class="ans">Peg-in about a minute. Peg-out: your VIZ is released after the Solana transfer finalizes — usually a minute or two.</div></details>
+          <div class="ans">Peg-in ~40s plus the mint. Peg-out a few seconds plus the release — usually under a minute.</div></details>
+        <details><summary>Why does peg-out ask for ~0.1 GRAM?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
+          <div class="ans">That covers network gas for the Jetton transfer; the unused excess is refunded to your wallet.</div></details>
       </div>
     </div>
   </section>
@@ -244,5 +261,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg><span id="toastMsg">Copied!</span></div>
 
-<script type="module" src="./solana.js"></script>
+<script type="module" src="./gram.js"></script>
+<script type="module" src="./token.js"></script>
 </body></html>
