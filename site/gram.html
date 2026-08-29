@@ -18,11 +18,12 @@
       <span>w<b>VIZ</b></span>
     </a>
     <nav class="nav-links" aria-label="Primary">
-      <a href="./solana.html">Solana bridge</a>
-      <a href="./#how">How it works</a>
-      <a href="./#fees">Fees</a>
-      <a href="./#faq">FAQ</a>
-      <a href="https://github.com/viz-cx/viz-gateway" target="_blank" rel="noopener">GitHub</a>
+      <a href="./">All chains</a>
+      <a href="#how">How it works</a>
+      <a href="#token">Token</a>
+      <a href="#fees">Fees</a>
+      <a href="#faq">FAQ</a>
+      <a href="./solana.html">Solana bridge →</a>
     </nav>
     <div class="nav-actions">
       <button class="icon-btn" id="themeToggle" type="button" aria-label="Switch color theme">
@@ -95,9 +96,167 @@
       </div>
     </section>
   </div>
+
+  <!-- HOW IT WORKS -->
+  <section class="section" id="how">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">How it works</span>
+        <h2>Two directions, both simple.</h2>
+        <p class="lead">Bridging is a plain transfer with a note attached. The widget above fills everything in for you — this is what happens underneath.</p>
+      </div>
+
+      <div class="how-grid">
+        <div class="flow-card in">
+          <div class="flow-head">
+            <span class="badge-num" aria-hidden="true">→</span>
+            <h3>Peg-in</h3>
+          </div>
+          <div class="flow-dir"><b>VIZ</b> <span class="arrow">→</span> <b>wVIZ</b></div>
+          <ol class="steps">
+            <li>
+              <span class="badge-num">1</span>
+              <div class="step-body">
+                <span>Send VIZ to this gateway account:</span>
+                <div class="addr">
+                  <code>gram.gate</code>
+                  <button class="copy-btn" type="button" data-copy="gram.gate" aria-label="Copy peg-in address gram.gate">
+                    <svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg>
+                    <svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </li>
+            <li>
+              <span class="badge-num">2</span>
+              <div class="step-body"><span>Put your TON address in the memo — exactly, and nothing else.</span></div>
+            </li>
+            <li>
+              <span class="badge-num">3</span>
+              <div class="step-body"><span>Receive wVIZ in your GRAM wallet in ~40 seconds.</span></div>
+            </li>
+          </ol>
+        </div>
+
+        <div class="flow-card out">
+          <div class="flow-head">
+            <span class="badge-num" aria-hidden="true">←</span>
+            <h3>Peg-out</h3>
+            <span class="pill">Free</span>
+          </div>
+          <div class="flow-dir"><b>wVIZ</b> <span class="arrow">→</span> <b>VIZ</b></div>
+          <ol class="steps">
+            <li>
+              <span class="badge-num">1</span>
+              <div class="step-body">
+                <span>Send wVIZ to the gateway Jetton wallet:</span>
+                <div class="addr">
+                  <code>EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy</code>
+                  <button class="copy-btn" type="button" data-copy="EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy" aria-label="Copy peg-out address">
+                    <svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg>
+                    <svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </li>
+            <li>
+              <span class="badge-num">2</span>
+              <div class="step-body"><span>Put your VIZ account name in the comment.</span></div>
+            </li>
+            <li>
+              <span class="badge-num">3</span>
+              <div class="step-body"><span>Receive VIZ back — free, in seconds.</span></div>
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="callout">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"></circle><path d="M12 11v5"></path><circle cx="12" cy="7.6" r="0.4" fill="currentColor" stroke="none"></circle><path d="M12 7.5v.2"></path></svg>
+        <span><b>Tip:</b> Always copy-paste addresses, and start with a small test amount if it's your first time.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- TOKEN -->
+  <section class="section" id="token">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Token</span>
+        <h2>wVIZ at a glance.</h2>
+      </div>
+      <div class="grid-3">
+        <article class="card">
+          <h3>Wrapped VIZ (wVIZ)</h3>
+          <p>Standard Jetton on GRAM · 3 decimals · 1 wVIZ = 1 VIZ.</p>
+          <div class="addr">
+            <code>EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ</code>
+            <button class="copy-btn" type="button" data-copy="EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ" aria-label="Copy wVIZ token address">
+              <svg class="i-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"></rect><path d="M5 15V6a2 2 0 012-2h9"></path></svg>
+              <svg class="i-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
+            </button>
+          </div>
+          <a class="src-link" id="tok-explorer" href="#" target="_blank" rel="noopener">View on Tonviewer</a>
+        </article>
+
+        <article class="card">
+          <h3>Market</h3>
+          <div class="tok-row hidden" id="tok-price-row"><span>Price</span> <b id="tok-price">—</b></div>
+          <div class="tok-row hidden" id="tok-mcap-row"><span>Market cap</span> <b id="tok-mcap">—</b></div>
+          <div class="tok-row hidden" id="tok-supply-row"><span>Circulating</span> <b id="tok-supply">—</b></div>
+          <div class="tok-row hidden" id="tok-locked-row"><span>VIZ locked</span> <b id="tok-locked">—</b></div>
+          <p class="tok-empty" id="tok-empty">Live figures load from chain and the DEX. Price shows once a pool is live.</p>
+        </article>
+
+        <article class="card">
+          <h3>Trade</h3>
+          <p>wVIZ trades as a standard Jetton on TON DEXes.</p>
+          <a class="btn btn-primary" id="tok-stonfi" href="#" target="_blank" rel="noopener">Trade on STON.fi</a>
+          <a class="btn btn-ghost" id="tok-dedust" href="#" target="_blank" rel="noopener" style="margin-top:10px;">Trade on DeDust</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEES -->
+  <section class="section" id="fees">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Fees &amp; limits</span>
+        <h2>Priced in VIZ, so the peg never dilutes.</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="fees">
+          <tbody>
+            <tr><th scope="row">Fee</th><td id="ft-fee">max(45 VIZ, 0.20%)</td></tr>
+            <tr><th scope="row">First-time surcharge</th><td><span id="ft-surcharge">37.5 VIZ</span> (once per GRAM wallet)</td></tr>
+            <tr><th scope="row">Minimum</th><td>~83.5 VIZ first peg-in, ~46 VIZ after — just enough to cover the fee</td></tr>
+            <tr><th scope="row">Rate</th><td>1:1 (minus fee)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note">The fee is charged in VIZ so the 1:1 backing is never diluted.</p>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section" id="faq">
+    <div class="container">
+      <div class="section-head"><span class="eyebrow">FAQ</span><h2>GRAM questions.</h2></div>
+      <div class="faq" id="faqList">
+        <details open><summary>Which wallets do I need?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
+          <div class="ans">Any VIZ wallet, and any GRAM wallet that supports Jettons (e.g. Tonkeeper).</div></details>
+        <details><summary>How long does bridging take?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
+          <div class="ans">Peg-in ~40s plus the mint. Peg-out a few seconds plus the release — usually under a minute.</div></details>
+        <details><summary>Why does peg-out ask for ~0.1 GRAM?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
+          <div class="ans">That covers network gas for the Jetton transfer; the unused excess is refunded to your wallet.</div></details>
+      </div>
+    </div>
+  </section>
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg><span id="toastMsg">Copied!</span></div>
 
 <script type="module" src="./gram.js"></script>
+<script type="module" src="./token.js"></script>
 </body></html>
