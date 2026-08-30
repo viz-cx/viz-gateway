@@ -28,7 +28,8 @@ export async function fetchCirculatingSupply() {
     const total = jd.stack.readBigNumber();
     const gw = await withRetry(() => ton.runMethod(Address.parse(CONFIG.wviz.gatewayJettonWallet), "get_wallet_data", []));
     const held = gw.stack.readBigNumber();
-    return computeCirculating(total, held);
+    // Pinned frozen wVIZ (mis-sent into the JW's nested wallet) is non-circulating too.
+    return computeCirculating(total, held + BigInt(CONFIG.wviz.frozenMilliViz));
   } catch (_) { return null; }
 }
 

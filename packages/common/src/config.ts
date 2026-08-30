@@ -92,6 +92,7 @@ export interface GatewayConfig {
     multisigAddress: string;
     jettonMinterAddress: string;
     gatewayJettonWallet: string;
+    frozenMilliViz: bigint; // pinned non-circulating wVIZ frozen by JW-destination mis-sends (ManifestGram.frozenMilliViz)
     signerMnemonic: string;
     finalityConfirmations: number;
     scanMaxTransactions: number; // txs fetched per getTransactions page (RPC rate-limit tuning)
@@ -383,6 +384,7 @@ export function parseManifest(raw: unknown): FederationManifest {
       jettonMinterAddress: optStr(g["jettonMinterAddress"]),
       multisigAddress: optStr(g["multisigAddress"]),
       gatewayJettonWallet: optStr(g["gatewayJettonWallet"]),
+      frozenMilliViz: g["frozenMilliViz"] === undefined ? undefined : BigInt(g["frozenMilliViz"] as number),
     };
   }
   let accounts: ManifestAccounts | undefined;
@@ -514,6 +516,8 @@ export function loadConfig(): GatewayConfig {
       multisigAddress: federation.gram?.multisigAddress ?? opt("GRAM_MULTISIG_ADDRESS", ""),
       jettonMinterAddress: federation.gram?.jettonMinterAddress ?? opt("GRAM_JETTON_MINTER_ADDRESS", ""),
       gatewayJettonWallet: federation.gram?.gatewayJettonWallet ?? opt("GRAM_GATEWAY_JETTON_WALLET", ""),
+      // Pinned non-circulating wVIZ frozen by JW-destination mis-sends (see ManifestGram.frozenMilliViz).
+      frozenMilliViz: federation.gram?.frozenMilliViz ?? BigInt(opt("GRAM_FROZEN_MILLIVIZ", "0")),
       signerMnemonic: opt("GRAM_SIGNER_MNEMONIC", ""),
       finalityConfirmations: int("GRAM_FINALITY_CONFIRMATIONS", 1),
       scanMaxTransactions: int("GRAM_MAX_TRANSACTIONS", 20),

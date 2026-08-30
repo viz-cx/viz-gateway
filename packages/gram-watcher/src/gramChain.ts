@@ -341,6 +341,7 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
   private readonly minter: Address;
   private readonly gatewayWallet: Address | null;
   private readonly multisigAddress: string;
+  private readonly frozenMilliViz: bigint;
   private readonly finalityBufferSec: number;
   private readonly maxTransactions: number;
   private readonly maxScanPages: number;
@@ -359,6 +360,12 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     // cold-start's newestLt() time out / read empty until the burn has already landed,
     // after which the strictly-newer forward scan skips it. See config.ts gram.rpcTimeoutMs.
     rpcTimeoutMs = 30_000,
+    // wVIZ (milli) permanently frozen in the gateway JW's own nested jetton wallet
+    // (EQBQ2m5Zu2…) by mis-sends that used the JW address as the jetton destination —
+    // unmovable by anyone, so effectively burned but still in totalSupply. Pinned in the
+    // manifest (gram.frozenMilliViz), not read live: it only changes when a human
+    // mis-sends, and every incident needs a manual make-whole release anyway.
+    frozenMilliViz = 0n,
   ) {
     this.clients = buildTonClients(Array.isArray(endpoints) ? endpoints : [endpoints], apiKey, rpcTimeoutMs);
     this.minter = Address.parse(minterAddress);
@@ -368,6 +375,7 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     this.finalityBufferSec = Math.max(6, finalityConfirmations * 5 + 5);
     this.maxTransactions = Math.max(1, maxTransactions);
     this.maxScanPages = Math.max(1, maxScanPages);
+    this.frozenMilliViz = frozenMilliViz;
   }
 
   /**
@@ -403,6 +411,12 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
     return this.tonCall(async () => {
       const master = this.client.open(JettonMaster.create(this.minter));
       const data = await master.getJettonData();
+      // Subtract the pinned frozen reserve FIRST: wVIZ mis-sent with the gateway JW as the
+      // jetton DESTINATION lands in the JW's own nested jetton wallet, where no key can ever
+      // move it — effectively burned, but still in totalSupply. Without this, circulating is
+      // overstated and a manual make-whole VIZ release for the victim would trip a FALSE
+      // under-backing pause (2026-08-30: 1213 wVIZ frozen, tx 384abcc9…).
+      const total = data.totalSupply - this.frozenMilliViz;
       // Subtract wVIZ held INERT in the gateway's OWN jetton wallet. A peg-out TRANSFERS
       // wVIZ into the gateway wallet (it is not burned), so that balance is non-circulating
       // reserve — counting it as circulating makes recon see phantom under-backing (mirrors
@@ -440,16 +454,16 @@ export class GramHttpChain implements RemoteChain<GramMintProposal> {
             if (second.state === "active") throw err;
           }
           console.warn(`[gram] gateway jetton wallet ${state.state} ⇒ held=0: ${String(err)}`);
-          return data.totalSupply;
+          return total > 0n ? total : 0n;
         }
         // OUTSIDE the try: confirmZeroHeld's disagreement throw must reach recon as
         // INDETERMINATE. Inside it, the catch above re-interpreted the refusal as
         // "uninitialized ⇒ held=0" — the exact reading it refused (2026-08-15 pause).
         if (held === 0n) await this.confirmZeroHeld();
-        const circulating = data.totalSupply - held;
+        const circulating = total - held;
         return circulating > 0n ? circulating : 0n;
       }
-      return data.totalSupply; // 3-decimal jetton => base units are milli-VIZ
+      return total > 0n ? total : 0n; // 3-decimal jetton => base units are milli-VIZ
     });
   }
 

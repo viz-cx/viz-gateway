@@ -62,6 +62,7 @@ async function main(): Promise<void> {
       cfg.gram.scanMaxTransactions,
       cfg.gram.maxScanPages,
       cfg.gram.rpcTimeoutMs,
+      cfg.gram.frozenMilliViz,
     );
     recons.push(new Recon(
       [{ name: "GRAM", supply: () => gram.circulatingSupplyMilliViz() }],

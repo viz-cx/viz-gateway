@@ -3,7 +3,12 @@ export const CONFIG = {
   wviz: {
     minter: "EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ",
     multisigOwner: "EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0", // peg-out destination
-    gatewayJettonWallet: "EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy", // display only
+    gatewayJettonWallet: "EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy", // balance read ONLY — never a send target: jettons sent TO a jetton-wallet address freeze forever in its own nested wallet
+    // wVIZ permanently frozen in EQBQ2m5Zu2-y9gsuTqly6XRwo-iwLDArPhwmr4XDVBfAMQ24 (the
+    // gateway JW's own jetton wallet) by mis-sends that used the JW as jetton destination.
+    // Unrecoverable by anyone, so effectively burned but still in totalSupply — subtract
+    // from circulating. Mirrors federation.json gram.frozenMilliViz; bump both together.
+    frozenMilliViz: 1213000,
     decimals: 3,
   },
   solana: {

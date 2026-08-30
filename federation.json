@@ -13,7 +13,9 @@
   "gram": {
     "jettonMinterAddress": "EQAHujyCaWPjfNaAKHSPDlJZJd2mhWl203eLWShz8PM3_VIZ",
     "multisigAddress": "EQCfGcOZtfv7RgUuT0vddjFEinDIiAdZagyj70CvmqqLZ9m0",
-    "gatewayJettonWallet": "EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy"
+    "gatewayJettonWallet": "EQCjDw0JMwpzK-cQInWKABBspYWi-jP9PQgkQsqZ21UgsPhy",
+    "_frozen": "wVIZ (milli) permanently frozen in the gateway JW's OWN nested jetton wallet EQBQ2m5Zu2-y9gsuTqly6XRwo-iwLDArPhwmr4XDVBfAMQ24 by mis-sends that used gatewayJettonWallet as the jetton-transfer DESTINATION. Unmovable by anyone (TEP-74 wallets cannot emit transfer), so effectively burned but still in totalSupply; recon subtracts this pin from circulating. Every future mis-send of this class lands in that same wallet: bump this pin in the SAME PR as the victim's manual make-whole release, or recon false-pauses on under-backing. 2026-08-30: 1213 wVIZ from diolus, TON tx 384abcc9… (the site published the JW as the peg-out address until this commit). Mirror: site/config.js wviz.frozenMilliViz.",
+    "frozenMilliViz": 1213000
   },
   "rpc": {
     "vizNodeUrls": ["https://node.viz.cx", "https://api.viz.world", "https://mirror.viz.world"],
