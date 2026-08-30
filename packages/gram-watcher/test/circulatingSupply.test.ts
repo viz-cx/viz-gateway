@@ -365,6 +365,38 @@ test("no gateway wallet configured ⇒ raw totalSupply, held path never runs", a
   assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n);
 });
 
+test("pinned frozenMilliViz is subtracted alongside gateway-held (2026-08-30 JW mis-send)", async () => {
+  // 1213 wVIZ mis-sent with the gateway JW as jetton DESTINATION sits frozen in the JW's own
+  // nested wallet — still in totalSupply, unmovable by anyone. The manifest pin removes it from
+  // circulating so the victim's manual make-whole release doesn't read as under-backing.
+  const chain = new GramHttpChain(["https://e/y"], "", MINTER, GATEWAY_JW, MULTISIG, 1, 20, 50, 30_000, 1_213_000n);
+  (chain as unknown as { clients: TonClient[] }).clients = [fakeClient(250_795_248n, async () => 3_960_000n)];
+  (chain as unknown as { idx: number }).idx = 0;
+  assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n - 3_960_000n - 1_213_000n);
+});
+
+test("frozen pin also applies on the held=0 fallback path (wallet not active)", async () => {
+  const chain = new GramHttpChain(["https://e/y"], "", MINTER, GATEWAY_JW, MULTISIG, 1, 20, 50, 30_000, 1_213_000n);
+  (chain as unknown as { clients: TonClient[] }).clients = [
+    fakeClient(
+      250_795_248n,
+      async () => {
+        throw new Error("Unable to execute get method");
+      },
+      "uninitialized",
+    ),
+  ];
+  (chain as unknown as { idx: number }).idx = 0;
+  assert.equal(await chain.circulatingSupplyMilliViz(), 250_795_248n - 1_213_000n);
+});
+
+test("frozen pin ≥ totalSupply clamps circulating at 0 (never negative)", async () => {
+  const chain = new GramHttpChain(["https://e/y"], "", MINTER, GATEWAY_JW, MULTISIG, 1, 20, 50, 30_000, 9_999_999_999n);
+  (chain as unknown as { clients: TonClient[] }).clients = [fakeClient(250_795_248n, async () => 3_960_000n)];
+  (chain as unknown as { idx: number }).idx = 0;
+  assert.equal(await chain.circulatingSupplyMilliViz(), 0n);
+});
+
 test("held exactly equals totalSupply ⇒ circulating 0 (boundary, not negative-clamp)", async () => {
   const chain = chainWith([fakeClient(3_960_000n, async () => 3_960_000n)]);
   assert.equal(await chain.circulatingSupplyMilliViz(), 0n);

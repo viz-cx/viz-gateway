@@ -245,6 +245,16 @@ export interface ManifestGram {
   jettonMinterAddress?: string;
   multisigAddress?: string;
   gatewayJettonWallet?: string;
+  /**
+   * wVIZ (milli) permanently frozen in the gateway jetton wallet's OWN nested jetton wallet
+   * by mis-sends that used the JW address as the jetton-transfer destination. No key can ever
+   * move it (a TEP-74 wallet cannot emit a transfer op), so it is effectively burned but still
+   * counted in the minter's totalSupply — recon must subtract it from circulating, or a manual
+   * make-whole VIZ release for the victim trips a false under-backing pause. Pinned, not read
+   * live: the balance only changes when a human mis-sends, and each incident already needs a
+   * manual 2-of-3 release — bump this pin in the same PR (2026-08-30: 1213 wVIZ, tx 384abcc9…).
+   */
+  frozenMilliViz?: bigint;
 }
 
 /**

@@ -12,7 +12,8 @@
   "gram": {
     "jettonMinterAddress": "<wVIZ-jetton-minter-address>",
     "multisigAddress": "<gateway-multisig-address>",
-    "gatewayJettonWallet": "<gateway-jetton-wallet-address>"
+    "gatewayJettonWallet": "<gateway-jetton-wallet-address>",
+    "frozenMilliViz": 0
   },
   "rpc": {
     "vizNodeUrls": ["https://node.viz.cx", "https://api.viz.world", "https://mirror.viz.world"],
