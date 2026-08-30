@@ -31,3 +31,4 @@ keystore*.json
 viz-secrey-key
 memo-key*
 contracts/solana/target/
+.superpowers/
