@@ -46,14 +46,18 @@ the build fails with `TS5101`/`TS5107`. **Always `npm install` first** so the lo
 
 ## Dependency security
 
-`npm audit` flags advisories in transitive deps of `@solana/web3.js`, none in our own code.
-Last triaged 2026-07-01 — current state is **8 findings (3 high, 5 moderate), all one Solana chain**;
-**accepted** (don't re-triage; revisit only on dependency upgrades):
+`npm audit` flags advisories in transitive deps only, none in our own code.
+Last triaged 2026-11-26 — current state is **18 findings (7 high, 11 moderate)**, the 6 root advisories below;
+the rest are parents re-counted. **Accepted** (don't re-triage; revisit only on dependency upgrades):
 
 | Advisory | Sev | Via | Why accepted |
 |----------|-----|-----|--------------|
 | `bigint-buffer@1.1.5` (buffer overflow) | high | `@solana/spl-token`→`buffer-layout-utils` | No upstream patch (1.1.5 is latest; advisory covers all versions). Write-path partials are operator-signed; read path parses trusted-RPC data. We're on the latest `@solana/spl-token@0.4.14`; clears only when it drops the dep or on a web3.js v2 migration. The `@solana/web3.js`/`spl-token*` rows in `npm audit` are the same root cause re-counted. |
 | `uuid@8.3.2` (bounds check) | moderate | `@solana/web3.js`→`jayson` | Not exploitable — jayson uses `v4()`, never the vulnerable `buf` arg. |
+| `stream-json@1.9.1` (proto pollution, DoS) | moderate | `@solana/web3.js`→`jayson` | Unreachable — jayson uses it only in its TCP/TLS client + server (`lib/utils.js parseStream`); web3.js uses jayson's HTTP client. Fix is stream-json 3.6 (jayson pins `^1.9.1`). |
+| `toml@3.0.0` (proto pollution, DoS) | high | `@coral-xyz/anchor` | Unreachable — loaded only by anchor's `workspace.js` (reads local `Anchor.toml`); we import only `BorshInstructionCoder` (`solana-watcher/src/depositAddress.ts`). Latest anchor still pins `^3.0.0`. |
+| `zod@3.25.x` (memory exhaustion) | high | `@ton/ton` | No fix in range: fixed only in zod 4.6.6, and even latest `@ton/ton` pins `zod ^3`. Input is toncenter responses from our configured RPCs; a hostile RPC can already exhaust memory via body size. |
+| `glob`/`minimatch` (DoS) | moderate | `c8` (dev-only coverage) | Not shipped; globs our own repo paths. Fix needs a c8 major downgrade. |
 
 Advisories that **were** fixed (no longer in the tree — keep these notes so they aren't reintroduced):
 - `ws` (high DoS) — patched via `overrides: { "ws": "^8.18.0" }` in the root `package.json` (viz-js-lib pins
@@ -61,6 +65,11 @@ Advisories that **were** fixed (no longer in the tree — keep these notes so th
 - `form-data` (high CRLF injection) — resolved by `form-data@4.0.6` arriving transitively via `@ton/ton`→`axios`.
 - `babel-traverse@6` (critical ACE on compile) — gone since `viz-js-lib@^0.12.7` (registry move) dropped the
   babel-6 build chain. No override needed.
+- `axios` / `follow-redirects` (high) — bumped in-range to 1.20.0 / 1.16.2 (PR #160).
+- `moment` (path traversal, via `winston-daily-rotate-file`), `fast-uri` (SSRF/host confusion, dev via
+  `@ton/sandbox`→`ajv`), `brace-expansion` (DoS, dev via `c8`) — in-range lockfile bumps to 2.31.0 / 3.1.9 /
+  5.0.12 (2026-11-26). `brace-expansion` deliberately pinned to 5.0.12, not the 3-day-old 5.1.0. Avoid plain
+  `npm audit fix`: it also drags `@solana/web3.js` 1.98→1.99 (codecs 2→5) without clearing any advisory.
 
 Note: GitHub Dependabot may still show stale **open** alerts for `ws`/`form-data` until its next scan — the
 patched versions are already in the committed lockfile (verified via `npm audit`), so those alerts are
