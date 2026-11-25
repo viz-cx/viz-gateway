@@ -307,19 +307,16 @@ document.addEventListener("click", function (e) {
 
 /* ---------- Token "Market" card ----------
    Fail-soft like the GRAM token.js: each row stays hidden until its value loads.
-   Price comes from the Raydium pool; circulating + locked from the
-   coordinator's GET /recon (the figures recon itself checks), so no Solana RPC here. */
+   Price comes from the Raydium pool; market cap uses circulating from the
+   coordinator's GET /recon (the figure recon itself checks), so no Solana RPC here.
+   Circulating + locked themselves already show in the status strip. */
 (async function market() {
   const row = (id, text) => { if (!text) return; $(id).textContent = text; $(id + "-row").classList.remove("hidden"); };
   const getJson = (url) => fetch(url, { mode: "cors" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const [ray, recon] = await Promise.all([getJson(CONFIG.solana.raydiumPoolUrl), getJson(CONFIG.rpc.coordinator + "/recon")]);
   const pool = parseRaydiumPool(ray, CONFIG.solana.mint);
   const sol = recon?.chains?.SOLANA;
-  const whole = (milli) => (Number.isFinite(milli) ? milli / 1000 : null);
-  const circ = whole(sol?.circulatingMilliViz), locked = whole(sol?.lockedMilliViz);
-  const count = (n, unit) => (n === null ? null : n.toLocaleString(undefined, { maximumFractionDigits: 0 }) + unit);
+  const circ = Number.isFinite(sol?.circulatingMilliViz) ? sol.circulatingMilliViz / 1000 : null;
   row("tok-price", formatPriceUsd(pool?.priceUsd));
   row("tok-mcap", formatMarketCapUsd(pool?.priceUsd, circ));
-  row("tok-supply", count(circ, " wVIZ"));
-  row("tok-locked", count(locked, " VIZ"));
 })();
