@@ -1,6 +1,7 @@
 import { CONFIG } from "./config.js";
 import { isValidVizAccount, computePegInFee } from "./pegout.mjs";
 import { isValidSolanaAddress, solanaPayUrl } from "./solana-bridge.mjs";
+import { formatPriceUsd, formatMarketCapUsd, parseRaydiumPool } from "./token-format.mjs";
 
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
@@ -303,3 +304,22 @@ document.addEventListener("keydown", function (e) {
 document.addEventListener("click", function (e) {
   if (header.classList.contains("menu-open") && !e.target.closest(".nav")) closeMenu();
 });
+
+/* ---------- Token "Market" card ----------
+   Fail-soft like the GRAM token.js: each row stays hidden until its value loads.
+   Price comes from the Raydium pool; circulating + locked from the
+   coordinator's GET /recon (the figures recon itself checks), so no Solana RPC here. */
+(async function market() {
+  const row = (id, text) => { if (!text) return; $(id).textContent = text; $(id + "-row").classList.remove("hidden"); };
+  const getJson = (url) => fetch(url, { mode: "cors" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const [ray, recon] = await Promise.all([getJson(CONFIG.solana.raydiumPoolUrl), getJson(CONFIG.rpc.coordinator + "/recon")]);
+  const pool = parseRaydiumPool(ray, CONFIG.solana.mint);
+  const sol = recon?.chains?.SOLANA;
+  const whole = (milli) => (Number.isFinite(milli) ? milli / 1000 : null);
+  const circ = whole(sol?.circulatingMilliViz), locked = whole(sol?.lockedMilliViz);
+  const count = (n, unit) => (n === null ? null : n.toLocaleString(undefined, { maximumFractionDigits: 0 }) + unit);
+  row("tok-price", formatPriceUsd(pool?.priceUsd));
+  row("tok-mcap", formatMarketCapUsd(pool?.priceUsd, circ));
+  row("tok-supply", count(circ, " wVIZ"));
+  row("tok-locked", count(locked, " VIZ"));
+})();

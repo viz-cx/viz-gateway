@@ -8,7 +8,7 @@ const assert = require("node:assert");
 (async () => {
   const {
     formatPriceUsd, formatMarketCapUsd, parseStonFiPrice,
-    computeCirculating, baseUnitsToNumber,
+    computeCirculating, baseUnitsToNumber, parseRaydiumPool,
   } = await import("../site/token-format.mjs");
 
   // --- formatPriceUsd: sig-figs, trim, fail-soft ---
@@ -47,6 +47,16 @@ const assert = require("node:assert");
   assert.strictEqual(baseUnitsToNumber(243007408000n, 3), 243007408);
   assert.strictEqual(baseUnitsToNumber(1500n, 3), 1.5);
   console.log("[token] baseUnitsToNumber OK");
+
+  // --- parseRaydiumPool: orientation-aware price, TVL, fail-soft ---
+  const pool = (a, b, price, tvl) => ({ data: [{ mintA: { address: a }, mintB: { address: b }, price, tvl }] });
+  assert.deepStrictEqual(parseRaydiumPool(pool("W", "U", 0.0009, 23.06), "W"), { priceUsd: 0.0009, tvlUsd: 23.06 });
+  assert.deepStrictEqual(parseRaydiumPool(pool("U", "W", 1000, 23.06), "W"), { priceUsd: 0.001, tvlUsd: 23.06 }); // inverted
+  assert.deepStrictEqual(parseRaydiumPool(pool("W", "U", 0, 0), "W"), { priceUsd: null, tvlUsd: null });
+  assert.deepStrictEqual(parseRaydiumPool(pool("X", "U", 5, 10), "W"), { priceUsd: null, tvlUsd: 10 }); // not our mint
+  assert.strictEqual(parseRaydiumPool({ data: [null] }, "W"), null); // unknown pool id
+  assert.strictEqual(parseRaydiumPool(null, "W"), null);
+  console.log("[token] parseRaydiumPool OK");
 
   console.log("token-format spike: ALL PASS");
 })();

@@ -17,6 +17,8 @@ export const CONFIG = {
     vizAccount: "solana.gate", // peg-in gate account on VIZ
     rpc: "https://api.mainnet-beta.solana.com", // public endpoint, CORS-enabled, no key
     explorerUrl: "https://solscan.io/token/", // append the mint address
+    // Raydium wVIZ/USDT CPMM pool info — CORS `*`, browser-fetchable.
+    raydiumPoolUrl: "https://api-v3.raydium.io/pools/info/ids?ids=Dt4J1mVAb6xViSeFjchzfuQ4sagBWFWQpBPWfM8NkMj",
   },
   pegIn: {
     vizAccount: "gram.gate",
