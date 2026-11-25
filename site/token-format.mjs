@@ -30,6 +30,19 @@ export function parseStonFiPrice(json) {
   return isFinite(n) && n > 0 ? n : null;
 }
 
+// Extract { priceUsd, tvlUsd } from a Raydium GET /pools/info/ids response for the
+// wVIZ/USDT pool (USDT taken as $1). `price` is mintB per mintA, so invert when wVIZ
+// is mintB. Each field is a positive number or null; null overall if the pool is absent.
+export function parseRaydiumPool(json, wvizMint) {
+  const p = json && Array.isArray(json.data) ? json.data[0] : null;
+  if (!p || !p.mintA || !p.mintB) return null;
+  const pos = (n) => (isFinite(n) && n > 0 ? n : null);
+  const raw = Number(p.price);
+  const priceUsd = p.mintA.address === wvizMint ? pos(raw)
+    : p.mintB.address === wvizMint ? pos(1 / raw) : null;
+  return { priceUsd, tvlUsd: pos(Number(p.tvl)) };
+}
+
 // True circulating wVIZ = minter total − gateway-held (peg-out returns sit in the
 // gateway's own jetton wallet, not burned). Never returns the raw total: that would
 // overstate supply and contradict "VIZ locked". Floors at 0n. BigInt in/out.
