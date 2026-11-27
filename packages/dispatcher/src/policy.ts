@@ -8,6 +8,12 @@ export interface DeliveryResult {
   /** Fee withheld for a PEG_IN (so the dispatcher can spawn the FEE_SWEEP). */
   feeMilliViz?: bigint;
   error?: string;
+  /**
+   * The coordinator gave no verdict (transport error / proxy timeout / non-2xx / paused): the
+   * orchestration may STILL be running and land the mint. Never refund on this — retry, so the
+   * next round's actionExecuted check sees a landed mint instead of paying it out twice.
+   */
+  indeterminate?: boolean;
 }
 
 /** The next outbox state for a row after a delivery attempt. */
@@ -51,7 +57,11 @@ export function planTransition(rec: OutboxRecord, result: DeliveryResult, now: n
   const attempts = rec.attempts + 1;
   const error = result.error ?? "delivery failed";
   const nextAttemptAt = now + opts.retryIntervalMs;
-  if (now - rec.createdAt >= opts.windowMs && rec.direction === "PEG_IN") {
+  // Refund only on a DEFINITIVE coordinator failure, and never on a row's first verdict: an aged
+  // row (backlog / post-unpause) must get one re-drive, whose actionExecuted check catches a mint
+  // that landed after the previous round gave up. Signers do not check mint-vs-refund themselves.
+  const mayRefund = !result.indeterminate && rec.attempts > 0;
+  if (now - rec.createdAt >= opts.windowMs && rec.direction === "PEG_IN" && mayRefund) {
     return { status: "REFUNDING", patch: { attempts, lastError: `window exhausted: ${error}`, nextAttemptAt } };
   }
   return { status: "QUEUED", patch: { attempts, lastError: error, nextAttemptAt } };

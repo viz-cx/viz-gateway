@@ -52,6 +52,11 @@ proxy:
   hosts:
     - gateway.viz.cx
   app_port: 8100
+  # The dispatcher POSTs /submit through this proxy and a peg-in orchestration runs up to
+  # N x 180s + 120s (config.ts pegInOrchestrationBudgetMs = 660s at N=3). The 30s default cut
+  # the response while the coordinator kept going, so a landing mint looked failed -> refund.
+  # Raise this with N.
+  response_timeout: 700
   healthcheck:
     path: /health                     # coordinator serves GET /health (index.ts)
 

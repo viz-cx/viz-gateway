@@ -56,8 +56,10 @@ async function submit(url: string, rec: OutboxRecord, timeoutMs: number, submitT
       // row retries. Generous (see submitTimeoutMs) so a legit slow mint is not aborted.
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (res.status === 423) return { broadcast: false, error: "coordinator paused" };
-    if (!res.ok) return { broadcast: false, error: `coordinator HTTP ${res.status}` };
+    // No verdict (paused / proxy 5xx while the coordinator may still be orchestrating): the
+    // policy must retry, never refund — see DeliveryResult.indeterminate.
+    if (res.status === 423) return { broadcast: false, error: "coordinator paused", indeterminate: true };
+    if (!res.ok) return { broadcast: false, error: `coordinator HTTP ${res.status}`, indeterminate: true };
     const body = (await res.json()) as { broadcast?: boolean; txid?: string; error?: string; feeMilliViz?: string };
     return {
       broadcast: Boolean(body.broadcast),
@@ -66,7 +68,7 @@ async function submit(url: string, rec: OutboxRecord, timeoutMs: number, submitT
       error: body.error,
     };
   } catch (err) {
-    return { broadcast: false, error: String(err) };
+    return { broadcast: false, error: String(err), indeterminate: true };
   }
 }
 
