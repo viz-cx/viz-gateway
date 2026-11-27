@@ -23,13 +23,14 @@ export interface DeliveryResult {
  * check said "not on-chain", so a `broadcast:false` there is safe to count toward a refund.
  * Everything else is INDETERMINATE — a proxy 502/504 (the coordinator may still be minting), a
  * 423 pause, a 401, or a coordinator 500 (its actionExecuted read itself failed, so nobody
- * checked whether an earlier round's mint landed). A garbled 200 is indeterminate too.
+ * checked whether an earlier round's mint landed). A garbled 200 is indeterminate too, and so
+ * is a 200 whose approvals reached the threshold without a confirmed broadcast.
  */
 export function deliveryResultFrom(status: number, bodyText: string): DeliveryResult {
   const noVerdict = (error: string): DeliveryResult => ({ broadcast: false, error, indeterminate: true });
   if (status === 423) return noVerdict("coordinator paused");
   if (status !== 200) return noVerdict(`coordinator HTTP ${status}`);
-  let body: { broadcast?: unknown; txid?: unknown; error?: unknown; feeMilliViz?: unknown };
+  let body: { broadcast?: unknown; txid?: unknown; error?: unknown; feeMilliViz?: unknown; approvals?: unknown; threshold?: unknown };
   try {
     body = JSON.parse(bodyText) as typeof body;
   } catch {
@@ -37,6 +38,17 @@ export function deliveryResultFrom(status: number, bodyText: string): DeliveryRe
   }
   if (body === null || typeof body !== "object" || typeof body.broadcast !== "boolean") {
     return noVerdict("coordinator 200 carries no broadcast verdict");
+  }
+  // Threshold met but not confirmed (TON order "not executed in time", Solana send error): the
+  // authorization is COMPLETE and may still land — a durable-nonce tx never expires. Not a
+  // refundable failure; retry until the coordinator's on-chain check settles it.
+  if (
+    !body.broadcast &&
+    typeof body.approvals === "number" &&
+    typeof body.threshold === "number" &&
+    body.approvals >= body.threshold
+  ) {
+    return noVerdict(`threshold met but not confirmed: ${typeof body.error === "string" ? body.error : "no error"}`);
   }
   // An unparseable fee must not turn a landed mint into a failure: the coordinator already
   // pinned the real fee on the row, so drop it here and let COALESCE keep the pinned value.

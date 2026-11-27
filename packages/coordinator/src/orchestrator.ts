@@ -48,6 +48,24 @@ export interface OrchestrationResult {
 }
 
 /**
+ * Join an in-flight run for the same key instead of starting a second one. The dispatcher
+ * re-submits an action whose previous /submit it gave up on (connection reset, timeout) while
+ * that orchestration is still running here; a SECOND concurrent round can lose to the first at
+ * broadcast (Solana: same durable-nonce tx already landed) and report a clean failure for a mint
+ * that succeeded — which the dispatcher would refund. Joining returns the one real outcome.
+ */
+export function singleFlight<T>(): (key: string, run: () => Promise<T>) => Promise<T> {
+  const inflight = new Map<string, Promise<T>>();
+  return (key, run) => {
+    const existing = inflight.get(key);
+    if (existing) return existing;
+    const p = run().finally(() => inflight.delete(key));
+    inflight.set(key, p);
+    return p;
+  };
+}
+
+/**
  * Drives one action to completion: build the single shared proposal, collect
  * operator approvals up to the threshold, then broadcast. Works at 1-of-1 (solo
  * bootstrap) and unchanged at 7-of-11. The orchestrator holds no keys; signers
@@ -142,7 +160,11 @@ export class Orchestrator {
 
     const approvals = set.count(action.id);
     if (!set.isMet(action.id)) {
-      return { actionId: action.id, approvals, threshold: this.threshold, broadcast: false, feeMilliViz: fee };
+      // A signer whose /approve call we gave up on may still have landed its on-chain approval.
+      return (
+        (await this.landedMeanwhile(action, fee)) ??
+        { actionId: action.id, approvals, threshold: this.threshold, broadcast: false, feeMilliViz: fee }
+      );
     }
 
     try {
@@ -153,14 +175,29 @@ export class Orchestrator {
       );
       return { actionId: action.id, approvals, threshold: this.threshold, broadcast: true, txid, feeMilliViz: fee };
     } catch (err) {
-      return {
-        actionId: action.id,
-        approvals,
-        threshold: this.threshold,
-        broadcast: false,
-        feeMilliViz: fee,
-        error: String(err),
-      };
+      return (
+        (await this.landedMeanwhile(action, fee)) ?? {
+          actionId: action.id,
+          approvals,
+          threshold: this.threshold,
+          broadcast: false,
+          feeMilliViz: fee,
+          error: String(err),
+        }
+      );
     }
+  }
+
+  /**
+   * A failure verdict is only honest if the action is STILL not on-chain at the END of the
+   * round — the dispatcher may refund on it. Re-check; if it landed while we were collecting
+   * approvals, report success. If the check itself throws, so does process() (HTTP 500): no
+   * verdict, the dispatcher retries.
+   */
+  private async landedMeanwhile(action: CanonicalAction, fee: string): Promise<OrchestrationResult | null> {
+    const again = await this.broadcaster.actionExecuted(action);
+    if (!again.executed) return null;
+    console.log(`[orchestrator] ${action.id} landed on-chain during the round (${again.txid ?? ""})`);
+    return { actionId: action.id, approvals: 0, threshold: this.threshold, broadcast: true, txid: again.txid, feeMilliViz: fee };
   }
 }

@@ -68,6 +68,20 @@ test("non-string txid/error fields are dropped, not propagated", () => {
   assert.equal(r.error, undefined);
 });
 
+test("threshold met but not confirmed is indeterminate: the signed mint may still land", () => {
+  const body = { broadcast: false, approvals: 2, threshold: 2, error: "GRAM order not executed within 90000ms" };
+  const r = deliveryResultFrom(200, JSON.stringify(body));
+  assert.equal(r.indeterminate, true);
+  assert.match(r.error ?? "", /threshold met/);
+  assert.equal(planTransition(row({ attempts: 9 }), r, AGED * 10, opts).status, "QUEUED");
+  // over-threshold counts too; below threshold stays a verdict
+  assert.equal(deliveryResultFrom(200, JSON.stringify({ ...body, approvals: 3 })).indeterminate, true);
+  assert.equal(deliveryResultFrom(200, JSON.stringify({ ...body, approvals: 1 })).indeterminate, undefined);
+  // a threshold of 0 / missing counters must not be read as "met"
+  assert.equal(deliveryResultFrom(200, JSON.stringify({ broadcast: false })).indeterminate, undefined);
+  assert.equal(deliveryResultFrom(200, JSON.stringify({ broadcast: false, approvals: "2", threshold: "2" })).indeterminate, undefined);
+});
+
 // --- planTransition: when REFUNDING is reachable ---
 
 test("refund matrix: needs PEG_IN + aged + verdict + a prior attempt", () => {
