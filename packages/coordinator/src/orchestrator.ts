@@ -110,7 +110,17 @@ export class Orchestrator {
       };
     }
 
-    const { proposal, feeMilliViz } = await this.broadcaster.buildProposal(action);
+    // A build failure (below-minimum, RPC) is a VERDICT, not a crash: actionExecuted just said
+    // "not on-chain" and no signer has been asked this round, so report it as a clean
+    // broadcast:false. The dispatcher refunds only on such verdicts — a thrown error (HTTP 500)
+    // is reserved for "could not even check", which must retry, never refund.
+    let built: BuildResult;
+    try {
+      built = await this.broadcaster.buildProposal(action);
+    } catch (err) {
+      return { actionId: action.id, approvals: 0, threshold: this.threshold, broadcast: false, error: String(err) };
+    }
+    const { proposal, feeMilliViz } = built;
     const fee = feeMilliViz.toString();
     // Pin the fee before broadcast so it survives a lost response / crash: recovery
     // reads it back rather than stranding the withheld fee as un-swept surplus.

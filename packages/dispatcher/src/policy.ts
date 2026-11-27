@@ -16,6 +16,44 @@ export interface DeliveryResult {
   indeterminate?: boolean;
 }
 
+/**
+ * Map the coordinator's /submit HTTP response to a DeliveryResult (pure, testable).
+ *
+ * Only a 200 JSON body is a VERDICT: the orchestrator reached it after its own actionExecuted
+ * check said "not on-chain", so a `broadcast:false` there is safe to count toward a refund.
+ * Everything else is INDETERMINATE — a proxy 502/504 (the coordinator may still be minting), a
+ * 423 pause, a 401, or a coordinator 500 (its actionExecuted read itself failed, so nobody
+ * checked whether an earlier round's mint landed). A garbled 200 is indeterminate too.
+ */
+export function deliveryResultFrom(status: number, bodyText: string): DeliveryResult {
+  const noVerdict = (error: string): DeliveryResult => ({ broadcast: false, error, indeterminate: true });
+  if (status === 423) return noVerdict("coordinator paused");
+  if (status !== 200) return noVerdict(`coordinator HTTP ${status}`);
+  let body: { broadcast?: unknown; txid?: unknown; error?: unknown; feeMilliViz?: unknown };
+  try {
+    body = JSON.parse(bodyText) as typeof body;
+  } catch {
+    return noVerdict("coordinator returned a non-JSON 200");
+  }
+  if (body === null || typeof body !== "object" || typeof body.broadcast !== "boolean") {
+    return noVerdict("coordinator 200 carries no broadcast verdict");
+  }
+  // An unparseable fee must not turn a landed mint into a failure: the coordinator already
+  // pinned the real fee on the row, so drop it here and let COALESCE keep the pinned value.
+  let feeMilliViz: bigint | undefined;
+  try {
+    feeMilliViz = body.feeMilliViz !== undefined ? BigInt(String(body.feeMilliViz)) : undefined;
+  } catch {
+    feeMilliViz = undefined;
+  }
+  return {
+    broadcast: body.broadcast,
+    txid: typeof body.txid === "string" ? body.txid : undefined,
+    feeMilliViz,
+    error: typeof body.error === "string" ? body.error : undefined,
+  };
+}
+
 /** The next outbox state for a row after a delivery attempt. */
 export interface Transition {
   status: ActionStatus;
