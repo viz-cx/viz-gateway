@@ -183,7 +183,7 @@ function fakeBroadcaster(action, { alreadyExecuted = false, existingTxid = "EXIS
     // Exhaust delivery window -> REFUNDING
     const pegInRec = await store.get(pegInId);
     const refundingT = planTransition(
-      pegInRec,
+      { ...pegInRec, attempts: 1 }, // refund never fires on a row's first verdict
       { broadcast: false, error: "timeout" },
       Date.now() + 200000,
       { retryIntervalMs: 10000, windowMs: 180000 },

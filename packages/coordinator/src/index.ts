@@ -8,7 +8,7 @@ import { resolveGramEndpoints } from "@gateway/gram-watcher/dist/orbsEndpoint";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
 import { lookupResponseBody, resolveDepositAddress } from "@gateway/solana-watcher/dist/lookupValidate";
 import { depositAddress, depositAta } from "@gateway/solana-watcher/dist/depositAddress";
-import { Orchestrator } from "./orchestrator";
+import { Orchestrator, singleFlight, type OrchestrationResult } from "./orchestrator";
 import { HttpSignerClient, SolanaMintBroadcaster, GramMintBroadcaster, GramReturnBroadcaster, VizReleaseBroadcaster } from "./adapters";
 import { SignerRegistry } from "./registry";
 import { loadSourceHints, applySourceHintResolutions, resolveSourceHint } from "./sourceHints";
@@ -143,6 +143,9 @@ async function main(): Promise<void> {
       (id, feeMilliViz) => store.setFee(id, feeMilliViz),
     ).process(action, hint);
   };
+
+  // One orchestration per action id at a time: a re-submit joins the running round.
+  const orchestrateOnce = singleFlight<OrchestrationResult>();
 
   const [host, portStr] = cfg.coordinator.listen.split(":");
   const port = Number.parseInt(portStr ?? "8100", 10);
@@ -306,7 +309,7 @@ async function main(): Promise<void> {
           }
           const raw = JSON.parse(body) as { action: Record<string, unknown> };
           const action = actionFromWire(raw.action);
-          const result = await orchestrate(action);
+          const result = await orchestrateOnce(action.id, () => orchestrate(action));
           console.log(`[coordinator] ${action.id} -> ${JSON.stringify(result)}`);
           json(200, result);
         } catch (err) {

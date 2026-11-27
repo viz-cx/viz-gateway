@@ -42,10 +42,20 @@ console.log("[dispatcher] failure within window -> QUEUED + backoff OK");
 
 // 3) failure past the 3-min window -> REFUNDING (PEG_IN only).
 const now3 = base.createdAt + 180_000;
-t = planTransition(base, { broadcast: false, error: "still down" }, now3, opts);
+const retried = { ...base, attempts: 1 };
+t = planTransition(retried, { broadcast: false, error: "still down" }, now3, opts);
 assert.strictEqual(t.status, "REFUNDING");
 assert.match(t.patch.lastError, /window exhausted/);
 console.log("[dispatcher] PEG_IN failure past window -> REFUNDING OK");
+
+// 3a) never refund while the mint may still land: an indeterminate result (proxy timeout /
+//     transport error — the coordinator may still be orchestrating) or a row's FIRST verdict
+//     keeps retrying, so the next round's actionExecuted check can see a landed mint.
+t = planTransition(retried, { broadcast: false, error: "coordinator HTTP 504", indeterminate: true }, now3, opts);
+assert.strictEqual(t.status, "QUEUED", "indeterminate past window must retry, not refund");
+t = planTransition(base, { broadcast: false, error: "still down" }, now3, opts);
+assert.strictEqual(t.status, "QUEUED", "first verdict past window must retry, not refund");
+console.log("[dispatcher] indeterminate / first-verdict past window -> QUEUED (no refund) OK");
 
 // 3b) a PEG_OUT / FEE_SWEEP / REFUND has nothing to refund — the gateway already
 //     owes the release — so past the window it keeps retrying (QUEUED), never
