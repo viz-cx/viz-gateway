@@ -18,6 +18,8 @@ const http = require("node:http");
 const net = require("node:net");
 const { HttpSignerClient } = require("../packages/coordinator/dist/adapters");
 const { loadConfig } = require("../packages/common/dist/config");
+const { timeoutFetch } = require("../packages/solana-watcher/dist/solanaChain");
+const { Connection } = require("@solana/web3.js");
 
 const ACTION = {
   direction: "PEG_OUT",
@@ -86,6 +88,20 @@ async function healthyResolves() {
 
   server.close();
   console.log("[fetch-timeout] responsive signer resolves (signal does not break happy path) OK");
+}
+
+// The Solana RPC client is bounded the same way: a blackholed RPC rejects instead of hanging
+// the orchestration round (which singleFlight would then pin every retry behind).
+async function solanaRpcAborts() {
+  const { server, held, port } = await blackholeServer();
+  const conn = new Connection(`http://127.0.0.1:${port}`, { commitment: "finalized", fetch: timeoutFetch(300) });
+  const start = Date.now();
+  await assert.rejects(() => conn.getSlot(), "blackhole Solana RPC must reject, not hang");
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 3300, `abort should fire near 300ms, took ${elapsed}ms`);
+  for (const s of held) s.destroy();
+  server.close();
+  console.log(`[fetch-timeout] blackhole Solana RPC aborts in ${elapsed}ms OK`);
 }
 
 function configWiring() {
@@ -164,6 +180,7 @@ function configWiring() {
 (async () => {
   await blackholeAborts();
   await healthyResolves();
+  await solanaRpcAborts();
   configWiring();
   console.log("[fetch-timeout] ALL OK");
 })().catch((e) => {

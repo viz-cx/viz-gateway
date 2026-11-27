@@ -21,6 +21,17 @@ import { buildBurnDepositIx } from "./depositAddress";
 /** Memo program id (used to carry the VIZ destination on a peg-out transfer). */
 const MEMO_PROGRAM_ID = "MemoSq4gq4PtfDg1xv9JaY9Cz9c6Tn3ANk6tDsj4hf"; // SPL Memo v2
 
+/** Per-request ceiling on a Solana RPC call (web3.js sets none). */
+export const SOLANA_RPC_TIMEOUT_MS = 30_000;
+
+/**
+ * A fetch that aborts a wedged RPC request. Without it a blackholed endpoint hangs the await
+ * forever, and the coordinator's singleFlight then parks every retry of that action behind it.
+ */
+export function timeoutFetch(timeoutMs: number): typeof fetch {
+  return (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+}
+
 /** RPC scan throttling/pagination (avoid 429 on public/free-tier RPC). */
 export interface SolanaScanOpts {
   /** Max signatures fetched per scan page. */
@@ -161,7 +172,10 @@ export class SolanaChain implements RemoteChain<SolanaMintProposal> {
     scan: SolanaScanOpts = {},
     depositProgramId = "",
   ) {
-    this.conn = new Connection(rpcUrl, "finalized");
+    this.conn = new Connection(rpcUrl, {
+      commitment: "finalized",
+      fetch: timeoutFetch(SOLANA_RPC_TIMEOUT_MS) as never, // web3.js types this as node-fetch's
+    });
     this.mint = new PublicKey(mintAddress);
     this.gatewayTokenAccount = gatewayTokenAccount ? new PublicKey(gatewayTokenAccount) : null;
     this.finalitySlots = Math.max(0, finalitySlots);
