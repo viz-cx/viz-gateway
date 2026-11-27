@@ -47,6 +47,9 @@ export interface OrchestrationResult {
   error?: string;
 }
 
+/** The one build failure that is a refundable VERDICT: the deposit can never be minted as-is. */
+export class BelowMinimumError extends Error {}
+
 /**
  * Join an in-flight run for the same key instead of starting a second one. The dispatcher
  * re-submits an action whose previous /submit it gave up on (connection reset, timeout) while
@@ -128,14 +131,15 @@ export class Orchestrator {
       };
     }
 
-    // A build failure (below-minimum, RPC) is a VERDICT, not a crash: actionExecuted just said
-    // "not on-chain" and no signer has been asked this round, so report it as a clean
-    // broadcast:false. The dispatcher refunds only on such verdicts — a thrown error (HTTP 500)
-    // is reserved for "could not even check", which must retry, never refund.
+    // Below-minimum is a VERDICT, not a crash: actionExecuted just said "not on-chain" and no
+    // signer has been asked this round, so report a clean broadcast:false the dispatcher may
+    // refund on. Any other build failure (RPC, getNonce) rethrows -> HTTP 500 -> retry: an RPC
+    // outage past the refund window must not refund (and fee) a deposit that is mintable.
     let built: BuildResult;
     try {
       built = await this.broadcaster.buildProposal(action);
     } catch (err) {
+      if (!(err instanceof BelowMinimumError)) throw err;
       return { actionId: action.id, approvals: 0, threshold: this.threshold, broadcast: false, error: String(err) };
     }
     const { proposal, feeMilliViz } = built;

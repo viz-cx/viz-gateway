@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CanonicalAction } from "@gateway/common";
-import { Orchestrator, singleFlight, type Broadcaster, type SignerClient } from "../src/orchestrator";
+import { BelowMinimumError, Orchestrator, singleFlight, type Broadcaster, type SignerClient } from "../src/orchestrator";
 
 // The dispatcher refunds a PEG_IN only on a 200 verdict from /submit, i.e. only when
 // Orchestrator.process RETURNS. A throw becomes HTTP 500 = "retry, never refund". These tests
@@ -49,8 +49,15 @@ test("actionExecuted failing THROWS (HTTP 500): nobody checked the chain, so no 
   assert.equal(s.asked, 0);
 });
 
-test("buildProposal failing RETURNS broadcast:false and asks no signer", async () => {
-  const b = broadcaster({ buildProposal: async () => { throw new Error("PEG_IN trx:0 below minimum (refund)"); } });
+test("a transient buildProposal failure THROWS (no verdict) and asks no signer", async () => {
+  const b = broadcaster({ buildProposal: async () => { throw new Error("rpc down"); } });
+  const s = signer("op-2");
+  await assert.rejects(new Orchestrator(2, ops, [s], b).process(action), /rpc down/);
+  assert.equal(s.asked, 0);
+});
+
+test("below-minimum RETURNS broadcast:false and asks no signer", async () => {
+  const b = broadcaster({ buildProposal: async () => { throw new BelowMinimumError("PEG_IN trx:0 below minimum (refund)"); } });
   const s = signer("op-2");
   const r = await new Orchestrator(2, ops, [s], b).process(action);
   assert.equal(r.broadcast, false);

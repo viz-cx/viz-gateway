@@ -16,7 +16,7 @@ import {
 import { VizJsChain } from "@gateway/viz-watcher/dist/vizChain";
 import { GramHttpChain } from "@gateway/gram-watcher/dist/gramChain";
 import { SolanaChain } from "@gateway/solana-watcher/dist/solanaChain";
-import type { Broadcaster, BuildResult, Proposal, SignerClient } from "./orchestrator";
+import { BelowMinimumError, type Broadcaster, type BuildResult, type Proposal, type SignerClient } from "./orchestrator";
 
 /** Calls an operator's signer /approve endpoint over HTTP (push model). */
 export class HttpSignerClient implements SignerClient {
@@ -150,7 +150,7 @@ export class GramMintBroadcaster implements Broadcaster {
     // Read destination provisioning ONCE and pin it; compute NET from gross+policy.
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
     const q = quotePegIn(action.amountMilliViz, destProvisioned, await this.feePolicy());
-    if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
+    if (!q.ok) throw new BelowMinimumError(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
     const net = q.b.net;
     // The REAL packed mint-order cell hash (seqno-independent): every operator rebuilds
     // it from the canonical action and asserts a match before acting, binding each
@@ -293,7 +293,7 @@ export class SolanaMintBroadcaster implements Broadcaster {
   async buildProposal(action: CanonicalAction): Promise<BuildResult> {
     const destProvisioned = await this.chain.isDestinationProvisioned(action.recipient);
     const q = quotePegIn(action.amountMilliViz, destProvisioned, pegInFeePolicyFor(this.fees, "SOLANA"));
-    if (!q.ok) throw new Error(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
+    if (!q.ok) throw new BelowMinimumError(`PEG_IN ${action.id} below minimum (refund): need >= ${q.minMilliViz} mVIZ`);
     const proposal = await this.chain.buildMintProposal(action.recipient, q.b.net, destProvisioned, this.signerSet, action.id);
     return { proposal, feeMilliViz: q.b.fee };
   }
